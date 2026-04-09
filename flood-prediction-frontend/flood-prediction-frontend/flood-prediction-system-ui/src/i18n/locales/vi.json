@@ -1,0 +1,126 @@
+{
+  "app": {
+    "brand": "Hệ thống Dự báo Ngập lụt",
+    "subtitle": "Thời tiết, dự báo và thông tin rủi ro theo quận"
+  },
+  "sidebar": {
+    "brand": "Flood Prediction",
+    "systemUi": "System UI",
+    "theme": "Theme",
+    "logout": "Logout",
+    "toggleLanguage": "Toggle Language",
+    "dark": "Dark",
+    "light": "Light"
+  },
+  "language": {
+    "en": "EN",
+    "vi": "VI"
+  },
+  "newsTicker": {
+    "danger1": "🔴 Cảnh báo: Cầu Giấy nguy cơ ngập 50cm lúc 15:00",
+    "warning1": "🟡 Hoàn Kiếm: Đang mưa vừa...",
+    "info1": "💧 Đông Đa: Lượng mưa tăng nhẹ, theo dõi diễn biến"
+  },
+  "nav": {
+    "dashboard": "Bảng điều khiển",
+    "map": "Bản đồ ngập lụt",
+    "weather": "Thời tiết",
+    "reports": "Báo cáo",
+    "settings": "Cài đặt",
+    "profile": "Hồ sơ"
+  },
+  "weather": {
+    "title": "Dự báo ngập lụt - Weather",
+    "searchDistrict": "Tìm kiếm quận",
+    "detected": "Đang chọn",
+    "currentWeather": "Thời tiết hiện tại",
+    "sevenDayForecast": "Dự báo 7 ngày",
+    "temperature": "Nhiệt độ",
+    "humidity": "Độ ẩm",
+    "wind": "Sức gió",
+    "rainfall": "Lượng mưa",
+    "updated": "Cập nhật",
+    "dataSource": "Nguồn dữ liệu: GET /api/weather",
+    "helpLine": "Gõ quận để cập nhật Thời tiết hiện tại + dự báo 7 ngày và Mini-map.",
+    "kindRain": "Mưa",
+    "kindSun": "Nắng",
+    "kindFlood": "Cảnh báo ngập"
+  },
+  "floodMap": {
+    "title": "Bản đồ ngập lụt",
+    "hint": "Di chuột vào khu vực để xem thời tiết và độ ngập dự kiến.",
+    "searchDistrict": "Tìm kiếm quận...",
+    "resetView": "Đặt lại góc nhìn",
+    "weather": "Thời tiết",
+    "temperature": "Nhiệt độ",
+    "rainfall": "Lượng mưa",
+    "floodDepth": "Độ ngập dự kiến",
+    "legend": "Chú giải",
+    "riskZones": "Vùng rủi ro",
+    "safe": "An toàn",
+    "mediumRisk": "Nguy cơ trung bình",
+    "highRisk": "Nguy cơ cao",
+    "severeRisk": "Nguy cơ nặng"
+  },
+  "miniMap": {
+    "radarTimelapse": "Radar Timelapse",
+    "play": "Play",
+    "playing": "Playing"
+  },
+  "reports": {
+    "title": "Báo cáo",
+    "filterHint": "Lọc theo ngày/quận và xuất CSV/Excel/PDF",
+    "predictionData": "Dữ liệu dự báo",
+    "date": "Ngày",
+    "district": "Quận",
+    "risk": "Mức rủi ro",
+    "predictedRainfall": "Mưa dự kiến (mm)",
+    "filters": "Bộ lọc",
+    "liveFilter": "Lọc trực tiếp (mock)",
+    "clear": "Xóa",
+    "noData": "Không có dữ liệu phù hợp bộ lọc."
+  },
+  "settings": {
+    "title": "Cài đặt",
+    "hint": "Giao diện, API và thông báo",
+    "appearance": "Giao diện",
+    "darkMode": "Chế độ tối",
+    "darkModeHint": "Áp dụng ngay và lưu vào localStorage",
+    "api": "API",
+    "apiHint": "Thiết lập base URL cho backend thật",
+    "apiBaseUrl": "API base URL",
+    "notifications": "Thông báo",
+    "floodAlerts": "Bật cảnh báo ngập",
+    "floodAlertsHint": "Chỉ là toggle UI (sẽ gắn với service thật sau).",
+    "save": "Lưu",
+    "leaveEmptyApiHint": "Để trống để dùng relative `/api/...` (mock dev vẫn hoạt động)."
+  },
+  "profile": {
+    "title": "Hồ sơ",
+    "hint": "Thông tin người dùng (chỉ cập nhật UI)",
+    "account": "Tài khoản",
+    "accountHint": "Quyền truy cập dựa trên mock JWT",
+    "role": "Vai trò",
+    "name": "Tên",
+    "email": "Email",
+    "saveChanges": "Lưu thay đổi",
+    "reset": "Đặt lại",
+    "notes": "Ghi chú",
+    "notesHint": "Auth hoạt động như thế nào trong demo"
+  },
+  "login": {
+    "title": "Hệ thống Dự báo Ngập lụt",
+    "hint": "Đăng nhập bằng mock JWT để xem UI theo vai trò",
+    "role": "Vai trò",
+    "signIn": "Đăng nhập",
+    "reset": "Đặt lại",
+    "tip": "Mẹo: đổi vai trò bất cứ lúc nào trong màn hình đăng nhập."
+  },
+  "risk": {
+    "safe": "An toàn",
+    "medium": "Nguy cơ trung bình",
+    "high": "Nguy cơ cao",
+    "severe": "Nguy cơ nặng"
+  }
+}
+

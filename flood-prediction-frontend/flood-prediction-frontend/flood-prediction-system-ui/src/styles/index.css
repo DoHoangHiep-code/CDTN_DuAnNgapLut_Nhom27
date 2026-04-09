@@ -1,0 +1,203 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50;
+  }
+}
+
+@layer components {
+  .fps-card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900;
+  }
+}
+
+@layer utilities {
+  /* Hide ugly scrollbar for horizontal scroll areas */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Make inline SVG icons feel "3D" */
+  .fps-3d-icon {
+    filter: drop-shadow(0 2px 0 rgba(15, 23, 42, 0.15)) drop-shadow(0 8px 14px rgba(15, 23, 42, 0.12));
+    transform: translateZ(0);
+  }
+
+  /* Glassmorphism icon container */
+  .fps-glass-icon {
+    @apply rounded-2xl border border-slate-200/60 bg-white/50 backdrop-blur;
+  }
+  .dark .fps-glass-icon {
+    @apply border-slate-800/60 bg-white/5;
+  }
+}
+
+/* Leaflet: custom marker + pulse animation for severe flood warning */
+@keyframes fps-pulse-ring {
+  0% {
+    transform: scale(0.75);
+    opacity: 0.75;
+  }
+  70% {
+    transform: scale(1.2);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.fps-map-marker {
+  width: var(--bubble-size, 14px);
+  height: var(--bubble-size, 14px);
+  border-radius: 9999px;
+  position: relative;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+
+.fps-map-marker--safe {
+  background: #16a34a;
+}
+.fps-map-marker--medium {
+  background: #f59e0b;
+}
+.fps-map-marker--high {
+  background: #f97316;
+}
+.fps-map-marker--severe {
+  background: #e11d48;
+}
+
+.fps-map-marker--severe::before {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--pulse-spread, 10px));
+  border-radius: 9999px;
+  border: 2px solid rgba(225, 29, 72, 0.55);
+  filter: blur(0.4px);
+  animation: fps-pulse-ring 1.6s infinite;
+}
+
+.fps-map-bubble-hit {
+  cursor: pointer;
+}
+
+.fps-map-tooltip {
+  pointer-events: none;
+  min-width: 210px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  color: #0f172a;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.18);
+}
+
+.fps-depth-tag {
+  position: absolute;
+  top: -8px;
+  left: 0;
+  background: rgba(15, 23, 42, 0.95);
+  color: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+  padding: 4px 8px;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.dark .fps-depth-tag {
+  background: rgba(2, 6, 23, 0.95);
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+.dark .fps-map-tooltip {
+  background: rgba(2, 6, 23, 0.94);
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* News ticker */
+.fps-news-ticker {
+  background: rgba(2, 6, 23, 0.78);
+  box-shadow: 0 10px 40px rgba(2, 6, 23, 0.15);
+}
+.fps-news-ticker--danger {
+  background: rgba(127, 29, 29, 0.42);
+  border-color: rgba(127, 29, 29, 0.65) !important;
+}
+.fps-news-ticker--base {
+  background: rgba(2, 6, 23, 0.78);
+}
+.fps-news-ticker-track {
+  display: flex;
+  width: max-content;
+  animation: fps-marquee 28s linear infinite;
+}
+@keyframes fps-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+/* Weather card decorative background */
+@keyframes fps-rain-drift {
+  0% {
+    transform: translate(-8px, -8px) rotate(-14deg);
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate(18px, 26px) rotate(-14deg);
+    opacity: 0;
+  }
+}
+
+@keyframes fps-cloud-drift {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0.5;
+  }
+  100% {
+    transform: translate(-18px, 8px);
+    opacity: 0;
+  }
+}
+
+.fps-weather-bg {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.fps-weather-bg--rain svg {
+  animation: fps-rain-drift 2.2s linear infinite;
+}
+
+.fps-weather-bg--sun svg {
+  animation: fps-cloud-drift 2.6s ease-in-out infinite;
+}
+
+.fps-weather-bg--flood svg {
+  animation: fps-cloud-drift 2.1s ease-in-out infinite;
+}
+
