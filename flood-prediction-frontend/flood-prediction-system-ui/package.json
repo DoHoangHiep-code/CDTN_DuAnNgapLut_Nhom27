@@ -27,6 +27,7 @@
     "axios-mock-adapter": "^2.1.0",
     "chart.js": "^4.5.1",
     "clsx": "^2.1.1",
+    "html2canvas": "^1.4.1",
     "i18next": "^25.8.20",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
