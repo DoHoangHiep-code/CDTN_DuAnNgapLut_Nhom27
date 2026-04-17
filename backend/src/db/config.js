@@ -1,3 +1,4 @@
+require('dotenv').config();
 module.exports = {
   development: {
     username: process.env.DB_USER || 'postgres',
@@ -10,8 +11,8 @@ module.exports = {
   },
   test: {
     username: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || 'postgres',
-    database: process.env.DB_NAME || 'flood_prediction_test',
+    password: process.env.DB_PASSWORD || '123456',
+    database: process.env.DB_NAME_TEST || 'flood_prediction_test',
     host: process.env.DB_HOST || '127.0.0.1',
     port: Number(process.env.DB_PORT || 5432),
     dialect: 'postgres',

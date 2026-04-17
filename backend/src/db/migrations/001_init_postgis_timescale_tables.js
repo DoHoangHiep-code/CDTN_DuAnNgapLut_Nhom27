@@ -5,7 +5,15 @@ module.exports = {
   async up(queryInterface, Sequelize) {
     // Extensions
     await queryInterface.sequelize.query('CREATE EXTENSION IF NOT EXISTS postgis;')
-    await queryInterface.sequelize.query('CREATE EXTENSION IF NOT EXISTS timescaledb;')
+    // TimescaleDB: chỉ tạo nếu extension thực sự có sẵn trên instance này
+    // (tránh crash trên PostgreSQL standard không cài TimescaleDB)
+    const tsdbRows = await queryInterface.sequelize.query(
+      "SELECT 1 AS ok FROM pg_available_extensions WHERE name = 'timescaledb' LIMIT 1;",
+    )
+    const tsdbAvailable = Array.isArray(tsdbRows?.[0]) ? tsdbRows[0].length > 0 : false
+    if (tsdbAvailable) {
+      await queryInterface.sequelize.query('CREATE EXTENSION IF NOT EXISTS timescaledb;')
+    }
 
     // Enums
     await queryInterface.sequelize.query(
@@ -15,7 +23,7 @@ module.exports = {
       "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'risk_level') THEN CREATE TYPE risk_level AS ENUM ('safe','medium','high','severe'); END IF; END $$;",
     )
     await queryInterface.sequelize.query(
-      "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'reported_level') THEN CREATE TYPE reported_level AS ENUM ('Khô ráo','<20cm','>50cm'); END IF; END $$;",
+      "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'reported_level') THEN CREATE TYPE reported_level AS ENUM ('Khô ráo','<15cm','15-30cm','>30cm'); END IF; END $$;",
     )
 
     // users
@@ -122,16 +130,16 @@ module.exports = {
   },
 
   async down(queryInterface) {
-    await queryInterface.dropTable('system_logs')
-    await queryInterface.dropTable('actual_flood_reports')
-    await queryInterface.dropTable('flood_predictions')
-    await queryInterface.dropTable('weather_measurements')
-    await queryInterface.dropTable('grid_nodes')
-    await queryInterface.dropTable('users')
+    await queryInterface.dropTable('system_logs',            { ifExists: true })
+    await queryInterface.dropTable('actual_flood_reports',   { ifExists: true })
+    await queryInterface.dropTable('flood_predictions',      { ifExists: true })
+    await queryInterface.dropTable('weather_measurements',   { ifExists: true })
+    await queryInterface.dropTable('grid_nodes',             { ifExists: true })
+    await queryInterface.dropTable('users',                  { ifExists: true })
 
-    await queryInterface.sequelize.query("DROP TYPE IF EXISTS reported_level;")
-    await queryInterface.sequelize.query("DROP TYPE IF EXISTS risk_level;")
-    await queryInterface.sequelize.query("DROP TYPE IF EXISTS user_role;")
+    await queryInterface.sequelize.query('DROP TYPE IF EXISTS reported_level;')
+    await queryInterface.sequelize.query('DROP TYPE IF EXISTS risk_level;')
+    await queryInterface.sequelize.query('DROP TYPE IF EXISTS user_role;')
   },
 }
 
