@@ -6,8 +6,7 @@ const router = express.Router() // Router cho /api/v1/admin/users
 const controller = new AdminUserController() // Khởi tạo controller
 
 // Bảo vệ toàn bộ route bằng verifyToken + isAdmin để ngăn truy cập trái phép
-router.use(verifyToken) // Bắt buộc có JWT hợp lệ
-router.use(isAdmin) // Bắt buộc role admin
+router.use('/admin/users', verifyToken, isAdmin) // Chỉ áp dụng cho đúng endpoint này
 
 // GET list users
 router.get('/admin/users', controller.list)

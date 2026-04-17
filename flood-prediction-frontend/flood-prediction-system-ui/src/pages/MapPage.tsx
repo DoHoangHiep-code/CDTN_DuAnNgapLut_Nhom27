@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleMarker, MapContainer, Marker, Popup, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import type { LatLngExpression } from 'leaflet'
 import * as L from 'leaflet'
+import axios from 'axios'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
@@ -14,15 +15,20 @@ import { getFloodPrediction, getWeather } from '../services/api'
 import type { RiskLevel } from '../utils/types'
 import { depthCmFromRainfall, formatDepthCm } from '../utils/floodDepth'
 import Supercluster from 'supercluster'
-import { LocationSearch } from '../components/LocationSearch'
+import { LocationSearch, type NominatimResult } from '../components/LocationSearch'
+import { FloodReportModal } from '../components/FloodReportModal'
 
+// ───────────────────────────────────────────────────────────────
+// Màu sắc vùng ngập
+// ───────────────────────────────────────────────────────────────
 const RISK_FILL: Record<RiskLevel, { color: string; fillColor: string }> = {
-  safe: { color: '#16a34a', fillColor: 'rgba(22,163,74,0.25)' }, // green
-  medium: { color: '#f59e0b', fillColor: 'rgba(245,158,11,0.25)' }, // yellow
-  high: { color: '#f97316', fillColor: 'rgba(249,115,22,0.25)' }, // orange
-  severe: { color: '#e11d48', fillColor: 'rgba(225,29,72,0.25)' }, // red
+  safe: { color: '#16a34a', fillColor: 'rgba(22,163,74,0.25)' },
+  medium: { color: '#f59e0b', fillColor: 'rgba(245,158,11,0.25)' },
+  high: { color: '#f97316', fillColor: 'rgba(249,115,22,0.25)' },
+  severe: { color: '#e11d48', fillColor: 'rgba(225,29,72,0.25)' },
 }
 
+// Tính centroid (điểm trung tâm) của polygon để đặt marker
 function centroid(poly: [number, number][]): LatLngExpression {
   const avg = poly.reduce(
     (acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }),
@@ -35,14 +41,17 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
 }
 
+// Chuyển độ sâu ngập (cm) thành màu heat-map: vàng → cam → đỏ
 function heatColor(depthCm: number) {
-  // 0..100+ cm mapped to yellow -> orange -> red -> deep red
   const t = clamp(depthCm / 100, 0, 1)
   if (t <= 0.33) return `rgb(${Math.round(255)},${Math.round(200 - 80 * (t / 0.33))},${Math.round(60)})`
   if (t <= 0.66) return `rgb(${Math.round(255)},${Math.round(120 - 90 * ((t - 0.33) / 0.33))},${Math.round(40)})`
   return `rgb(${Math.round(230 - 40 * ((t - 0.66) / 0.34))},${Math.round(30)},${Math.round(30)})`
 }
 
+// ───────────────────────────────────────────────────────────────
+// Kiểu dữ liệu
+// ───────────────────────────────────────────────────────────────
 type FloodPoint = {
   id: string
   name: string
@@ -52,14 +61,13 @@ type FloodPoint = {
   position: LatLngExpression
 }
 
-type ClusterProps = {
-  cluster: true
-  point_count: number
-}
-
+type ClusterProps = { cluster: true; point_count: number }
 type PointFeature = GeoJSON.Feature<GeoJSON.Point, FloodPoint & { cluster?: false }>
 type ClusterFeature = GeoJSON.Feature<GeoJSON.Point, ClusterProps & { cluster_id: number }>
 
+// ───────────────────────────────────────────────────────────────
+// Layer: Cluster các điểm ngập
+// ───────────────────────────────────────────────────────────────
 function FloodClustersLayer({
   points,
   onSelectPoint,
@@ -76,14 +84,8 @@ function FloodClustersLayer({
   })
 
   useMapEvents({
-    moveend: () => {
-      const b = map.getBounds()
-      setView({ zoom: map.getZoom(), bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] })
-    },
-    zoomend: () => {
-      const b = map.getBounds()
-      setView({ zoom: map.getZoom(), bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] })
-    },
+    moveend: () => { const b = map.getBounds(); setView({ zoom: map.getZoom(), bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] }) },
+    zoomend: () => { const b = map.getBounds(); setView({ zoom: map.getZoom(), bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] }) },
   })
 
   const indexRef = useRef<Supercluster<FloodPoint, ClusterProps> | null>(null)
@@ -98,11 +100,7 @@ function FloodClustersLayer({
   }, [points])
 
   useEffect(() => {
-    const sc = new Supercluster<FloodPoint, ClusterProps>({
-      radius: 60,
-      maxZoom: 18,
-      minZoom: 0,
-    })
+    const sc = new Supercluster<FloodPoint, ClusterProps>({ radius: 60, maxZoom: 18, minZoom: 0 })
     sc.load(features)
     indexRef.current = sc
   }, [features])
@@ -128,12 +126,7 @@ function FloodClustersLayer({
           const iconHtml = `<div style="width:${size}px;height:${size}px" class="fps-cluster">
             <div class="fps-cluster__inner">${count}</div>
           </div>`
-          const icon = L.divIcon({
-            html: iconHtml,
-            className: '',
-            iconSize: [size, size],
-            iconAnchor: [size / 2, size / 2],
-          })
+          const icon = L.divIcon({ html: iconHtml, className: '', iconSize: [size, size], iconAnchor: [size / 2, size / 2] })
           return (
             <Marker
               key={`c_${(p.properties as any).cluster_id}`}
@@ -150,7 +143,6 @@ function FloodClustersLayer({
             />
           )
         }
-
         const p = (f as PointFeature).properties
         const color = heatColor(p.depthCm)
         const radius = clamp(7 + p.depthCm * 0.22, 7, 24)
@@ -159,16 +151,8 @@ function FloodClustersLayer({
             key={p.id}
             center={[lat, lng]}
             radius={radius}
-            pathOptions={{
-              color,
-              fillColor: color,
-              weight: 1,
-              opacity: isMaxZoom ? 0.6 : 0.9,
-              fillOpacity: isMaxZoom ? 0.6 : 0.35,
-            }}
-            eventHandlers={{
-              click: () => onSelectPoint(p),
-            }}
+            pathOptions={{ color, fillColor: color, weight: 1, opacity: isMaxZoom ? 0.6 : 0.9, fillOpacity: isMaxZoom ? 0.6 : 0.35 }}
+            eventHandlers={{ click: () => onSelectPoint(p) }}
           >
             <Tooltip direction="top" className="fps-map-tooltip" opacity={1}>
               <div className="space-y-1">
@@ -185,22 +169,150 @@ function FloodClustersLayer({
   )
 }
 
+// ───────────────────────────────────────────────────────────────
+// Sub-component: Fly đến tọa độ đã chọn (dùng useMap để truy cập
+// Leaflet instance bên trong MapContainer)
+// ───────────────────────────────────────────────────────────────
 function FlyToSelectedLocation({ target }: { target: { lat: number; lng: number } | null }) {
   const map = useMap()
   useEffect(() => {
     if (!target) return
-    map.flyTo([target.lat, target.lng], 14, { duration: 1.5 })
+    // Animate mượt mà đến tọa độ với zoom 14 và duration 1.5 giây
+    map.flyTo([target.lat, target.lng], 14, { animate: true, duration: 1.5 })
   }, [target?.lat, target?.lng, map])
   return null
 }
 
+// ───────────────────────────────────────────────────────────────
+// Sub-component: Marker "Pulse" tại điểm tìm kiếm từ Nominatim
+// Hiển thị vòng tròn rung để thu hút sự chú ý
+// ───────────────────────────────────────────────────────────────
+function SearchPulseMarker({ position }: { position: [number, number] }) {
+  // Dùng divIcon để tạo hiệu ứng pulse custom bằng CSS
+  const icon = useMemo(() => L.divIcon({
+    className: '',
+    html: `<div class="fps-search-pulse">
+             <div class="fps-search-pulse__ring"></div>
+             <div class="fps-search-pulse__dot"></div>
+           </div>`,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+  }), [])
+
+  return <Marker position={position} icon={icon} />
+}
+
+// ───────────────────────────────────────────────────────────────
+// Sub-component: Lấy địa chỉ thực tế khi click bản đồ (Reverse Geocoding)
+// Gọi Nominatim /reverse API và hiển thị Popup với địa chỉ
+// ───────────────────────────────────────────────────────────────
+function ReverseGeocodeLayer({ onOpenReport }: { onOpenReport: () => void }) {
+  const [popupData, setPopupData] = useState<{
+    lat: number; lng: number; address: string | null; loading: boolean
+  } | null>(null)
+
+  useMapEvents({
+    click: async (e) => {
+      const { lat, lng } = e.latlng
+
+      // Hiện popup ngay với trạng thái loading
+      setPopupData({ lat, lng, address: null, loading: true })
+
+      try {
+        // Gọi Nominatim Reverse Geocoding để lấy địa chỉ từ tọa độ
+        const res = await axios.get<{ display_name: string }>(
+          'https://nominatim.openstreetmap.org/reverse',
+          {
+            params: { format: 'json', lat, lon: lng },
+            headers: {
+              'Accept-Language': 'vi,en',
+              // KHÔNG đặt User-Agent ở đây: trình duyệt cấm ghi đè Forbidden Header này
+            },
+          },
+        )
+        setPopupData({ lat, lng, address: res.data.display_name, loading: false })
+      } catch {
+        setPopupData({ lat, lng, address: 'Không thể lấy địa chỉ.', loading: false })
+      }
+    },
+  })
+
+  if (!popupData) return null
+
+  return (
+    <Popup
+      position={[popupData.lat, popupData.lng]}
+      closeButton
+      autoClose={false}
+      closeOnClick={false}
+      eventHandlers={{ remove: () => setPopupData(null) }}
+    >
+      <div className="w-[280px] space-y-2.5">
+        {/* Tiêu đề popup */}
+        <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+          Địa điểm được chọn
+        </div>
+
+        {/* Địa chỉ hoặc loading */}
+        {popupData.loading ? (
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+            Đang tra địa chỉ…
+          </div>
+        ) : (
+          <div className="text-sm leading-snug text-slate-800">{popupData.address}</div>
+        )}
+
+        {/* Tọa độ chính xác */}
+        <div className="rounded-md bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-500">
+          {popupData.lat.toFixed(6)}, {popupData.lng.toFixed(6)}
+        </div>
+
+        {/* Nút mở FloodReportModal để báo cáo chi tiết */}
+        <button
+          type="button"
+          onClick={() => { setPopupData(null); onOpenReport() }}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-rose-600 px-3 py-2 text-xs font-bold text-white hover:bg-rose-700"
+        >
+          🚨 Báo cáo tình trạng ngập tại đây
+        </button>
+      </div>
+    </Popup>
+  )
+}
+
+
+
+// ───────────────────────────────────────────────────────────────
+// Sub-component: Cầu nối để lấy instance Leaflet Map ra ngoài
+// MapContainer (useMap chỉ hoạt động được bên trong MapContainer)
+// ───────────────────────────────────────────────────────────────
+function MapBridge({ onMap }: { onMap: (m: L.Map) => void }) {
+  const m = useMap()
+  useEffect(() => { onMap(m) }, [m, onMap])
+  return null
+}
+
+// ───────────────────────────────────────────────────────────────
+// Component chính: MapPage
+// ───────────────────────────────────────────────────────────────
 export function MapPage() {
   const { t } = useTranslation()
   const flood = useAsync(getFloodPrediction, [])
   const weather = useAsync(getWeather, [])
+
   const [searchInput, setSearchInput] = useState('')
   const [filterTerm, setFilterTerm] = useState('')
+
+  // Vị trí đã chọn để flyTo – có thể từ quận nội bộ hoặc kết quả Nominatim
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null)
+
+  // Marker pulse tại vị trí tìm kiếm từ Nominatim (khác với quận nội bộ)
+  const [pulseMarker, setPulseMarker] = useState<[number, number] | null>(null)
+
+  // State điều khiển mở/đóng modal gửi báo cáo ngập lụt
+  const [reportModalOpen, setReportModalOpen] = useState(false)
+
   const [map, setMap] = useState<L.Map | null>(null)
   const [searchParams] = useSearchParams()
   const districtIdFromUrl = searchParams.get('districtId')
@@ -230,22 +342,38 @@ export function MapPage() {
     return filteredDistricts.map((d) => {
       const position = centroid(d.polygon)
       const depthCm = depthCmFromRainfall(d.predictedRainfallMm, d.risk)
-      return {
-        id: d.id,
-        name: d.name,
-        risk: d.risk,
-        predictedRainfallMm: d.predictedRainfallMm,
-        depthCm,
-        position,
-      }
+      return { id: d.id, name: d.name, risk: d.risk, predictedRainfallMm: d.predictedRainfallMm, depthCm, position }
     })
   }, [filteredDistricts])
 
+  // Fly đến quận từ URL param khi dữ liệu sẵn sàng
   useEffect(() => {
     if (!map || !districtFromUrl) return
     const pos = centroid(districtFromUrl.polygon)
     map.flyTo(pos, 15, { animate: true, duration: 0.6 })
   }, [map, districtFromUrl])
+
+  // Xử lý chọn kết quả từ Nominatim geocoding
+  const handleGeoResult = useCallback((result: NominatimResult) => {
+    const lat = parseFloat(result.lat)
+    const lon = parseFloat(result.lon)
+    if (isNaN(lat) || isNaN(lon)) return
+
+    // Cập nhật vị trí để FlyToSelectedLocation kích hoạt flyTo
+    setSelectedLocation({ lat, lng: lon })
+    // Đặt marker pulse tại điểm đã tìm
+    setPulseMarker([lat, lon])
+  }, [])
+
+  // Xử lý reset tìm kiếm và về trung tâm mặc định
+  const handleResetView = useCallback(() => {
+    setSearchInput('')
+    setFilterTerm('')
+    setSelectedLocation(null)
+    setPulseMarker(null)
+    map?.flyTo(defaultCenter, defaultZoom)
+  }, [map])
+
   if (flood.loading || weather.loading) return <Spinner label="Loading map…" />
   if (flood.error) return <ErrorState error={flood.error} onRetry={flood.reload} />
   if (weather.error) return <ErrorState error={weather.error} onRetry={weather.reload} />
@@ -263,7 +391,8 @@ export function MapPage() {
       <div className="grid grid-cols-12 gap-4">
         <div className="col-span-12 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 lg:col-span-8">
           <div className="relative">
-            <div className="absolute top-4 left-4 z-[1000] w-full max-w-md pointer-events-auto">
+            {/* ── Thanh tìm kiếm nổi trên bản đồ ── */}
+            <div className="absolute top-4 left-4 z-[1000] w-full max-w-sm pointer-events-auto">
               <LocationSearch
                 districts={flood.data.districts}
                 placeholder={t('floodMap.searchDistrict')}
@@ -271,25 +400,37 @@ export function MapPage() {
                 onChange={setSearchInput}
                 onFilterChange={setFilterTerm}
                 onSelectDistrict={(d) => {
+                  // Chọn quận từ dữ liệu nội bộ → fly đến centroid
                   const c = centroid(d.polygon) as [number, number]
                   setSelectedLocation({ lat: c[0], lng: c[1] })
+                  // Xoá pulse marker cũ (không cần cho quận nội bộ)
+                  setPulseMarker(null)
                 }}
+                onSelectGeoResult={handleGeoResult}
               />
             </div>
 
+            {/* ── Nút Reset về mặc định ── */}
             <button
               type="button"
-              onClick={() => {
-                setSearchInput('')
-                setFilterTerm('')
-                setSelectedLocation(null)
-                map?.flyTo(defaultCenter, defaultZoom)
-              }}
+              onClick={handleResetView}
               className="absolute top-4 right-4 z-[1000] cursor-pointer rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-bold text-slate-800 shadow-sm backdrop-blur hover:bg-white dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100"
             >
               {t('floodMap.resetView')}
             </button>
 
+            {/* ── Nút mở modal Báo cáo ngập (bottom-right của bản đồ) ── */}
+            <button
+              type="button"
+              onClick={() => setReportModalOpen(true)}
+              className="absolute bottom-5 right-4 z-[1000] flex cursor-pointer items-center gap-2 rounded-2xl border border-rose-200 bg-rose-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg backdrop-blur transition hover:bg-rose-700 active:scale-95 dark:border-rose-700"
+            >
+              {/* Icon cảnh báo ngập */}
+              <span className="text-base leading-none">🚨</span>
+              Báo cáo ngập
+            </button>
+
+            {/* ── Leaflet MapContainer ── */}
             <MapContainer
               center={center}
               zoom={12}
@@ -297,14 +438,24 @@ export function MapPage() {
               preferCanvas
               className="h-[32rem] w-full"
             >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-              <MapBridge onMap={setMap} />
-              <FlyToSelectedLocation target={selectedLocation} />
-              <ActualReportClickLayer />
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
 
+              {/* Cầu nối để lấy Leaflet map instance ra ngoài MapContainer */}
+              <MapBridge onMap={setMap} />
+
+              {/* Fly đến vị trí đã chọn (cả quận nội bộ lẫn Nominatim) */}
+              <FlyToSelectedLocation target={selectedLocation} />
+
+              {/* Marker pulse tại điểm tìm kiếm Nominatim */}
+              {pulseMarker && <SearchPulseMarker position={pulseMarker} />}
+
+              {/* Reverse geocoding: click bản đồ → hiện địa chỉ + báo cáo */}
+              <ReverseGeocodeLayer onOpenReport={() => setReportModalOpen(true)} />
+
+              {/* Các điểm ngập (có clustering) */}
               <FloodClustersLayer
                 points={floodPoints}
                 onSelectPoint={(p) => {
@@ -318,6 +469,7 @@ export function MapPage() {
           </div>
         </div>
 
+        {/* ── Chú thích mức độ rủi ro ── */}
         <Card className="h-fit col-span-12 lg:col-span-4">
           <CardHeader>
             <div>
@@ -332,99 +484,51 @@ export function MapPage() {
             <LegendRow label={t('floodMap.severeRisk')} level="severe" />
           </div>
 
-          <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-950/40 dark:text-slate-300">
-            Data source: `GET /api/flood-prediction` (mocked in dev)
+          {/* Gợi ý tính năng cho người dùng */}
+          <div className="mt-4 space-y-2">
+            <div className="rounded-xl bg-sky-50 p-3 text-xs text-sky-700 dark:bg-sky-950/30 dark:text-sky-300">
+              💡 <strong>Tìm kiếm:</strong> Nhập tên địa điểm để lọc bản đồ và fly đến tọa độ.
+            </div>
+            <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-950/40 dark:text-slate-300">
+              🖱 <strong>Click bản đồ:</strong> Xem địa chỉ và báo cáo tình trạng thực tế.
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-950/40 dark:text-slate-400">
+            Geocoding: OpenStreetMap Nominatim API
           </div>
         </Card>
       </div>
+
+      {/* ── Modal Báo cáo ngập lụt ── */}
+      {/* Render ngoài luồng DOM bình thường nhờ fixed positioning trong FloodReportModal */}
+      <FloodReportModal
+        open={reportModalOpen}
+        onClose={() => setReportModalOpen(false)}
+        onSubmit={async ({ lat, lng, level, note }) => {
+          // Gọi API backend gửi báo cáo thực tế
+          const { apiV1 } = await import('../utils/axiosConfig')
+          await apiV1.post('/reports/actual-flood', { lat, lng, severity: level, note })
+          toast.success('Báo cáo ngập đã được gửi. Cảm ơn bạn!')
+          setReportModalOpen(false)
+        }}
+      />
     </div>
   )
 }
 
-function MapBridge({ onMap }: { onMap: (m: L.Map) => void }) {
-  const m = useMap()
-  useEffect(() => {
-    onMap(m)
-  }, [m, onMap])
-  return null
-}
-
-type ActualStatus = 'dry' | 'light_lt20' | 'deep_gt50'
-
-function ActualReportClickLayer() {
-  const [popupLatLng, setPopupLatLng] = useState<{ lat: number; lng: number } | null>(null)
-
-  useMapEvents({
-    click: (e) => {
-      setPopupLatLng({ lat: e.latlng.lat, lng: e.latlng.lng })
-    },
-  })
-
-  if (!popupLatLng) return null
-
-  const onSubmit = async (status: ActualStatus) => {
-    await submitActualReport(popupLatLng.lat, popupLatLng.lng, status)
-    setPopupLatLng(null)
-    toast.success('Cảm ơn bạn đã gửi cập nhật thực tế.')
-  }
-
-  return (
-    <Popup
-      position={[popupLatLng.lat, popupLatLng.lng]}
-      closeButton
-      autoClose={false}
-      closeOnClick={false}
-      eventHandlers={{ remove: () => setPopupLatLng(null) }}
-    >
-      <div className="w-[270px] space-y-2">
-        <div className="text-sm font-semibold text-slate-800">Tình trạng thực tế ở đây?</div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void onSubmit('dry')}
-            className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-700"
-          >
-            Khô ráo
-          </button>
-          <button
-            type="button"
-            onClick={() => void onSubmit('light_lt20')}
-            className="rounded-lg bg-amber-500 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-amber-600"
-          >
-            Ngập nhẹ (&lt;20cm)
-          </button>
-          <button
-            type="button"
-            onClick={() => void onSubmit('deep_gt50')}
-            className="rounded-lg bg-red-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-red-700"
-          >
-            Ngập sâu (&gt;50cm)
-          </button>
-        </div>
-      </div>
-    </Popup>
-  )
-}
-
-async function submitActualReport(lat: number, lng: number, status: ActualStatus) {
-  // Gọi API thật qua axios instance đã có interceptor JWT
-  const { apiV1 } = await import('../utils/axiosConfig')
-  await apiV1.post('/reports/actual-flood', { lat, lng, status })
-}
-
+// ───────────────────────────────────────────────────────────────
+// Hàng chú thích màu sắc vùng ngập
+// ───────────────────────────────────────────────────────────────
 function LegendRow({ label, level }: { label: string; level: RiskLevel }) {
   const s = RISK_FILL[level]
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-3">
-        <span
-          className="h-3.5 w-3.5 rounded"
-          style={{ backgroundColor: s.fillColor, outline: `2px solid ${s.color}` }}
-        />
+        <span className="h-3.5 w-3.5 rounded" style={{ backgroundColor: s.fillColor, outline: `2px solid ${s.color}` }} />
         <span className="font-semibold text-slate-800 dark:text-slate-100">{label}</span>
       </div>
       <RiskBadge level={level} />
     </div>
   )
 }
-
