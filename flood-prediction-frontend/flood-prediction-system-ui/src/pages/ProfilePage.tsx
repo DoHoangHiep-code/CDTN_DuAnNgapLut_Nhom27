@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { UserCircle2 } from 'lucide-react'
 import { CardHeader, CardMeta, CardTitle } from '../components/Card'
 import { Input } from '../components/Input'
 import { Button } from '../components/Button'
-import { Toggle } from '../components/Toggle'
 import { useAuth } from '../context/AuthContext'
 import { useTranslation } from 'react-i18next'
 import { cn } from '../utils/cn'
 import type { Role } from '../utils/types'
-import { updateMyProfile, uploadMyAvatar } from '../services/api'
+import { updateMyProfile, uploadMyAvatar, authChangePassword } from '../services/api'
 
 function RoleBadge({ role }: { role: Role }) {
   const { t } = useTranslation()
@@ -29,18 +28,38 @@ function RoleBadge({ role }: { role: Role }) {
 export function ProfilePage() {
   const { t } = useTranslation()
   const { user, fetchProfile } = useAuth()
+
+  // State Profile
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [emailNotif, setEmailNotif] = useState(true)
-  const [floodAlert, setFloodAlert] = useState(false)
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Preview avatar trước khi upload để UX tốt hơn
+  // State Change Password
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [changingPwd, setChangingPwd] = useState(false)
+
+  // Xem trước Avatar
   const avatarPreview = useMemo(() => {
     if (!avatarFile) return null
     return URL.createObjectURL(avatarFile)
   }, [avatarFile])
+
+  // Lấy đường dẫn base URL cho avatar
+  // Nếu path tương đối (ví dụ: /uploads/abc.jpg) thì thêm url backend
+  const displayAvatar = useMemo(() => {
+    if (avatarPreview) return avatarPreview
+    if (!user || !user.avatar_url) return null
+
+    if (user.avatar_url.startsWith('http')) {
+      return user.avatar_url
+    }
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3002'
+    return `${baseUrl.replace(/\/+$/, '')}${user.avatar_url}`
+  }, [avatarPreview, user])
 
   useEffect(() => {
     setName(user?.full_name ?? '')
@@ -48,6 +67,65 @@ export function ProfilePage() {
   }, [user])
 
   if (!user) return null
+
+  // Đổi mật khẩu
+  async function handleChangePassword() {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      toast.error('Vui lòng nhập đầy đủ các trường mật khẩu')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('Mật khẩu mới và xác nhận mật khẩu không khớp')
+      return
+    }
+    if (newPassword.length < 6) {
+      toast.error('Mật khẩu mới phải có ít nhất 6 ký tự')
+      return
+    }
+
+    setChangingPwd(true)
+    try {
+      await authChangePassword({ currentPassword, newPassword })
+      toast.success('Đổi mật khẩu thành công')
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (e: any) {
+      const msg = e?.response?.data?.error?.message || e?.response?.data?.message || 'Đổi mật khẩu thất bại'
+      toast.error(String(msg))
+    } finally {
+      setChangingPwd(false)
+    }
+  }
+
+  // Cập nhật Profile
+  async function handleSaveProfile() {
+    setSaving(true)
+    try {
+      let updated = false
+      if (name.trim() !== user?.full_name) {
+        await updateMyProfile({ full_name: name.trim() })
+        updated = true
+      }
+      if (avatarFile) {
+        await uploadMyAvatar(avatarFile)
+        setAvatarFile(null)
+        updated = true
+      }
+
+      if (updated) {
+        toast.success('Cập nhật hồ sơ thành công')
+        await fetchProfile() // Sync global state
+      } else {
+        toast('Không có thông tin nào thay đổi', { icon: 'ℹ️' })
+      }
+    } catch (e: any) {
+      const msg = e?.response?.data?.error?.message || 'Cập nhật thất bại'
+      toast.error(String(msg))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -57,6 +135,7 @@ export function ProfilePage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* THÔNG TIN CÁ NHÂN */}
         <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-md dark:border-slate-800 dark:bg-slate-900">
           <CardHeader className="mb-4">
             <div>
@@ -66,18 +145,35 @@ export function ProfilePage() {
           </CardHeader>
 
           <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
-            <div className="grid h-28 w-28 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-sky-100 to-indigo-100 shadow-inner ring-2 ring-white dark:from-sky-950/40 dark:to-indigo-950/40 dark:ring-slate-700">
-              {avatarPreview || user.avatar_url ? (
+            {/* Input file ẩn, chỉ hiện Avatar clickable */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept="image/png,image/jpeg,image/jpg"
+              onChange={(e) => setAvatarFile(e.target.files?.[0] ?? null)}
+            />
+
+            <div
+              className="group relative grid h-28 w-28 shrink-0 cursor-pointer place-items-center rounded-2xl bg-gradient-to-br from-sky-100 to-indigo-100 shadow-inner ring-2 ring-white dark:from-sky-950/40 dark:to-indigo-950/40 dark:ring-slate-700 overflow-hidden"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {displayAvatar ? (
                 <img
-                  src={avatarPreview ?? user.avatar_url ?? ''}
+                  src={displayAvatar}
                   alt="avatar"
-                  className="h-24 w-24 rounded-2xl object-cover"
+                  className="h-full w-full object-cover transition-opacity duration-300 group-hover:opacity-75"
                 />
               ) : (
-                <UserCircle2 className="h-20 w-20 text-sky-700 opacity-90 dark:text-sky-300" strokeWidth={1.25} />
+                <UserCircle2 className="h-20 w-20 text-sky-700 opacity-90 transition-transform duration-300 group-hover:scale-110 dark:text-sky-300" strokeWidth={1.25} />
               )}
+              {/* Overlay chỉ hiện khi hover */}
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                <span className="text-xs font-semibold text-white">Thay đổi</span>
+              </div>
             </div>
-              <div className="min-w-0 flex-1 space-y-3 text-center sm:text-left">
+
+            <div className="min-w-0 flex-1 space-y-3 text-center sm:text-left">
               <div>
                 <div className="text-lg font-extrabold text-slate-900 dark:text-slate-100">{user.full_name}</div>
                 <div className="text-sm text-slate-600 dark:text-slate-400">{user.email}</div>
@@ -90,71 +186,37 @@ export function ProfilePage() {
           </div>
 
           <div className="mt-6 space-y-4 border-t border-slate-200 pt-6 dark:border-slate-800">
-            {/* Hiển thị email/role dạng read-only để đúng yêu cầu bảo mật */}
             <Input label={t('profile.name')} value={name} onChange={(e) => setName(e.target.value)} />
-            <Input label={t('profile.email')} value={email} onChange={() => {}} disabled />
 
-            {/* Upload avatar: dùng FormData + multipart/form-data */}
+            {/* Trường Email bị khóa */}
             <div>
-              <div className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-200">Avatar</div>
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/jpg"
-                onChange={(e) => setAvatarFile(e.target.files?.[0] ?? null)}
-                className="block w-full text-xs text-slate-700 dark:text-slate-200"
+              <Input
+                label={t('profile.email')}
+                value={email}
+                onChange={() => { }}
+                disabled
+                readOnly
+                className="cursor-not-allowed bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
               />
-              <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Chỉ chấp nhận PNG/JPG/JPEG, tối đa 2MB.</div>
-              <Button
-                className="mt-2"
-                variant="secondary"
-                disabled={!avatarFile || saving}
-                onClick={async () => {
-                  if (!avatarFile) return
-                  setSaving(true)
-                  try {
-                    await uploadMyAvatar(avatarFile)
-                    toast.success('Cập nhật avatar thành công')
-                    setAvatarFile(null)
-                    // Refresh profile để sidebar/ UI cập nhật avatar_url mới
-                    await fetchProfile()
-                  } catch (e: any) {
-                    const msg = e?.response?.data?.error?.message || 'Upload avatar thất bại'
-                    toast.error(String(msg))
-                  } finally {
-                    setSaving(false)
-                  }
-                }}
-              >
-                {saving ? 'Đang upload…' : 'Lưu avatar'}
-              </Button>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Email không thể thay đổi
+              </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+
+            <div className="flex flex-wrap gap-2 pt-2">
               <Button
                 className="min-w-[8rem]"
-                onClick={() => {
-                  // Chỉ update full_name theo API backend, tránh sửa role/email
-                  void (async () => {
-                    setSaving(true)
-                    try {
-                      await updateMyProfile({ full_name: name.trim() })
-                      toast.success('Cập nhật hồ sơ thành công')
-                      await fetchProfile()
-                    } catch (e: any) {
-                      const msg = e?.response?.data?.error?.message || 'Cập nhật thất bại'
-                      toast.error(String(msg))
-                    } finally {
-                      setSaving(false)
-                    }
-                  })()
-                }}
+                disabled={saving || (name.trim() === user.full_name && !avatarFile)}
+                onClick={handleSaveProfile}
               >
-                {t('profile.saveChanges')}
+                {saving ? 'Đang lưu…' : t('profile.saveChanges')}
               </Button>
               <Button
                 variant="ghost"
                 onClick={() => {
                   setName(user.full_name)
-                  setEmail(user.email)
+                  setAvatarFile(null)
+                  if (fileInputRef.current) fileInputRef.current.value = ''
                 }}
               >
                 {t('profile.reset')}
@@ -163,8 +225,49 @@ export function ProfilePage() {
           </div>
         </section>
 
-        <section className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-md dark:border-slate-800 dark:bg-slate-900">
+        <div className="space-y-6">
+          {/* BẢO MẬT & ĐỔI MẬT KHẨU */}
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-md dark:border-slate-800 dark:bg-slate-900">
+            <CardHeader className="mb-4">
+              <div>
+                <CardTitle>Bảo mật</CardTitle>
+                <CardMeta>Quản lý mật khẩu và tài khoản</CardMeta>
+              </div>
+            </CardHeader>
+
+            <div className="space-y-4">
+              <Input
+                label="Mật khẩu hiện tại"
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+              />
+              <Input
+                label="Mật khẩu mới"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+              <Input
+                label="Xác nhận mật khẩu mới"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+
+              <div className="pt-2">
+                <Button
+                  onClick={handleChangePassword}
+                  disabled={changingPwd || !currentPassword || !newPassword || !confirmPassword}
+                >
+                  {changingPwd ? 'Đang cập nhật...' : 'Đổi mật khẩu'}
+                </Button>
+              </div>
+            </div>
+          </section>
+
+          {/* CHỈ SỐ THỐNG KÊ */}
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-md dark:border-slate-800 dark:bg-slate-900">
             <CardHeader className="mb-4">
               <div>
                 <CardTitle>{t('profile.statsTitle')}</CardTitle>
@@ -181,26 +284,8 @@ export function ProfilePage() {
                 <div className="mt-1 text-2xl font-extrabold text-indigo-700 dark:text-indigo-300">45</div>
               </div>
             </div>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-md dark:border-slate-800 dark:bg-slate-900">
-            <div className="space-y-5">
-              <Toggle
-                label={t('profile.toggleEmail')}
-                hint={t('profile.toggleEmailHint')}
-                checked={emailNotif}
-                onChange={setEmailNotif}
-              />
-              <div className="border-t border-slate-100 dark:border-slate-800" />
-              <Toggle
-                label={t('profile.toggleFlood')}
-                hint={t('profile.toggleFloodHint')}
-                checked={floodAlert}
-                onChange={setFloodAlert}
-              />
-            </div>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
     </div>
   )

@@ -5,6 +5,28 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Flood Prediction System</title>
+
+    <!--
+      Script chống FOUC (Flash of Unstyled Content):
+      Chạy đồng bộ NGAY LẬP TỨC trước khi trình duyệt vẽ bất kỳ nội dung nào.
+      Đọc theme đã lưu trong localStorage và áp dụng class 'dark' lên thẻ <html>
+      để tránh hiện tượng trang sáng nhấp nháy khi tải lại ở chế độ tối.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('fps_settings_v1')
+          if (stored) {
+            var parsed = JSON.parse(stored)
+            if (parsed && parsed.theme === 'dark') {
+              document.documentElement.classList.add('dark')
+            }
+          }
+        } catch (_) {
+          // Bỏ qua nếu localStorage không khả dụng (private browsing, v.v.)
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

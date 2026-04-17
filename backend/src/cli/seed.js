@@ -156,7 +156,7 @@ async function seedFloodPredictions(nodeIds) {
 
 async function seedActualFloodReports(users, gridNodes) {
   const base = nowUtc()
-  const levels = ['Khô ráo', '<20cm', '>50cm']
+  const levels = ['Khô ráo', '<15cm', '15-30cm', '>30cm']
 
   const rows = []
   for (let i = 0; i < 10; i++) {

@@ -54,6 +54,11 @@ export async function authResetPassword(payload: { token: string; newPassword: s
   return res.data
 }
 
+export async function authChangePassword(payload: { currentPassword: string; newPassword: string }) {
+  const res = await apiV1.post<{ success: boolean; message: string }>('/users/profile/password', payload)
+  return res.data
+}
+
 export async function getMyProfile() {
   const res = await apiV1.get<{ success: boolean; data: any }>('/users/profile')
   return res.data
@@ -105,3 +110,20 @@ export async function adminDeleteUser(userId: number) {
   return res.data
 }
 
+// ---------- User Settings API ----------
+
+// Payload gửi lên khi người dùng thay đổi cài đặt cá nhân.
+// Hiện tại chỉ có floodAlertsEnabled; có thể mở rộng thêm các trường khác sau.
+export type UserSettingsPayload = {
+  floodAlertsEnabled: boolean
+}
+
+/**
+ * Gọi PUT /users/settings để đồng bộ cài đặt người dùng với backend.
+ * Khi backend chưa triển khai endpoint này, hàm sẽ ném lỗi 404 –
+ * UI sẽ bắt lỗi đó và hiện toast thông báo cho người dùng.
+ */
+export async function updateUserSettings(payload: UserSettingsPayload) {
+  const res = await apiV1.put<{ success: boolean; message?: string }>('/users/settings', payload)
+  return res.data
+}
