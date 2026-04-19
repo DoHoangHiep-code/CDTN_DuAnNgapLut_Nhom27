@@ -10,9 +10,12 @@ module.exports = (sequelize) => {
       temp: { type: DataTypes.DECIMAL, allowNull: true },
       rhum: { type: DataTypes.DECIMAL, allowNull: true },
       prcp: { type: DataTypes.DECIMAL, allowNull: true },
-      prcp_3h: { type: DataTypes.DECIMAL, allowNull: true },
+      prcp_3h:  { type: DataTypes.DECIMAL, allowNull: true },
+      prcp_6h:  { type: DataTypes.DECIMAL, allowNull: true },
+      prcp_12h: { type: DataTypes.DECIMAL, allowNull: true },
       prcp_24h: { type: DataTypes.DECIMAL, allowNull: true },
       wspd: { type: DataTypes.DECIMAL, allowNull: true },
+      pres: { type: DataTypes.DECIMAL, allowNull: true },
     },
     {
       tableName: 'weather_measurements',

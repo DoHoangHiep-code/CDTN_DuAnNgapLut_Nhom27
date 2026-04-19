@@ -13,7 +13,7 @@ import { RiskBadge } from '../components/Badge'
 import { useAsync } from '../hooks/useAsync'
 import { getFloodPrediction, getWeather } from '../services/api'
 import type { RiskLevel } from '../utils/types'
-import { depthCmFromRainfall, formatDepthCm } from '../utils/floodDepth'
+import { formatDepthCm } from '../utils/floodDepth'
 import Supercluster from 'supercluster'
 import { LocationSearch, type NominatimResult } from '../components/LocationSearch'
 import { FloodReportModal } from '../components/FloodReportModal'
@@ -341,7 +341,7 @@ export function MapPage() {
   const floodPoints = useMemo<FloodPoint[]>(() => {
     return filteredDistricts.map((d) => {
       const position = centroid(d.polygon)
-      const depthCm = depthCmFromRainfall(d.predictedRainfallMm, d.risk)
+      const depthCm = d.flood_depth_cm ?? 0
       return { id: d.id, name: d.name, risk: d.risk, predictedRainfallMm: d.predictedRainfallMm, depthCm, position }
     })
   }, [filteredDistricts])

@@ -36,7 +36,7 @@ export type FloodDistrict = {
   name: string
   risk: RiskLevel
   predictedRainfallMm: number
-  // Rough polygon coordinates [lat, lng]
+  flood_depth_cm: number
   polygon: [number, number][]
   updatedAtIso: string
 }
