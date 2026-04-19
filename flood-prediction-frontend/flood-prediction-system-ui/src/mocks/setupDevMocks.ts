@@ -90,6 +90,7 @@ function buildFloodPrediction(): FloodPredictionResponse {
       id: d.id,
       name: d.name,
       predictedRainfallMm: round(d.rain, 1),
+      flood_depth_cm: round(d.rain * 0.8, 1),
       risk: riskFromRain(d.rain),
       polygon,
       updatedAtIso: isoNow(),
