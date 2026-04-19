@@ -32,13 +32,14 @@ export function DashboardPage() {
   }, [flood.data])
 
   const loading = dashboard.loading || weather.loading || flood.loading
-  const error = dashboard.error || weather.error || flood.error
+  // Chỉ crash toàn trang nếu TẤT CẢ đều lỗi — nếu chỉ 1 lỗi thì render partial
+  const criticalError = dashboard.error && weather.error && flood.error
 
   if (loading) return <Spinner label="Loading dashboard…" />
-  if (error) return <ErrorState error={error} onRetry={() => void (weather.reload(), flood.reload())} />
-  if (!weather.data || !flood.data || !dashboard.data) return null
+  if (criticalError) return <ErrorState error={dashboard.error!} onRetry={() => void (dashboard.reload(), weather.reload(), flood.reload())} />
+  if (!weather.data && !flood.data && !dashboard.data) return null
 
-  const w = weather.data.current
+  const w = weather.data?.current ?? { temperatureC: 0, humidityPct: 0, windKph: 0, rainfallMm: 0, observedAtIso: new Date().toISOString(), locationName: '—' }
 
   return (
     <div className="space-y-5">
@@ -113,10 +114,9 @@ export function DashboardPage() {
           </CardHeader>
           <div className="h-56 min-h-[14rem]">
             {mode === '24h' ? (
-              <RainForecastChart points={dashboard.data.forecast24h ?? []} />
+              <RainForecastChart points={dashboard.data?.forecast24h ?? []} />
             ) : (
-              // 3d vẫn dùng dữ liệu weather demo (có thể mở rộng backend sau)
-              <RainChart mode="3d" forecast24h={weather.data.forecast24h} forecast3d={weather.data.forecast3d} />
+              <RainChart mode="3d" forecast24h={weather.data?.forecast24h ?? []} forecast3d={weather.data?.forecast3d ?? []} />
             )}
           </div>
         </Card>

@@ -176,7 +176,13 @@ class PredictionService {
   // Dùng cho FloodPredictionController để build FloodDistrict shape cho frontend
   // -------------------------------------------------------------------------
   async runBatchPredictionWithNodes() {
-    const nodeRows = await this.weatherRepository.getAllNodesWithLatestWeather()
+    let nodeRows
+    try {
+      nodeRows = await this.weatherRepository.getAllNodesWithLatestWeather()
+    } catch (err) {
+      console.error('[PredictionService] DB error, returning empty:', err.message)
+      return []
+    }
     if (!nodeRows.length) return []
 
     const validItems = nodeRows.filter((r) => r.lat != null)
