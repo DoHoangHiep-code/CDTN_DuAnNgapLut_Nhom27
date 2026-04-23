@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Droplets, Thermometer, Wind, CloudRain, RefreshCcw } from 'lucide-react'
+import { Droplets, Thermometer, Wind, CloudRain, RefreshCcw, ExternalLink } from 'lucide-react'
 import { Card, CardHeader, CardMeta, CardTitle } from '../components/Card'
 import { Spinner } from '../components/Spinner'
 import { ErrorState } from '../components/ErrorState'
@@ -48,14 +48,29 @@ export function DashboardPage() {
           <h2 className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100">{t('dashboard.title')}</h2>
           <p className="text-sm text-slate-600 dark:text-slate-300">{t('dashboard.subtitle')}</p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          leftIcon={<RefreshCcw className="h-4 w-4" />}
-          onClick={() => void (weather.reload(), flood.reload())}
-        >
-          {t('dashboard.refresh')}
-        </Button>
+        {/* Nhóm nút góc phải: Refresh + mở Power BI */}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<RefreshCcw className="h-4 w-4" />}
+            onClick={() => void (weather.reload(), flood.reload())}
+          >
+            {t('dashboard.refresh')}
+          </Button>
+
+          {/* Nút mở báo cáo Power BI trong tab mới */}
+          {/* TODO: Thay 'https://app.powerbi.com/' bằng link báo cáo thực tế */}
+          <a
+            href="https://app.powerbi.com/view?r=eyJrIjoiODk5Mjk3ODQtOTUzOS00NTY3LTk3MTYtMGFlYjY1N2E4OWE1IiwidCI6IjVhYWYwYTA1LTkzMGYtNGEzZS04Njk1LWI2OTE1OGY1NWZiNiIsImMiOjEwfQ%3D%3D"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500 bg-indigo-50 px-3 py-1.5 text-sm font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-100 active:scale-95 dark:border-indigo-400 dark:bg-indigo-900/30 dark:text-indigo-300 dark:hover:bg-indigo-900/50"
+          >
+            <ExternalLink className="h-4 w-4" />
+            Mở báo cáo Power BI
+          </a>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">

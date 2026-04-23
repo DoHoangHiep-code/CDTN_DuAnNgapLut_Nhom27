@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 import toast from 'react-hot-toast'
-import { Download, Send } from 'lucide-react'
+import { Download } from 'lucide-react'
 
 import { Button } from '../components/Button'
 import { CardHeader, CardMeta, CardTitle } from '../components/Card'
@@ -15,7 +15,7 @@ import { Input } from '../components/Input'
 import { Spinner } from '../components/Spinner'
 import { useAsync } from '../hooks/useAsync'
 import { useReverseGeocode } from '../hooks/useReverseGeocode'
-import { getFloodPrediction, getReports, sendToPowerBI } from '../services/api'
+import { getFloodPrediction, getReports } from '../services/api'
 import { LocationSearch } from '../components/LocationSearch'
 import type { ReportsResponse } from '../utils/types'
 import { useTranslation } from 'react-i18next'
@@ -90,7 +90,6 @@ export function ReportsPage() {
   const [date, setDate] = useState('')
   const [districtInput, setDistrictInput] = useState('')
   const [districtFilter, setDistrictFilter] = useState('')
-  const [sending, setSending] = useState(false)
   const [exporting, setExporting] = useState(false)
 
   const flood = useAsync(getFloodPrediction, [])
@@ -219,29 +218,6 @@ export function ReportsPage() {
             </Button>
           </div>
 
-          <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-950/40 dark:text-slate-300">
-            <div className="font-semibold">Send to Power BI</div>
-            <div className="mt-1">Simulates `POST /api/export-powerbi`</div>
-            <div className="mt-3">
-              <Button
-                leftIcon={<Send className="h-4 w-4" />}
-                disabled={sending}
-                onClick={async () => {
-                  setSending(true)
-                  try {
-                    const res = await sendToPowerBI({ rows })
-                    toast.success(res.message ?? 'Sent to Power BI')
-                  } catch (e) {
-                    toast.error(e instanceof Error ? e.message : 'Failed to send')
-                  } finally {
-                    setSending(false)
-                  }
-                }}
-              >
-                {sending ? 'Sending…' : 'Send to Power BI'}
-              </Button>
-            </div>
-          </div>
         </GlassCard>
       </div>
     </div>
