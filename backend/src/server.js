@@ -12,6 +12,7 @@ const { profileRouter }        = require('./routes/profileRoutes')         // Ro
 const { adminUserRouter }      = require('./routes/adminUserRoutes')       // Router admin CRUD users
 const { reportsRouter }        = require('./routes/reportsRoutes')         // Router reports
 const { floodPredictionRouter} = require('./routes/floodPredictionRoutes') // Router compat /flood-prediction
+const { chatbotRouter }        = require('./routes/chatbotRoutes')         // Router chatbot AI
 
 // ── Weather Cronjob ──────────────────────────────────────────────────────────
 // Import service cronjob dự báo ngập lụt mỗi 6 tiếng
@@ -36,6 +37,7 @@ app.use('/api/v1', dashboardRouter)
 app.use('/api/v1', mapRouter)
 app.use('/api/v1', weatherRouter)
 app.use('/api/v1', floodPredictionRouter)
+app.use('/api/v1', chatbotRouter)
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1', profileRouter)
 app.use('/api/v1', adminUserRouter)
