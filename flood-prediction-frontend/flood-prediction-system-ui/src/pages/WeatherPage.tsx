@@ -203,8 +203,8 @@ export function WeatherPage() {
       {/* Page header */}
       <div className="flex items-end justify-between">
         <div>
-          <h2 className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100">{t('weather.title')}</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400">{t('weather.helpLine')}</p>
+          <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">{t('weather.title')}</h2>
+          <p className="mt-1 text-base text-slate-500 dark:text-slate-400">{t('weather.helpLine')}</p>
         </div>
         <button
           type="button"
@@ -218,58 +218,56 @@ export function WeatherPage() {
       {/* Top section: 2 ô vuông bằng nhau */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:max-w-2xl">
 
-        {/* Ô 1 — Thời tiết hiện tại, hình vuông */}
-        <div className="aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex h-full flex-col">
-            {/* Gradient header ~45% */}
-            <div className={cn('flex flex-1 flex-col justify-between bg-gradient-to-br p-5 text-white', currentCfg.gradient)}>
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-widest text-white/70">Thời tiết hiện tại</div>
-                  <div className="mt-1 flex items-center gap-1.5 text-sm font-bold">
-                    <MapPin className="h-4 w-4 opacity-80" />
-                    {current.locationName}
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-white/20 p-3 backdrop-blur">
-                  <CurrentIcon className="h-8 w-8 text-white" />
-                </div>
-              </div>
+        {/* Ô 1 — Thời tiết hiện tại */}
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-900">
+          {/* Gradient top */}
+          <div className={cn('bg-gradient-to-br px-6 py-6 text-white', currentCfg.gradient)}>
+            <div className="flex items-start justify-between">
               <div>
-                <div className="text-6xl font-black tracking-tight">
-                  {current.temperatureC}°<span className="text-4xl">C</span>
+                <div className="text-xs font-bold uppercase tracking-widest text-white/60">Thời tiết hiện tại</div>
+                <div className="mt-1.5 flex items-center gap-1.5 text-sm font-semibold text-white/90">
+                  <MapPin className="h-4 w-4" />
+                  {current.locationName}
                 </div>
-                <div className="mt-1 text-sm font-medium text-white/80">{currentCfg.label}</div>
+              </div>
+              <div className="rounded-2xl bg-white/20 p-3 backdrop-blur">
+                <CurrentIcon className="h-9 w-9 text-white" />
               </div>
             </div>
+            <div className="mt-5">
+              <div className="text-7xl font-black leading-none tracking-tight">
+                {current.temperatureC}°
+              </div>
+              <div className="mt-2 text-base font-semibold text-white/80">{currentCfg.label}</div>
+            </div>
+          </div>
 
-            {/* Stats */}
-            <div className="grid grid-cols-3 divide-x divide-slate-100 dark:divide-slate-800">
-              <div className="flex flex-col items-center gap-1 py-4">
-                <Droplets className="h-5 w-5 text-sky-500" />
-                <div className="text-base font-extrabold text-sky-600 dark:text-sky-400">{current.humidityPct}%</div>
-                <div className="text-[11px] text-slate-500">Độ ẩm</div>
-              </div>
-              <div className="flex flex-col items-center gap-1 py-4">
-                <Wind className="h-5 w-5 text-cyan-500" />
-                <div className="text-base font-extrabold text-cyan-600 dark:text-cyan-400">{current.windKph}</div>
-                <div className="text-[11px] text-slate-500">km/h</div>
-              </div>
-              <div className="flex flex-col items-center gap-1 py-4">
-                <CloudRain className="h-5 w-5 text-indigo-500" />
-                <div className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">{current.rainfallMm}</div>
-                <div className="text-[11px] text-slate-500">mm mưa</div>
-              </div>
+          {/* Stats row */}
+          <div className="grid grid-cols-3 divide-x divide-slate-100 dark:divide-slate-800">
+            <div className="flex flex-col items-center gap-1.5 py-5">
+              <Droplets className="h-5 w-5 text-sky-500" />
+              <div className="text-lg font-extrabold text-sky-600 dark:text-sky-400">{current.humidityPct}%</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Độ ẩm</div>
             </div>
+            <div className="flex flex-col items-center gap-1.5 py-5">
+              <Wind className="h-5 w-5 text-cyan-500" />
+              <div className="text-lg font-extrabold text-cyan-600 dark:text-cyan-400">{current.windKph}</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">km/h</div>
+            </div>
+            <div className="flex flex-col items-center gap-1.5 py-5">
+              <CloudRain className="h-5 w-5 text-indigo-500" />
+              <div className="text-lg font-extrabold text-indigo-600 dark:text-indigo-400">{current.rainfallMm}</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">mm mưa</div>
+            </div>
+          </div>
 
-            <div className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-400 dark:border-slate-800">
-              Cập nhật {new Date(current.observedAtIso).toLocaleString('vi-VN')}
-            </div>
+          <div className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400 dark:border-slate-800 dark:text-slate-500">
+            Cập nhật {new Date(current.observedAtIso).toLocaleString('vi-VN')}
           </div>
         </div>
 
-        {/* Ô 2 — Bản đồ, hình vuông */}
-        <div className="flex aspect-square flex-col gap-2">
+        {/* Ô 2 — Bản đồ */}
+        <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <div className="min-w-0 flex-1">
               <LocationSearch
