@@ -34,8 +34,15 @@ class ReportsController {
   // POST /api/v1/reports
   async create(req, res, next) {
     try {
-      // Lấy userId từ JWT (verifyToken đã set req.user)
+      // Route này đã qua verifyToken → req.user luôn tồn tại nếu token hợp lệ
+      // Guard thêm để phòng trường hợp middleware bị bypass hoặc payload JWT thiếu user_id
       const userId = req.user?.user_id
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: { message: 'Bạn cần đăng nhập để gửi báo cáo này.' },
+        })
+      }
 
       // Lấy payload từ body
       const { latitude, longitude, reported_level } = req.body || {}
@@ -52,9 +59,9 @@ class ReportsController {
         return res.status(400).json({ success: false, error: { message: 'Latitude/Longitude không hợp lệ' } })
       }
 
-      // Tạo report (PostGIS geom sẽ được tạo trong SQL)
+      // Tạo report với user_id đã xác thực (KHÔNG còn nullable)
       const created = await this.reportsService.create({
-        userId: userId ?? null,
+        userId,          // ← user_id luôn có giá trị tại đây
         latitude: lat,
         longitude: lng,
         reported_level,

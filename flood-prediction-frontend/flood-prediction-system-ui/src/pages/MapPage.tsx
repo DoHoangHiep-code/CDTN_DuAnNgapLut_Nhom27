@@ -13,10 +13,11 @@ import { RiskBadge } from '../components/Badge'
 import { useAsync } from '../hooks/useAsync'
 import { getFloodPrediction, getWeather } from '../services/api'
 import type { RiskLevel } from '../utils/types'
-import { depthCmFromRainfall, formatDepthCm } from '../utils/floodDepth'
+import { formatDepthCm } from '../utils/floodDepth'
 import Supercluster from 'supercluster'
 import { LocationSearch, type NominatimResult } from '../components/LocationSearch'
 import { FloodReportModal } from '../components/FloodReportModal'
+import { FloodWarningCard } from '../components/FloodWarningCard'
 
 // ───────────────────────────────────────────────────────────────
 // Màu sắc vùng ngập
@@ -287,9 +288,17 @@ function ReverseGeocodeLayer({ onOpenReport }: { onOpenReport: () => void }) {
 // Sub-component: Cầu nối để lấy instance Leaflet Map ra ngoài
 // MapContainer (useMap chỉ hoạt động được bên trong MapContainer)
 // ───────────────────────────────────────────────────────────────
-function MapBridge({ onMap }: { onMap: (m: L.Map) => void }) {
+function MapBridge({ onMap, onCenter }: { onMap: (m: L.Map) => void; onCenter: (lat: number, lon: number) => void }) {
   const m = useMap()
   useEffect(() => { onMap(m) }, [m, onMap])
+
+  // Cập nhật center khi map di chuyển hoặc zoom
+  useMapEvents({
+    moveend: () => {
+      const c = m.getCenter()
+      onCenter(c.lat, c.lng)
+    },
+  })
   return null
 }
 
@@ -312,6 +321,9 @@ export function MapPage() {
 
   // State điều khiển mở/đóng modal gửi báo cáo ngập lụt
   const [reportModalOpen, setReportModalOpen] = useState(false)
+
+  // Tọa độ tâm bản đồ – dùng để cấp cho FloodWarningCard
+  const [mapCenter, setMapCenter] = useState({ lat: 21.0278, lon: 105.8342 })
 
   const [map, setMap] = useState<L.Map | null>(null)
   const [searchParams] = useSearchParams()
@@ -341,7 +353,7 @@ export function MapPage() {
   const floodPoints = useMemo<FloodPoint[]>(() => {
     return filteredDistricts.map((d) => {
       const position = centroid(d.polygon)
-      const depthCm = depthCmFromRainfall(d.predictedRainfallMm, d.risk)
+      const depthCm = d.flood_depth_cm ?? 0
       return { id: d.id, name: d.name, risk: d.risk, predictedRainfallMm: d.predictedRainfallMm, depthCm, position }
     })
   }, [filteredDistricts])
@@ -430,6 +442,12 @@ export function MapPage() {
               Báo cáo ngập
             </button>
 
+            {/* ── FloodWarningCard: Bảng dự đoán nổi góc dưới trái ── */}
+            <FloodWarningCard
+              lat={mapCenter.lat}
+              lon={mapCenter.lon}
+            />
+
             {/* ── Leaflet MapContainer ── */}
             <MapContainer
               center={center}
@@ -443,8 +461,11 @@ export function MapPage() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
 
-              {/* Cầu nối để lấy Leaflet map instance ra ngoài MapContainer */}
-              <MapBridge onMap={setMap} />
+              {/* Cầu nối để lấy Leaflet map instance và theo dõi center map */}
+              <MapBridge
+                onMap={setMap}
+                onCenter={(lat, lon) => setMapCenter({ lat, lon })}
+              />
 
               {/* Fly đến vị trí đã chọn (cả quận nội bộ lẫn Nominatim) */}
               <FlyToSelectedLocation target={selectedLocation} />

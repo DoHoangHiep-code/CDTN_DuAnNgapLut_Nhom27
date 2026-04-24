@@ -13,6 +13,35 @@ export async function getFloodPrediction() {
   return (res.data?.data ?? res.data) as FloodPredictionResponse
 }
 
+// ── Dự đoán ngập theo tọa độ cụ thể (gọi AI real-time, legacy) ──
+// Trả về { label: 0|1, warningText, floodDepthCm, weather, usingLiveWeather, fetchedAt }
+export async function getFloodPredictionByLocation(lat: number, lon: number) {
+  const res = await apiV1.get<any>('/flood-prediction/by-location', { params: { lat, lon } })
+  return res.data?.data ?? res.data
+}
+
+// ── Lấy dự báo mới nhất từ DB (node gần nhất với tọa độ) ──
+// Endpoint: GET /api/v1/forecasts/latest?lat=&lon=
+// Trả về schema đầy đủ:
+// {
+//   location: string,          – tên node gần nhất + khoảng cách
+//   time: string (ISO),        – thời điểm dự báo trong DB
+//   weather: { temp, prcp, rhum, clouds, description },
+//   prediction: { flood_depth_cm, risk_level, explanation, label, warningText }
+//   usingLiveWeather: boolean
+//   source: 'database' | 'realtime'
+// }
+export async function getForecastLatest(lat: number, lon: number) {
+  const res = await apiV1.get<any>('/forecasts/latest', { params: { lat, lon } })
+  return res.data ?? null
+}
+
+// ── Thời tiết thực tế từ OpenWeatherMap ──
+export async function getLiveWeather(lat: number, lon: number) {
+  const res = await apiV1.get<any>('/weather/live', { params: { lat, lon } })
+  return res.data?.data ?? res.data
+}
+
 export async function getReports(params?: { date?: string; district?: string }) {
   const res = await apiV1.get<any>('/reports', { params })
   return (res.data?.data ?? res.data) as ReportsResponse

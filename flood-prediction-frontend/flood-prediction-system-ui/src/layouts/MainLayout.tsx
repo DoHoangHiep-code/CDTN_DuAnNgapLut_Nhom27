@@ -6,6 +6,7 @@ import { cn } from '../utils/cn'
 import { BRAND_ICON, NAV_ITEMS } from '../utils/nav'
 import { NewsTicker, type NewsTickerItem } from '../components/NewsTicker'
 import { useTranslation } from 'react-i18next'
+import { FloatingChatBotIcon } from '../components/FloatingChatBotIcon'
 
 export function MainLayout() {
   const { user, logout } = useAuth()
@@ -108,6 +109,8 @@ export function MainLayout() {
             </div>
         </div>
       </aside>
+
+      <FloatingChatBotIcon />
 
       <main className="flex w-full min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="flex min-h-0 flex-1 flex-col space-y-5 p-4 sm:p-5">

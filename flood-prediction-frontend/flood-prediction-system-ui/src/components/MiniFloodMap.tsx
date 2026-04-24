@@ -3,7 +3,7 @@ import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from 'react-le
 import type { LatLngExpression } from 'leaflet'
 import type { FloodDistrict, RiskLevel } from '../utils/types'
 import { cn } from '../utils/cn'
-import { depthCmFromRainfall, formatDepthCm } from '../utils/floodDepth'
+import { formatDepthCm } from '../utils/floodDepth'
 import { AlertTriangle, CloudRain, Sun } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -88,7 +88,7 @@ export function MiniFloodMap({
 
   const positions = useMemo(() => {
     const visible = selectedDistrictId ? districts.filter((d) => d.id === selectedDistrictId) : districts
-    return visible.map((d) => ({ id: d.id, name: d.name, risk: d.risk, pos: centroid(d.polygon), mm: d.predictedRainfallMm }))
+    return visible.map((d) => ({ id: d.id, name: d.name, risk: d.risk, pos: centroid(d.polygon), mm: d.predictedRainfallMm, depthCm: d.flood_depth_cm ?? 0 }))
   }, [districts, selectedDistrictId])
 
   return (
@@ -117,7 +117,7 @@ export function MiniFloodMap({
         />
 
         {positions.map((p) => {
-          const depthCm = depthCmFromRainfall(p.mm, p.risk)
+          const depthCm = p.depthCm
           const baseRadius = 5 + depthCm * 0.18 // pixels
           const radarRadius = baseRadius * (0.55 + phase * 1.35)
 
