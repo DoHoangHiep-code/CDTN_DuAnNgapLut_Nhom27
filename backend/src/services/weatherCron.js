@@ -18,9 +18,10 @@ require('dotenv').config()
 
 const cron    = require('node-cron')
 const axios   = require('axios')
+const { getWeatherByCoords } = require('./OpenWeatherService')
 
 // Import models từ index (đã setup associations)
-const { GridNode, FloodPrediction } = require('../models')
+const { GridNode, FloodPrediction, WeatherMeasurement, SystemLog } = require('../models')
 
 // ─── Cấu hình ────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,72 @@ const NODE_CONCURRENCY = 3
 
 /** Số giờ forecast lấy từ Open-Meteo (tối đa 240h = 10 ngày, dùng 96h = 4 ngày) */
 const FORECAST_HOURS = 96
+
+// ─── Bước 0: Đồng bộ weather_measurements từ OpenWeatherMap ───────────────────
+
+/**
+ * Lấy dữ liệu thời tiết hiện tại từ OpenWeather cho toàn bộ node và ghi vào weather_measurements.
+ *
+ * Lưu ý:
+ * - OpenWeather "current weather" chỉ có snapshot hiện tại, không phải forecast nhiều giờ.
+ * - Vì vậy cron sẽ ghi 1 bản ghi/node/lần chạy để tạo chuỗi thời gian trên DB.
+ *
+ * @param {Array<any>} nodes
+ * @returns {Promise<number>} số dòng đã ghi
+ */
+async function ingestCurrentWeatherFromOpenWeather(nodes) {
+  if (!nodes.length) return 0
+
+  const now = new Date()
+  const records = []
+
+  // Chia nhỏ node để không vượt rate limit API.
+  for (let i = 0; i < nodes.length; i += NODE_CONCURRENCY) {
+    const chunk = nodes.slice(i, i + NODE_CONCURRENCY)
+
+    const chunkResults = await Promise.allSettled(
+      chunk.map(async (n) => {
+        const w = await getWeatherByCoords(Number(n.latitude), Number(n.longitude))
+        if (!w) return null
+
+        // Map dữ liệu OpenWeather vào schema weather_measurements.
+        // Vì current API không có các trường tích lũy, tạm lấy gần đúng để model vẫn nhận đủ field.
+        return {
+          node_id: n.node_id,
+          time: now,
+          temp: Number(w.temp) || 0,
+          rhum: Number(w.humidity) || 0,
+          prcp: Number(w.rain1h) || 0,
+          prcp_3h: Number(w.rain1h) || 0,
+          prcp_6h: Number(w.rain1h) || 0,
+          prcp_12h: Number(w.rain1h) || 0,
+          prcp_24h: Number(w.rain1h) || 0,
+          wspd: Number(w.windSpeed) || 0,
+          pres: Number(w.pressure) || 1013,
+        }
+      }),
+    )
+
+    for (const r of chunkResults) {
+      if (r.status === 'fulfilled' && r.value) records.push(r.value)
+    }
+
+    // Delay nhỏ giữa mỗi batch để giảm khả năng dính HTTP 429.
+    if (i + NODE_CONCURRENCY < nodes.length) {
+      await new Promise((resolve) => setTimeout(resolve, 150))
+    }
+  }
+
+  if (!records.length) {
+    console.warn('[WeatherCron] Không lấy được dữ liệu OpenWeather cho node nào.')
+    return 0
+  }
+
+  await WeatherMeasurement.bulkCreate(records)
+  console.log(`[WeatherCron] ✅ Đã ghi ${records.length} dòng vào weather_measurements từ OpenWeather.`)
+
+  return records.length
+}
 
 // ─── Helper: tính risk_level từ flood_depth_cm ───────────────────────────────
 
@@ -286,6 +353,17 @@ async function upsertPredictions(records) {
   })
 
   console.log(`[WeatherCron] ✅ Đã upsert ${records.length} bản ghi vào flood_predictions.`)
+
+  // Ghi log vận hành lên DB để theo dõi lịch sử chạy cron trên cloud (Supabase).
+  // admin_id để null vì đây là tác vụ hệ thống tự động, không phải thao tác của user admin cụ thể.
+  const nowIso = new Date().toISOString()
+  await SystemLog.create({
+    admin_id: null,
+    event_type: 'CRONJOB_WEATHER',
+    event_source: 'services/weatherCron',
+    message: `Cronjob hoàn thành: Đã cập nhật ${records.length} dòng dữ liệu vào ${nowIso}`,
+    timestamp: new Date(),
+  })
 }
 
 // ─── Hàm chính: runWeatherCron ───────────────────────────────────────────────
@@ -302,14 +380,48 @@ async function runWeatherCron() {
 
   try {
     // Bước 1: Lấy danh sách tất cả GridNode từ DB
-    const nodes = await GridNode.findAll({
+    let nodes = await GridNode.findAll({
       attributes: ['node_id', 'latitude', 'longitude', 'elevation', 'slope', 'impervious_ratio'],
     })
 
     if (!nodes.length) {
-      console.warn('[WeatherCron] Không có GridNode nào trong DB. Dừng.')
-      return
+      // Không có node thì không thể gọi OpenWeather theo lat/lng.
+      // Vì đây là dữ liệu "khung" (lưới điểm) chứ KHÔNG phải dữ liệu thời tiết,
+      // ta tự khởi tạo một lưới node mặc định trong phạm vi Hà Nội để hệ thống chạy được end-to-end.
+      console.warn('[WeatherCron] Không có GridNode nào trong DB. Tự khởi tạo lưới node mặc định (Hà Nội)...')
+
+      const minLat = 20.8
+      const maxLat = 21.3
+      const minLng = 105.5
+      const maxLng = 106.0
+      const makePoint = (lng, lat) => ({ type: 'Point', coordinates: [lng, lat] })
+
+      const created = []
+      for (let i = 1; i <= 50; i++) {
+        const lat = Number((minLat + Math.random() * (maxLat - minLat)).toFixed(6))
+        const lng = Number((minLng + Math.random() * (maxLng - minLng)).toFixed(6))
+        created.push({
+          node_id: 100000 + i,
+          latitude: lat,
+          longitude: lng,
+          elevation: Number((Math.random() * 25).toFixed(2)),
+          slope: Number((Math.random() * 10).toFixed(2)),
+          impervious_ratio: Number((0.05 + Math.random() * 0.9).toFixed(3)),
+          geom: makePoint(lng, lat),
+          // Các cột dist_to_* có thể null; query AI sẽ COALESCE về default.
+        })
+      }
+
+      await GridNode.bulkCreate(created)
+      nodes = await GridNode.findAll({
+        attributes: ['node_id', 'latitude', 'longitude', 'elevation', 'slope', 'impervious_ratio'],
+      })
+
+      console.log(`[WeatherCron] ✅ Đã khởi tạo ${nodes.length} GridNode.`)
     }
+
+    // Bước 0: Ghi dữ liệu current weather từ OpenWeather vào DB Supabase.
+    const weatherRowsInserted = await ingestCurrentWeatherFromOpenWeather(nodes.map((n) => n.toJSON()))
 
     console.log(`[WeatherCron] Tổng số node: ${nodes.length}. Xử lý theo nhóm ${NODE_CONCURRENCY}.`)
 
@@ -340,6 +452,15 @@ async function runWeatherCron() {
 
     // Bước 5: Upsert toàn bộ records vào DB
     await upsertPredictions(allRecords)
+
+    // Ghi log riêng cho bước đồng bộ OpenWeather -> Supabase
+    await SystemLog.create({
+      admin_id: null,
+      event_type: 'CRONJOB_OPENWEATHER',
+      event_source: 'services/weatherCron',
+      message: `Cronjob hoàn thành: Đã cập nhật ${weatherRowsInserted} dòng dữ liệu vào ${new Date().toISOString()}`,
+      timestamp: new Date(),
+    })
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
     console.log(`[WeatherCron] 🏁 Hoàn thành sau ${elapsed}s. Tổng: ${allRecords.length} bản ghi.\n`)
