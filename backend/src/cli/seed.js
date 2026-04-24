@@ -115,15 +115,23 @@ async function seedWeatherMeasurements(nodeIds) {
     const node_id = pick(nodeIds)
     const minutesAgo = randInt(0, 24 * 60)
     const time = new Date(base.getTime() - minutesAgo * 60 * 1000)
+    const prcp    = Number(Math.max(0, rand(0, 40)).toFixed(2))
+    const prcp_3h = Number((prcp * rand(1.5, 3.5)).toFixed(2))
+    const prcp_6h = Number((prcp_3h * rand(1.2, 2.0)).toFixed(2))
+    const prcp_12h = Number((prcp_6h * rand(1.1, 1.8)).toFixed(2))
+    const prcp_24h = Number((prcp_12h * rand(1.1, 2.0)).toFixed(2))
     rows.push({
       node_id,
       time,
-      temp: Number(rand(22, 36).toFixed(2)),
-      rhum: Number(rand(45, 98).toFixed(2)),
-      prcp: Number(Math.max(0, rand(-0.2, 8)).toFixed(2)),
-      prcp_3h: null,
-      prcp_24h: null,
-      wspd: Number(rand(0, 35).toFixed(2)),
+      temp:    Number(rand(22, 36).toFixed(2)),
+      rhum:    Number(rand(45, 98).toFixed(2)),
+      wspd:    Number(rand(0, 35).toFixed(2)),
+      pres:    Number(rand(1000, 1020).toFixed(1)),
+      prcp,
+      prcp_3h,
+      prcp_6h,
+      prcp_12h,
+      prcp_24h,
     })
   }
   await WeatherMeasurement.bulkCreate(rows)

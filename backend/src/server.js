@@ -1,16 +1,25 @@
+require('dotenv').config() // Load .env trước tất cả (phải đứng đầu file)
+
 const express = require('express') // Import Express để tạo HTTP server
-const cors = require('cors') // Import CORS để cho phép frontend gọi API khác port (bị browser chặn nếu thiếu)
-const path = require('path') // Import path để build đường dẫn static an toàn
-const { dashboardRouter } = require('./routes/dashboardRoutes') // Router dashboard
-const { mapRouter } = require('./routes/mapRoutes') // Router flood map
-const { weatherRouter } = require('./routes/weatherRoutes') // Router weather
-const { authRouter } = require('./routes/authRoutes') // Router auth
-const { profileRouter } = require('./routes/profileRoutes') // Router profile
-const { adminUserRouter } = require('./routes/adminUserRoutes') // Router admin CRUD users
-const { reportsRouter } = require('./routes/reportsRoutes') // Router reports (actual_flood_reports)
-const { floodPredictionRouter } = require('./routes/floodPredictionRoutes') // Router compat /flood-prediction
+const cors    = require('cors')    // Import CORS để cho phép frontend gọi API khác port
+const path    = require('path')    // Import path để build đường dẫn static an toàn
+
+const { dashboardRouter }      = require('./routes/dashboardRoutes')      // Router dashboard
+const { mapRouter }            = require('./routes/mapRoutes')             // Router flood map
+const { weatherRouter }        = require('./routes/weatherRoutes')         // Router weather
+const { authRouter }           = require('./routes/authRoutes')            // Router auth
+const { profileRouter }        = require('./routes/profileRoutes')         // Router profile
+const { adminUserRouter }      = require('./routes/adminUserRoutes')       // Router admin CRUD users
+const { reportsRouter }        = require('./routes/reportsRoutes')         // Router reports
+const { floodPredictionRouter} = require('./routes/floodPredictionRoutes') // Router compat /flood-prediction
+const { chatbotRouter }        = require('./routes/chatbotRoutes')         // Router chatbot AI
+
+// ── Weather Cronjob ──────────────────────────────────────────────────────────
+// Import service cronjob dự báo ngập lụt mỗi 6 tiếng
+const { startWeatherCron, manualTrigger } = require('./services/weatherCron')
 
 const app = express() // Khởi tạo app Express
+
 // Bật CORS để frontend (Vite) gọi API mà không bị browser chặn (Same-Origin Policy)
 app.use(
   cors({
@@ -18,33 +27,51 @@ app.use(
     credentials: false, // JWT dùng header Bearer nên không cần cookie
   }),
 )
-app.use(express.json()) // Parse JSON body (giới hạn/advanced có thể thêm sau để chống payload lớn)
+app.use(express.json()) // Parse JSON body
 
-app.get('/health', (_req, res) => res.json({ ok: true })) // Health check đơn giản
+// ── Health check ─────────────────────────────────────────────────────────────
+app.get('/health', (_req, res) => res.json({ ok: true }))
 
-app.use('/api/v1', dashboardRouter) // Mount dashboard endpoints
-app.use('/api/v1', mapRouter) // Mount flood map endpoints
-app.use('/api/v1', weatherRouter) // Mount weather endpoints
-app.use('/api/v1', floodPredictionRouter) // Mount endpoint compat để FE không bị 404
-app.use('/api/v1/auth', authRouter) // Mount auth endpoints dưới /api/v1/auth/*
-app.use('/api/v1', profileRouter) // Mount profile endpoints
-app.use('/api/v1', adminUserRouter) // Mount admin endpoints
-app.use('/api/v1', reportsRouter) // Mount reports endpoints
+// ── API Routes ───────────────────────────────────────────────────────────────
+app.use('/api/v1', dashboardRouter)
+app.use('/api/v1', mapRouter)
+app.use('/api/v1', weatherRouter)
+app.use('/api/v1', floodPredictionRouter)
+app.use('/api/v1', chatbotRouter)
+app.use('/api/v1/auth', authRouter)
+app.use('/api/v1', profileRouter)
+app.use('/api/v1', adminUserRouter)
 
-// Serve static uploads để client load avatar_url dạng /uploads/...
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'))) // Cho phép truy cập file avatar qua URL
-
-// Global error handler (keeps controllers thin; prevents leaking stack traces by default)
-// eslint-disable-next-line no-unused-vars
-app.use((err, _req, res, _next) => {
-  const status = Number(err?.statusCode) || 500 // Ưu tiên statusCode nếu service chủ động set (vd: 400/401/403)
-  const message = err instanceof Error ? err.message : 'Unknown error' // Không trả stack trace để giảm lộ nội bộ
-  return res.status(status).json({ success: false, error: { message } }) // Format lỗi thống nhất
+// ── Route kích hoạt Cronjob thủ công (CHỈ dùng khi dev/test) ────────────────
+// QUAN TRỌNG: Phải đặt TRƯỚC reportsRouter vì router.use(verifyToken) bên trong
+// reportsRouter sẽ chặn mọi request không có token (kể cả /cron/trigger).
+// Gọi: GET http://localhost:3002/api/v1/cron/trigger
+app.get('/api/v1/cron/trigger', (_req, res) => {
+  res.json({ success: true, message: 'WeatherCron đang chạy ở background, kiểm tra console để xem tiến độ.' })
+  // Fire-and-forget: trả 200 ngay, cron chạy async
+  manualTrigger().catch((err) => console.error('[CronTrigger] Lỗi:', err))
 })
 
-const port = Number(process.env.PORT || 3002) // Đọc port từ env để dễ deploy
+app.use('/api/v1', reportsRouter)
+
+// ── Serve static uploads ─────────────────────────────────────────────────────
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')))
+
+// ── Global error handler ─────────────────────────────────────────────────────
+// eslint-disable-next-line no-unused-vars
+app.use((err, _req, res, _next) => {
+  const status  = Number(err?.statusCode) || 500
+  const message = err instanceof Error ? err.message : 'Unknown error'
+  return res.status(status).json({ success: false, error: { message } })
+})
+
+// ── Khởi động server ─────────────────────────────────────────────────────────
+const port = Number(process.env.PORT || 3002)
 app.listen(port, () => {
-  // eslint-disable-next-line no-console
-  console.log(`Backend listening on :${port}`) // Log để debug khi chạy local
+  console.log(`Backend listening on :${port}`)
+
+  // Đăng ký Weather Cronjob sau khi server đã listen thành công
+  // → tránh cron chạy trước khi DB connection sẵn sàng
+  startWeatherCron()
 })
 
