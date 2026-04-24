@@ -138,7 +138,7 @@ export function MainLayout() {
       <FloatingChatBotIcon />
 
       <main className="flex w-full min-h-0 flex-1 flex-col overflow-y-auto">
-        <div className="flex min-h-0 flex-1 flex-col space-y-5 p-4 sm:p-5">
+        <div className="flex flex-1 flex-col space-y-5 p-4 sm:p-5">
           <header className="fps-card flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{t('app.brand')}</div>
@@ -174,7 +174,7 @@ export function MainLayout() {
 
           <NewsTicker items={newsItems} />
 
-          <div className="fps-card min-h-0 flex-1 p-4 sm:p-6">
+          <div className="fps-card flex-1 p-4 sm:p-6 mb-8">
             <Outlet />
           </div>
         </div>

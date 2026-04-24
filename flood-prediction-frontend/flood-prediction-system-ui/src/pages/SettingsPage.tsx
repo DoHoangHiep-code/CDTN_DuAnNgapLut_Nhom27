@@ -158,10 +158,10 @@ export function SettingsPage() {
   ]
 
   return (
-    <div className="mx-auto max-w-6xl pb-8 px-4 sm:px-6 lg:px-8">
+    <div className="mx-auto w-full max-w-5xl pb-10">
 
       {/* Page header */}
-      <div className="flex items-center gap-4 mb-8">
+      <div className="flex items-center gap-4 mb-6 px-1">
         <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 shadow-lg shadow-sky-200 dark:shadow-sky-900/40">
           <Settings2 className="h-6 w-6 text-white" />
         </div>
@@ -173,130 +173,134 @@ export function SettingsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-        {/* ── Giao diện ── */}
-      <div className="space-y-2">
-        <SectionHeader icon={<Palette className="h-3.5 w-3.5" />} title={t('settings.appearance')} />
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800/80">
-          <ToggleRow
-            icon={theme === 'dark' ? <Moon className="h-5 w-5 text-indigo-400" /> : <Sun className="h-5 w-5 text-amber-500" />}
-            iconBg={theme === 'dark' ? 'bg-indigo-100 dark:bg-indigo-900/40' : 'bg-amber-100 dark:bg-amber-900/40'}
-            title={t('settings.darkMode')}
-            description={t('settings.darkModeHint')}
-            checked={theme === 'dark'}
-            onChange={toggleTheme}
-            active={theme === 'dark'}
-          />
+      {/* Container toàn bộ (View to) */}
+      <div className="mt-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8 items-start">
+          
+          {/* --- CỘT TRÁI --- */}
+          <div className="space-y-8">
+            {/* ── Giao diện ── */}
+            <div className="space-y-3">
+              <SectionHeader icon={<Palette className="h-4 w-4" />} title={t('settings.appearance')} />
+              <div className="overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 shadow-sm dark:border-slate-800 dark:bg-slate-950 divide-y divide-slate-200/50 dark:divide-slate-800/80">
+                <ToggleRow
+                  icon={theme === 'dark' ? <Moon className="h-5 w-5 text-indigo-400" /> : <Sun className="h-5 w-5 text-amber-500" />}
+                  iconBg={theme === 'dark' ? 'bg-indigo-100 dark:bg-indigo-900/40' : 'bg-amber-100 dark:bg-amber-900/40'}
+                  title={t('settings.darkMode')}
+                  description={t('settings.darkModeHint')}
+                  checked={theme === 'dark'}
+                  onChange={toggleTheme}
+                  active={theme === 'dark'}
+                />
+              </div>
+            </div>
+
+            {/* ── Bản đồ ── */}
+            <div className="space-y-3">
+              <SectionHeader icon={<Map className="h-4 w-4" />} title={t('settings.sectionMap')} />
+              <div className="overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 shadow-sm dark:border-slate-800 dark:bg-slate-950 divide-y divide-slate-200/50 dark:divide-slate-800/80">
+                <ToggleRow
+                  icon={<Layers className="h-5 w-5 text-emerald-500" />}
+                  iconBg="bg-emerald-100 dark:bg-emerald-900/40"
+                  title={t('settings.showRiskOverlay')}
+                  description={t('settings.showRiskOverlayHint')}
+                  checked={showRiskOverlay}
+                  onChange={setShowRiskOverlay}
+                  active={showRiskOverlay}
+                />
+                <ToggleRow
+                  icon={<MapPin className="h-5 w-5 text-rose-500" />}
+                  iconBg="bg-rose-100 dark:bg-rose-900/40"
+                  title={t('settings.showFloodMarkers')}
+                  description={t('settings.showFloodMarkersHint')}
+                  checked={showFloodMarkers}
+                  onChange={setShowFloodMarkers}
+                  active={showFloodMarkers}
+                />
+                <SelectRow<MapStyle>
+                  icon={<Map className="h-5 w-5 text-teal-500" />}
+                  iconBg="bg-teal-100 dark:bg-teal-900/40"
+                  title={t('settings.mapStyle')}
+                  description={t('settings.mapStyleHint')}
+                  options={mapStyleOptions}
+                  value={mapStyle}
+                  onChange={setMapStyle}
+                />
+              </div>
+            </div>
+
+            {/* ── Thông báo ── */}
+            <div className="space-y-3">
+              <SectionHeader icon={<Bell className="h-4 w-4" />} title={t('settings.notifications')} />
+              <div className={cn("overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 shadow-sm dark:border-slate-800 dark:bg-slate-950 divide-y divide-slate-200/50 dark:divide-slate-800/80", alertsLoading && 'pointer-events-none opacity-50')}>
+                <ToggleRow
+                  icon={floodAlertsEnabled
+                    ? <Bell className="h-5 w-5 text-sky-500" />
+                    : <BellOff className="h-5 w-5 text-slate-400" />}
+                  iconBg={floodAlertsEnabled ? 'bg-sky-100 dark:bg-sky-900/40' : 'bg-slate-100 dark:bg-slate-800'}
+                  title={t('settings.floodAlerts')}
+                  description={alertsLoading ? 'Đang cập nhật...' : t('settings.floodAlertsHint')}
+                  checked={floodAlertsEnabled}
+                  onChange={handleAlertToggle}
+                  active={floodAlertsEnabled}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* --- CỘT PHẢI --- */}
+          <div className="space-y-8">
+            {/* ── Ngôn ngữ ── */}
+            <div className="space-y-3">
+              <SectionHeader icon={<Globe className="h-4 w-4" />} title={t('settings.language')} />
+              <div className="overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 shadow-sm dark:border-slate-800 dark:bg-slate-950 divide-y divide-slate-200/50 dark:divide-slate-800/80">
+                <SelectRow<Language>
+                  icon={<Globe className="h-5 w-5 text-violet-500" />}
+                  iconBg="bg-violet-100 dark:bg-violet-900/40"
+                  title={t('settings.language')}
+                  description={t('settings.languageHint')}
+                  options={langOptions}
+                  value={language}
+                  onChange={handleLanguageChange}
+                />
+              </div>
+            </div>
+
+            {/* ── Dự báo ── */}
+            <div className="space-y-3">
+              <SectionHeader icon={<BarChart2 className="h-4 w-4" />} title={t('settings.sectionForecast')} />
+              <div className="overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 shadow-sm dark:border-slate-800 dark:bg-slate-950 divide-y divide-slate-200/50 dark:divide-slate-800/80">
+                <ToggleRow
+                  icon={<Thermometer className="h-5 w-5 text-orange-500" />}
+                  iconBg="bg-orange-100 dark:bg-orange-900/40"
+                  title={t('settings.showFloodDepth')}
+                  description={t('settings.showFloodDepthHint')}
+                  checked={showFloodDepth}
+                  onChange={setShowFloodDepth}
+                  active={showFloodDepth}
+                />
+                <ToggleRow
+                  icon={<BarChart2 className="h-5 w-5 text-blue-500" />}
+                  iconBg="bg-blue-100 dark:bg-blue-900/40"
+                  title={t('settings.showWeatherStats')}
+                  description={t('settings.showWeatherStatsHint')}
+                  checked={showWeatherStats}
+                  onChange={setShowWeatherStats}
+                  active={showWeatherStats}
+                />
+                <SelectRow<RefreshInterval>
+                  icon={<Clock className="h-5 w-5 text-sky-500" />}
+                  iconBg="bg-sky-100 dark:bg-sky-900/40"
+                  title={t('settings.forecastRefresh')}
+                  description={t('settings.forecastRefreshHint')}
+                  options={refreshOptions}
+                  value={forecastRefreshInterval}
+                  onChange={setForecastRefreshInterval}
+                />
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-
-      {/* ── Ngôn ngữ ── */}
-      <div className="space-y-2">
-        <SectionHeader icon={<Globe className="h-3.5 w-3.5" />} title={t('settings.language')} />
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800/80">
-          <SelectRow<Language>
-            icon={<Globe className="h-5 w-5 text-violet-500" />}
-            iconBg="bg-violet-100 dark:bg-violet-900/40"
-            title={t('settings.language')}
-            description={t('settings.languageHint')}
-            options={langOptions}
-            value={language}
-            onChange={handleLanguageChange}
-          />
-        </div>
-      </div>
-
-      {/* ── Bản đồ ── */}
-      <div className="space-y-2">
-        <SectionHeader icon={<Map className="h-3.5 w-3.5" />} title={t('settings.sectionMap')} />
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800/80">
-          <ToggleRow
-            icon={<Layers className="h-5 w-5 text-emerald-500" />}
-            iconBg="bg-emerald-100 dark:bg-emerald-900/40"
-            title={t('settings.showRiskOverlay')}
-            description={t('settings.showRiskOverlayHint')}
-            checked={showRiskOverlay}
-            onChange={setShowRiskOverlay}
-            active={showRiskOverlay}
-          />
-
-          <ToggleRow
-            icon={<MapPin className="h-5 w-5 text-rose-500" />}
-            iconBg="bg-rose-100 dark:bg-rose-900/40"
-            title={t('settings.showFloodMarkers')}
-            description={t('settings.showFloodMarkersHint')}
-            checked={showFloodMarkers}
-            onChange={setShowFloodMarkers}
-            active={showFloodMarkers}
-          />
-
-          <SelectRow<MapStyle>
-            icon={<Map className="h-5 w-5 text-teal-500" />}
-            iconBg="bg-teal-100 dark:bg-teal-900/40"
-            title={t('settings.mapStyle')}
-            description={t('settings.mapStyleHint')}
-            options={mapStyleOptions}
-            value={mapStyle}
-            onChange={setMapStyle}
-          />
-        </div>
-      </div>
-
-      {/* ── Dự báo ── */}
-      <div className="space-y-2">
-        <SectionHeader icon={<BarChart2 className="h-3.5 w-3.5" />} title={t('settings.sectionForecast')} />
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800/80">
-          <ToggleRow
-            icon={<Thermometer className="h-5 w-5 text-orange-500" />}
-            iconBg="bg-orange-100 dark:bg-orange-900/40"
-            title={t('settings.showFloodDepth')}
-            description={t('settings.showFloodDepthHint')}
-            checked={showFloodDepth}
-            onChange={setShowFloodDepth}
-            active={showFloodDepth}
-          />
-
-          <ToggleRow
-            icon={<BarChart2 className="h-5 w-5 text-blue-500" />}
-            iconBg="bg-blue-100 dark:bg-blue-900/40"
-            title={t('settings.showWeatherStats')}
-            description={t('settings.showWeatherStatsHint')}
-            checked={showWeatherStats}
-            onChange={setShowWeatherStats}
-            active={showWeatherStats}
-          />
-
-          <SelectRow<RefreshInterval>
-            icon={<Clock className="h-5 w-5 text-sky-500" />}
-            iconBg="bg-sky-100 dark:bg-sky-900/40"
-            title={t('settings.forecastRefresh')}
-            description={t('settings.forecastRefreshHint')}
-            options={refreshOptions}
-            value={forecastRefreshInterval}
-            onChange={setForecastRefreshInterval}
-          />
-        </div>
-      </div>
-
-      {/* ── Thông báo ── */}
-      <div className="space-y-2">
-        <SectionHeader icon={<Bell className="h-3.5 w-3.5" />} title={t('settings.notifications')} />
-
-        <div className={cn("overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800/80", alertsLoading && 'pointer-events-none opacity-50')}>
-          <ToggleRow
-            icon={floodAlertsEnabled
-              ? <Bell className="h-5 w-5 text-sky-500" />
-              : <BellOff className="h-5 w-5 text-slate-400" />}
-            iconBg={floodAlertsEnabled ? 'bg-sky-100 dark:bg-sky-900/40' : 'bg-slate-100 dark:bg-slate-800'}
-            title={t('settings.floodAlerts')}
-            description={alertsLoading ? 'Đang cập nhật...' : t('settings.floodAlertsHint')}
-            checked={floodAlertsEnabled}
-            onChange={handleAlertToggle}
-            active={floodAlertsEnabled}
-          />
-        </div>
-      </div>
-
       </div>
     </div>
   )
