@@ -1,15 +1,13 @@
 import { useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ChevronLeft, ChevronRight, CloudRain, Droplets, Sun, Thermometer, Wind } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, CloudRain, Droplets, MapPin, RefreshCcw, Sun, Wind } from 'lucide-react'
 import type { LatLngExpression } from 'leaflet'
-import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Card, CardHeader, CardMeta, CardTitle } from '../components/Card'
 import { Spinner } from '../components/Spinner'
 import { ErrorState } from '../components/ErrorState'
 import { MiniFloodMap } from '../components/MiniFloodMap'
 import { LocationSearch } from '../components/LocationSearch'
 import { useAsync } from '../hooks/useAsync'
-import { getFloodPrediction, getWeather } from '../services/api'
+import { getFloodPrediction, getWeather, getForecast7dAI } from '../services/api'
 import type { FloodDistrict, WeatherForecastDay } from '../utils/types'
 import { cn } from '../utils/cn'
 
@@ -22,141 +20,129 @@ function kindFromRainfall(mm: number): WeatherKind {
 }
 
 function centroid(poly: [number, number][]): LatLngExpression {
-  const avg = poly.reduce(
-    (acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }),
-    { lat: 0, lng: 0 },
-  )
+  const avg = poly.reduce((acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }), { lat: 0, lng: 0 })
   return [avg.lat / poly.length, avg.lng / poly.length]
 }
 
 function formatDate(iso: string) {
   const d = new Date(iso)
-  return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+  return d.toLocaleDateString('vi-VN', { weekday: 'short', day: 'numeric', month: 'numeric' })
 }
 
-const KIND_STYLES: Record<
-  WeatherKind,
-  { bgClass: string; icon: string; bg: string; kindKey: string }
-> = {
+function formatDateFull(iso: string) {
+  const d = new Date(iso)
+  return d.toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'long' })
+}
+
+const KIND_CONFIG: Record<WeatherKind, {
+  gradient: string
+  iconColor: string
+  badgeColor: string
+  label: string
+  Icon: typeof CloudRain
+}> = {
   rain: {
-    bg: 'bg-blue-50 dark:bg-blue-950/20',
-    icon: 'text-blue-700 dark:text-blue-300',
-    bgClass: 'fps-weather-bg--rain',
-    kindKey: 'weather.kindRain',
+    gradient: 'from-sky-500 to-blue-600',
+    iconColor: 'text-sky-500',
+    badgeColor: 'bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300',
+    label: 'Mưa',
+    Icon: CloudRain,
   },
   sun: {
-    bg: 'bg-yellow-50 dark:bg-yellow-950/20',
-    icon: 'text-yellow-700 dark:text-yellow-200',
-    bgClass: 'fps-weather-bg--sun',
-    kindKey: 'weather.kindSun',
+    gradient: 'from-amber-400 to-orange-500',
+    iconColor: 'text-amber-500',
+    badgeColor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300',
+    label: 'Nắng',
+    Icon: Sun,
   },
   flood: {
-    bg: 'bg-red-50 dark:bg-red-950/20',
-    icon: 'text-red-700 dark:text-red-300',
-    bgClass: 'fps-weather-bg--flood',
-    kindKey: 'weather.kindFlood',
+    gradient: 'from-rose-500 to-red-600',
+    iconColor: 'text-rose-500',
+    badgeColor: 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300',
+    label: 'Nguy cơ ngập',
+    Icon: AlertTriangle,
   },
 }
 
-function WeatherCardBackground({ kind }: { kind: WeatherKind }) {
-  const cls = KIND_STYLES[kind].bgClass
-  return (
-    <div className={cn('fps-weather-bg', cls)}>
-      {kind === 'rain' ? (
-        <svg viewBox="0 0 120 120" width="72" height="72">
-          <path d="M30 30 L44 44 L30 44 L45 74 L36 74 L45 104 L28 68 L37 68 Z" fill="rgba(2,132,199,0.25)" />
-          <path d="M70 22 L84 36" stroke="rgba(2,132,199,0.25)" strokeWidth="6" strokeLinecap="round" />
-        </svg>
-      ) : kind === 'sun' ? (
-        <svg viewBox="0 0 120 120" width="72" height="72">
-          <circle cx="56" cy="46" r="18" fill="rgba(245,158,11,0.18)" />
-          <path
-            d="M56 14v12M56 64v12M24 46h12M76 46h12M34 26l8 8M70 62l8 8M70 30l-8 8M34 70l8-8"
-            stroke="rgba(245,158,11,0.22)"
-            strokeWidth="6"
-            strokeLinecap="round"
-          />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 120 120" width="72" height="72">
-          <path
-            d="M30 76c6-18 14-30 26-30 14 0 18 12 18 12s10-2 16 10c6 12-4 26-4 26H30Z"
-            fill="rgba(225,29,72,0.20)"
-          />
-          <path d="M60 24l6 10-6 10-6-10Z" fill="rgba(225,29,72,0.22)" />
-        </svg>
-      )}
-    </div>
-  )
+const RISK_CONFIG: Record<string, { label: string; dot: string; text: string }> = {
+  safe:   { label: 'An toàn',    dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400' },
+  medium: { label: 'Trung bình', dot: 'bg-yellow-500',  text: 'text-yellow-600 dark:text-yellow-400' },
+  high:   { label: 'Cao',        dot: 'bg-orange-500',  text: 'text-orange-600 dark:text-orange-400' },
+  severe: { label: 'Nguy hiểm',  dot: 'bg-red-500',     text: 'text-red-600 dark:text-red-400' },
 }
 
-function WeatherIcon3D({ kind }: { kind: WeatherKind }) {
-  const Icon = kind === 'rain' ? CloudRain : kind === 'sun' ? Sun : AlertTriangle
-  return <Icon className={cn('h-8 w-8 fps-3d-icon', KIND_STYLES[kind].icon)} />
-}
-
-function Metric3D({
-  icon,
-  label,
-  value,
-  valueClassName,
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-  valueClassName?: string
+function WeatherForecastCard({ d, aiDay, isFirst }: {
+  d: WeatherForecastDay
+  aiDay?: { flood_depth_cm: number; risk_level: string } | null
+  isFirst?: boolean
 }) {
-  return (
-    <div className="flex min-h-[5.5rem] flex-col justify-center rounded-xl border border-slate-200 bg-white/60 p-3 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/30">
-      <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-        <span className="fps-glass-icon grid h-9 w-9 place-items-center">{icon}</span>
-        {label}
-      </div>
-      <div className={cn('mt-1 text-lg font-extrabold text-slate-900 dark:text-slate-100', valueClassName)}>{value}</div>
-    </div>
-  )
-}
-
-function WeatherForecastCard({ d }: { d: WeatherForecastDay }) {
   const kind = kindFromRainfall(d.rainfallMm)
-  const s = KIND_STYLES[kind]
-  const { t } = useTranslation()
+  const cfg = KIND_CONFIG[kind]
+  const riskCfg = aiDay ? (RISK_CONFIG[aiDay.risk_level] ?? RISK_CONFIG.safe) : null
+  const Icon = cfg.Icon
 
   return (
-    <div
-      className={cn(
-        'relative h-full w-full rounded-2xl border p-4 shadow-sm transition-transform duration-300',
-        'hover:scale-105 hover:shadow-lg dark:text-slate-100',
-        s.bg,
-        'border-slate-200 dark:border-slate-800',
-      )}
-    >
-      <WeatherCardBackground kind={kind} />
+    <div className={cn(
+      'relative flex h-full w-full flex-col overflow-hidden rounded-2xl border transition-all duration-300',
+      'hover:-translate-y-1 hover:shadow-xl',
+      isFirst
+        ? 'border-sky-200 bg-gradient-to-b from-sky-50 to-white shadow-md dark:border-sky-800 dark:from-sky-950/30 dark:to-slate-900'
+        : 'border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900',
+    )}>
+      {/* Color bar top */}
+      <div className={cn('h-1.5 w-full bg-gradient-to-r', cfg.gradient)} />
 
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-extrabold text-slate-900 dark:text-slate-100">{formatDate(d.dateIso)}</div>
-          <div className={cn('mt-1 text-xs font-semibold', s.icon)}>{t(s.kindKey)}</div>
+      <div className="flex flex-1 flex-col gap-3 p-4">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              {formatDate(d.dateIso)}
+            </div>
+            <span className={cn('mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold', cfg.badgeColor)}>
+              <Icon className="h-3 w-3" />
+              {cfg.label}
+            </span>
+          </div>
+          <Icon className={cn('h-8 w-8 flex-shrink-0', cfg.iconColor)} />
         </div>
-        <div className="grid h-12 w-12 place-items-center fps-glass-icon">
-          <WeatherIcon3D kind={kind} />
-        </div>
-      </div>
 
-      <div className="mt-3 space-y-1 text-xs">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-slate-600 dark:text-slate-300">{t('weather.temperature')}</span>
-          <span className="font-semibold text-slate-900 dark:text-slate-100">
-            {d.minTempC}°C – {d.maxTempC}°C
-          </span>
+        {/* Temp big */}
+        <div className="text-center">
+          <div className="text-2xl font-black text-slate-800 dark:text-slate-100">
+            {d.minTempC}° <span className="text-slate-400">–</span> {d.maxTempC}°C
+          </div>
         </div>
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-slate-600 dark:text-slate-300">{t('weather.rainfall')}</span>
-          <span className="font-semibold text-slate-900 dark:text-slate-100">{d.rainfallMm} mm</span>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-slate-600 dark:text-slate-300">{t('weather.humidity')}</span>
-          <span className="font-semibold text-slate-900 dark:text-slate-100">{d.humidityPct}%</span>
+
+        {/* Stats */}
+        <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50">
+          <div className="flex items-center justify-between text-xs">
+            <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+              <CloudRain className="h-3.5 w-3.5 text-sky-500" /> Lượng mưa
+            </span>
+            <span className="font-bold text-sky-600 dark:text-sky-400">{d.rainfallMm} mm</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+              <Droplets className="h-3.5 w-3.5 text-indigo-500" /> Độ ẩm
+            </span>
+            <span className="font-bold text-indigo-600 dark:text-indigo-400">{d.humidityPct}%</span>
+          </div>
+          {aiDay && riskCfg && (
+            <>
+              <div className="flex items-center justify-between border-t border-slate-200/60 pt-2 text-xs dark:border-slate-700/60">
+                <span className="text-slate-500 dark:text-slate-400">Độ ngập (AI)</span>
+                <span className="font-bold text-slate-700 dark:text-slate-200">{aiDay.flood_depth_cm} cm</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500 dark:text-slate-400">Rủi ro</span>
+                <span className={cn('flex items-center gap-1 font-bold', riskCfg.text)}>
+                  <span className={cn('h-1.5 w-1.5 rounded-full', riskCfg.dot)} />
+                  {riskCfg.label}
+                </span>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -180,6 +166,7 @@ export function WeatherPage() {
   }, [flood.data, districtFilter])
 
   const weather = useAsync(() => getWeather({ district: selectedDistrict?.name }), [selectedDistrict?.name])
+  const forecast7dAI = useAsync(getForecast7dAI, [])
 
   const center = useMemo<LatLngExpression>(() => {
     const first = flood.data?.districts?.[0]
@@ -187,77 +174,103 @@ export function WeatherPage() {
     return centroid(first.polygon)
   }, [flood.data])
 
-  const forecast7d = weather.data?.forecast7d ?? []
+  const forecast7d = forecast7dAI.data && forecast7dAI.data.length > 0
+    ? forecast7dAI.data.map((d) => ({
+        dateIso: d.dateIso,
+        minTempC: d.minTempC,
+        maxTempC: d.maxTempC,
+        rainfallMm: d.rainfallMm,
+        humidityPct: d.humidityPct,
+      }))
+    : (weather.data?.forecast7d ?? [])
 
   function scrollForecast(dir: -1 | 1) {
-    const el = forecastScrollRef.current
-    if (!el) return
-    el.scrollBy({ left: dir * 300, behavior: 'smooth' })
+    forecastScrollRef.current?.scrollBy({ left: dir * 280, behavior: 'smooth' })
   }
 
-  if (flood.loading || weather.loading) return <Spinner label="Loading weather…" />
+  if (flood.loading || weather.loading || forecast7dAI.loading) return <Spinner label="Loading weather…" />
   if (flood.error) return <ErrorState error={flood.error} onRetry={flood.reload} />
   if (weather.error) return <ErrorState error={weather.error} onRetry={weather.reload} />
   if (!flood.data || !weather.data) return null
 
   const current = weather.data.current
   const currentKind = kindFromRainfall(current.rainfallMm)
+  const currentCfg = KIND_CONFIG[currentKind]
+  const CurrentIcon = currentCfg.Icon
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100">{t('weather.title')}</h2>
-        <p className="text-sm text-slate-600 dark:text-slate-300">{t('weather.helpLine')}</p>
+    <div className="space-y-5">
+      {/* Page header */}
+      <div className="flex items-end justify-between">
+        <div>
+          <h2 className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100">{t('weather.title')}</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t('weather.helpLine')}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { void weather.reload(); void forecast7dAI.reload() }}
+          className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+        >
+          <RefreshCcw className="h-3.5 w-3.5" /> Làm mới
+        </button>
       </div>
 
-      <div className="flex gap-4 items-start">
-        <div className="w-72 min-w-0">
-          <Card className="relative flex min-h-fit w-full flex-col gap-3 overflow-hidden">
-            <WeatherCardBackground kind={currentKind} />
+      {/* Top section: 2 ô vuông bằng nhau */}
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:max-w-2xl">
 
-            <CardHeader>
-              <div>
-                <CardTitle>{t('weather.currentWeather')}</CardTitle>
-                <CardMeta>{current.locationName}</CardMeta>
+        {/* Ô 1 — Thời tiết hiện tại, hình vuông */}
+        <div className="aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex h-full flex-col">
+            {/* Gradient header ~45% */}
+            <div className={cn('flex flex-1 flex-col justify-between bg-gradient-to-br p-5 text-white', currentCfg.gradient)}>
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-widest text-white/70">Thời tiết hiện tại</div>
+                  <div className="mt-1 flex items-center gap-1.5 text-sm font-bold">
+                    <MapPin className="h-4 w-4 opacity-80" />
+                    {current.locationName}
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-white/20 p-3 backdrop-blur">
+                  <CurrentIcon className="h-8 w-8 text-white" />
+                </div>
               </div>
-              <WeatherIcon3D kind={currentKind} />
-            </CardHeader>
-
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <Metric3D
-                icon={<Thermometer className="h-5 w-5 fps-3d-icon text-orange-500" />}
-                label={t('weather.temperature')}
-                value={`${current.temperatureC} °C`}
-                valueClassName="text-orange-600 dark:text-orange-400"
-              />
-              <Metric3D
-                icon={<Droplets className="h-5 w-5 fps-3d-icon text-sky-600" />}
-                label={t('weather.humidity')}
-                value={`${current.humidityPct} %`}
-                valueClassName="text-sky-600 dark:text-sky-400"
-              />
-              <Metric3D
-                icon={<Wind className="h-5 w-5 fps-3d-icon text-cyan-600" />}
-                label={t('weather.wind')}
-                value={`${current.windKph} km/h`}
-                valueClassName="text-cyan-700 dark:text-cyan-300"
-              />
-              <Metric3D
-                icon={<CloudRain className="h-5 w-5 fps-3d-icon text-indigo-600" />}
-                label={t('weather.rainfall')}
-                value={`${current.rainfallMm} mm`}
-                valueClassName="text-indigo-700 dark:text-indigo-300"
-              />
+              <div>
+                <div className="text-6xl font-black tracking-tight">
+                  {current.temperatureC}°<span className="text-4xl">C</span>
+                </div>
+                <div className="mt-1 text-sm font-medium text-white/80">{currentCfg.label}</div>
+              </div>
             </div>
 
-            <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-              {t('weather.updated')} {new Date(current.observedAtIso).toLocaleString()}
+            {/* Stats */}
+            <div className="grid grid-cols-3 divide-x divide-slate-100 dark:divide-slate-800">
+              <div className="flex flex-col items-center gap-1 py-4">
+                <Droplets className="h-5 w-5 text-sky-500" />
+                <div className="text-base font-extrabold text-sky-600 dark:text-sky-400">{current.humidityPct}%</div>
+                <div className="text-[11px] text-slate-500">Độ ẩm</div>
+              </div>
+              <div className="flex flex-col items-center gap-1 py-4">
+                <Wind className="h-5 w-5 text-cyan-500" />
+                <div className="text-base font-extrabold text-cyan-600 dark:text-cyan-400">{current.windKph}</div>
+                <div className="text-[11px] text-slate-500">km/h</div>
+              </div>
+              <div className="flex flex-col items-center gap-1 py-4">
+                <CloudRain className="h-5 w-5 text-indigo-500" />
+                <div className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">{current.rainfallMm}</div>
+                <div className="text-[11px] text-slate-500">mm mưa</div>
+              </div>
             </div>
-          </Card>
+
+            <div className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-400 dark:border-slate-800">
+              Cập nhật {new Date(current.observedAtIso).toLocaleString('vi-VN')}
+            </div>
+          </div>
         </div>
 
-        <div className="w-72 min-w-0 flex flex-col gap-3">
-          <div className="flex items-start justify-between gap-3">
+        {/* Ô 2 — Bản đồ, hình vuông */}
+        <div className="flex aspect-square flex-col gap-2">
+          <div className="flex items-center gap-2">
             <div className="min-w-0 flex-1">
               <LocationSearch
                 id="weather-location-search"
@@ -270,66 +283,75 @@ export function WeatherPage() {
                 onSelectDistrict={(d) => setMapFlyTo(centroid(d.polygon))}
               />
             </div>
-            <div className="flex shrink-0 flex-col items-end pt-5">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{t('weather.detected')}:</span>
-              <span className="max-w-[7rem] truncate text-sm font-extrabold text-slate-900 dark:text-slate-100">
-                {selectedDistrict?.name ?? '-'}
-              </span>
-            </div>
+            {selectedDistrict && (
+              <div className="flex shrink-0 flex-col items-end">
+                <span className="text-[11px] font-semibold text-slate-400">Đang chọn</span>
+                <span className="max-w-[8rem] truncate text-sm font-extrabold text-slate-800 dark:text-slate-100">
+                  {selectedDistrict.name}
+                </span>
+              </div>
+            )}
           </div>
-
-          <MiniFloodMap
-            districts={flood.data.districts}
-            selectedDistrictId={selectedDistrict?.id}
-            center={center}
-            zoom={12}
-            flyTo={mapFlyTo}
-          />
+          {/* Map chiếm phần còn lại của ô vuông — override aspect-square bằng h-full */}
+          <div className="min-h-0 flex-1">
+            <MiniFloodMap
+              districts={flood.data.districts}
+              selectedDistrictId={selectedDistrict?.id}
+              center={center}
+              zoom={12}
+              flyTo={mapFlyTo}
+              className="!aspect-auto h-full w-full"
+            />
+          </div>
         </div>
       </div>
 
-      <Card className="overflow-hidden">
-        <CardHeader>
+      {/* 7-day forecast */}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        {/* Section header */}
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
           <div>
-            <CardTitle>{t('weather.sevenDayForecast')}</CardTitle>
-            <CardMeta>Pastel cards, desktop.</CardMeta>
-          </div>
-        </CardHeader>
-
-        <div className="relative min-w-0">
-          <button
-            type="button"
-            onClick={() => scrollForecast(-1)}
-            className="absolute -left-2 top-1/2 z-10 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-700 shadow-md backdrop-blur hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:bg-slate-800 sm:flex"
-            aria-label="Previous"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => scrollForecast(1)}
-            className="absolute -right-2 top-1/2 z-10 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-700 shadow-md backdrop-blur hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:bg-slate-800 sm:flex"
-            aria-label="Next"
-          >
-            <ChevronRight className="h-5 w-5" />
-          </button>
-          <div
-            ref={forecastScrollRef}
-            className="overflow-x-auto snap-x pb-4 scroll-pl-4 scroll-pr-4 scrollbar-hide"
-          >
-            <div className="flex w-max gap-4">
-              {forecast7d.map((d) => (
-                <div key={d.dateIso} className="min-w-[200px] w-64 shrink-0 snap-start">
-                  <WeatherForecastCard d={d} />
-                </div>
-              ))}
+            <div className="text-sm font-extrabold text-slate-900 dark:text-slate-100">{t('weather.sevenDayForecast')}</div>
+            <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              {formatDateFull(forecast7d[0]?.dateIso ?? new Date().toISOString())} →{' '}
+              {formatDateFull(forecast7d[forecast7d.length - 1]?.dateIso ?? new Date().toISOString())}
             </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {forecast7dAI.data && forecast7dAI.data.length > 0 && (
+              <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                ✦ AI CatBoost
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => scrollForecast(-1)}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollForecast(1)}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
           </div>
         </div>
 
-        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">{t('weather.dataSource')}</div>
-      </Card>
+        {/* Cards scroll */}
+        <div
+          ref={forecastScrollRef}
+          className="flex gap-4 overflow-x-auto scroll-smooth p-5 scrollbar-hide"
+        >
+          {forecast7d.map((d, i) => (
+            <div key={d.dateIso} className="w-48 min-w-[180px] shrink-0">
+              <WeatherForecastCard d={d} aiDay={forecast7dAI.data?.[i] ?? null} isFirst={i === 0} />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
-
