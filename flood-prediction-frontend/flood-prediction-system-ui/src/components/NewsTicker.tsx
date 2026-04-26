@@ -24,7 +24,7 @@ export function NewsTicker({ items }: { items: NewsTickerItem[] }) {
                 key={`${item.id}_${k}`}
                 className={cn(
                   'text-sm font-semibold',
-                  item.severity === 'danger' ? 'text-rose-100' : item.severity === 'warning' ? 'text-amber-100' : 'text-sky-100',
+                  item.severity === 'danger' ? 'text-white' : item.severity === 'warning' ? 'text-white' : 'text-white',
                 )}
               >
                 {item.text}

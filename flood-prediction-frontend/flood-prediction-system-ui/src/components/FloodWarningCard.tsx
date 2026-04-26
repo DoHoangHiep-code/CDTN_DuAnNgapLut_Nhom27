@@ -144,7 +144,11 @@ export function FloodWarningCard({ lat, lon }: Props) {
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState<string | null>(null)
   const [reportOpen, setReportOpen] = useState(false)
-  const [collapsed, setCollapsed]   = useState(false)
+  const [collapsed, setCollapsed]   = useState(true) // mặc định thu gọn
+  const [hovered, setHovered]       = useState(false)
+
+  // Khi hover → mở full; rời chuột → thu gọn lại (trừ khi user đã pin mở bằng nút)
+  const isExpanded = hovered || !collapsed
   const abortRef = useRef<AbortController | null>(null)
 
   // Debounce tọa độ 900ms để tránh spam API khi drag map
@@ -244,6 +248,8 @@ export function FloodWarningCard({ lat, lon }: Props) {
           bgClass,
         )}
         style={{ pointerEvents: 'auto' }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
         {/* ── Header ── */}
         <div className="flex items-center justify-between px-4 pt-3 pb-2">
@@ -288,16 +294,16 @@ export function FloodWarningCard({ lat, lon }: Props) {
             <button
               type="button"
               onClick={() => setCollapsed((c) => !c)}
-              title={collapsed ? 'Mở rộng' : 'Thu gọn'}
+              title={collapsed ? 'Ghim mở' : 'Bỏ ghim'}
               className="rounded-lg p-1 text-white/70 hover:bg-white/20 hover:text-white transition text-sm leading-none"
             >
-              {collapsed ? '▾' : '▴'}
+              {collapsed ? '📌' : '✕'}
             </button>
           </div>
         </div>
 
-        {/* ── Body – có thể thu gọn ── */}
-        {!collapsed && (
+        {/* ── Body – mở khi hover hoặc khi user pin mở ── */}
+        {isExpanded && (
           <div className="px-4 pb-4 space-y-3">
 
             {/* Warning text lớn + depth */}
