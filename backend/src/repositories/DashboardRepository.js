@@ -49,7 +49,7 @@ class DashboardRepository {
    * 24h hourly forecast: mưa (prcp) + độ ngập dự đoán (flood_depth_cm), bucket theo local hour.
    *
    * CRITICAL:
-   * - Không aggregate trong JS (để DB làm).
+   * - Dùng date_trunc() thay time_bucket() vì Supabase chạy PostgreSQL vanilla (không có TimescaleDB).
    * - Trả đúng field: time, prcp, flood_depth_cm (để tooltip dashboard hiển thị).
    */
   async getRainForecast24h() {
@@ -57,14 +57,14 @@ class DashboardRepository {
     const sql = `
       WITH wm_bucket AS (
         SELECT
-          time_bucket('1 hour', (wm.time AT TIME ZONE :tz)) AS bucket_local,
+          date_trunc('hour', (wm.time AT TIME ZONE :tz)) AS bucket_local,
           wm.prcp
         FROM weather_measurements wm
         WHERE wm.time >= now() - interval '24 hours'
       ),
       fp_bucket AS (
         SELECT
-          time_bucket('1 hour', (fp.time AT TIME ZONE :tz)) AS bucket_local,
+          date_trunc('hour', (fp.time AT TIME ZONE :tz)) AS bucket_local,
           fp.flood_depth_cm
         FROM flood_predictions fp
         WHERE fp.time >= now() - interval '24 hours'

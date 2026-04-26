@@ -13,12 +13,15 @@ class WeatherController {
       const lngRaw = req.query.lng
       const district = typeof req.query.district === 'string' ? req.query.district : undefined
 
-      // Tương thích UI hiện tại: Dashboard/WeatherPage đang gọi /weather?district=...
-      // Nếu thiếu lat/lng thì trả dữ liệu demo theo district để tránh 400 làm UI crash.
+      // Yêu cầu bắt buộc lat/lng để query Supabase thay vì trả dữ liệu giả.
+      // Dashboard gọi /api/v1/weather không có tham số → backend trả 400, UI dùng dữ liệu từ /dashboard
       if (latRaw == null || lngRaw == null) {
-        const { buildWeather } = require('../utils/demoData') // require trong function để tránh vòng import
-        const demo = buildWeather(district)
-        return res.status(200).json({ success: true, data: demo })
+        return res.status(400).json({
+          success: false,
+          error: {
+            message: 'Tham số lat và lon là bắt buộc. Ví dụ: /weather?lat=21.02&lon=105.83',
+          },
+        })
       }
 
       const lat = Number(latRaw)
