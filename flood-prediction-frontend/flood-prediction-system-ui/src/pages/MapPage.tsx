@@ -18,6 +18,20 @@ import Supercluster from 'supercluster'
 import { LocationSearch, type NominatimResult } from '../components/LocationSearch'
 import { FloodReportModal } from '../components/FloodReportModal'
 import { FloodWarningCard } from '../components/FloodWarningCard'
+import { useSettings } from '../context/SettingsContext'
+
+// Tile URLs cho từng kiểu bản đồ
+const TILE_URLS: Record<string, string> = {
+  streets: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+}
+
+const TILE_ATTRIBUTIONS: Record<string, string> = {
+  streets: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  satellite: '&copy; <a href="https://www.esri.com/">Esri</a>',
+  terrain: '&copy; <a href="https://opentopomap.org">OpenTopoMap</a>',
+}
 
 // ───────────────────────────────────────────────────────────────
 // Màu sắc vùng ngập
@@ -307,6 +321,7 @@ function MapBridge({ onMap, onCenter }: { onMap: (m: L.Map) => void; onCenter: (
 // ───────────────────────────────────────────────────────────────
 export function MapPage() {
   const { t } = useTranslation()
+  const { showRiskOverlay, showFloodMarkers, mapStyle } = useSettings()
   const flood = useAsync(getFloodPrediction, [])
   const weather = useAsync(getWeather, [])
 
@@ -457,8 +472,8 @@ export function MapPage() {
               className="h-[32rem] w-full"
             >
               <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution={TILE_ATTRIBUTIONS[mapStyle]}
+                url={TILE_URLS[mapStyle]}
               />
 
               {/* Cầu nối để lấy Leaflet map instance và theo dõi center map */}
@@ -476,16 +491,18 @@ export function MapPage() {
               {/* Reverse geocoding: click bản đồ → hiện địa chỉ + báo cáo */}
               <ReverseGeocodeLayer onOpenReport={() => setReportModalOpen(true)} />
 
-              {/* Các điểm ngập (có clustering) */}
-              <FloodClustersLayer
-                points={floodPoints}
-                onSelectPoint={(p) => {
-                  map?.flyTo(p.position, 15, { animate: true, duration: 0.6 })
-                }}
-                onSelectCluster={(lat, lng, nextZoom) => {
-                  map?.flyTo([lat, lng], nextZoom, { animate: true, duration: 0.4 })
-                }}
-              />
+              {/* Các điểm ngập (có clustering) — ẩn khi tắt showFloodMarkers */}
+              {showFloodMarkers && (
+                <FloodClustersLayer
+                  points={showRiskOverlay ? floodPoints : []}
+                  onSelectPoint={(p) => {
+                    map?.flyTo(p.position, 15, { animate: true, duration: 0.6 })
+                  }}
+                  onSelectCluster={(lat, lng, nextZoom) => {
+                    map?.flyTo([lat, lng], nextZoom, { animate: true, duration: 0.4 })
+                  }}
+                />
+              )}
             </MapContainer>
           </div>
         </div>
