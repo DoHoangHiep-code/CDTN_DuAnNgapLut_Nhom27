@@ -5,6 +5,7 @@ module.exports = (sequelize) => {
     'GridNode',
     {
       node_id: { type: DataTypes.BIGINT, primaryKey: true, allowNull: false },
+      district_name: { type: DataTypes.STRING(255), allowNull: true },
       latitude: { type: DataTypes.DECIMAL(9, 6), allowNull: false },
       longitude: { type: DataTypes.DECIMAL(9, 6), allowNull: false },
       elevation: { type: DataTypes.DECIMAL(6, 2), allowNull: false },

@@ -83,18 +83,38 @@ async function seedUsers() {
   return users
 }
 
-async function seedGridNodes() {
-  const minLat = 20.8
-  const maxLat = 21.3
-  const minLng = 105.5
-  const maxLng = 106.0
+// Tên 30 quận/huyện Hà Nội — mỗi node được gán 1 quận theo vòng tròn
+const HANOI_DISTRICTS = [
+  'Ba Đình', 'Hoàn Kiếm', 'Tây Hồ', 'Long Biên', 'Cầu Giấy',
+  'Đống Đa', 'Hai Bà Trưng', 'Hoàng Mai', 'Thanh Xuân', 'Sóc Sơn',
+  'Đông Anh', 'Gia Lâm', 'Nam Từ Liêm', 'Thanh Trì', 'Bắc Từ Liêm',
+  'Mê Linh', 'Hà Đông', 'Sơn Tây', 'Ba Vì', 'Phúc Thọ',
+  'Đan Phượng', 'Hoài Đức', 'Quốc Oai', 'Thạch Thất', 'Chương Mỹ',
+  'Thanh Oai', 'Thường Tín', 'Phú Xuyên', 'Ứng Hòa', 'Mỹ Đức',
+]
 
+// Tọa độ trung tâm tương ứng với từng quận (lat, lng)
+const DISTRICT_CENTERS = [
+  [21.0340, 105.8412], [21.0278, 105.8520], [21.0745, 105.8200], [21.0612, 105.8989], [21.0319, 105.7900],
+  [21.0198, 105.8460], [21.0008, 105.8630], [20.9722, 105.8680], [20.9937, 105.8100], [21.2489, 105.8429],
+  [21.1624, 105.8468], [21.0240, 105.9380], [20.9870, 105.7680], [20.9310, 105.8560], [21.0630, 105.7650],
+  [21.1870, 105.7430], [20.9590, 105.7820], [21.1347, 105.5060], [21.1950, 105.4000], [21.1060, 105.5550],
+  [21.0800, 105.6800], [21.0380, 105.7400], [20.9780, 105.6500], [21.0660, 105.6400], [20.9420, 105.7200],
+  [20.9040, 105.7730], [20.8760, 105.8560], [20.8200, 105.8880], [20.8020, 105.7780], [20.7370, 105.7150],
+]
+
+async function seedGridNodes() {
   const nodes = []
   for (let i = 1; i <= 50; i++) {
-    const lat = Number(rand(minLat, maxLat).toFixed(6))
-    const lng = Number(rand(minLng, maxLng).toFixed(6))
+    const districtIdx = (i - 1) % HANOI_DISTRICTS.length
+    const [baseLat, baseLng] = DISTRICT_CENTERS[districtIdx]
+    // Thêm nhiễu nhỏ để mỗi node trong cùng quận có tọa độ khác nhau
+    const jitter = 0.008
+    const lat = Number((baseLat + (Math.random() - 0.5) * jitter).toFixed(6))
+    const lng = Number((baseLng + (Math.random() - 0.5) * jitter).toFixed(6))
     nodes.push({
       node_id: 100000 + i,
+      district_name: HANOI_DISTRICTS[districtIdx],
       latitude: lat,
       longitude: lng,
       elevation: Number(rand(0, 25).toFixed(2)),

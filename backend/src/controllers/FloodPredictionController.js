@@ -11,7 +11,7 @@ function nodeToDistrict(node, prediction) {
   const s = GRID_SIZE
   return {
     id: `node_${node.node_id}`,
-    name: node.name || `Node ${node.node_id}`,
+    name: node.district_name || `Node ${node.node_id}`,
     risk: prediction.risk_level,
     predictedRainfallMm: Number(node.prcp) || 0,
     flood_depth_cm: prediction.flood_depth_cm,
