@@ -18,6 +18,16 @@ require('dotenv').config()
 
 const cron    = require('node-cron')
 const axios   = require('axios')
+const axiosRetry = require('axios-retry').default || require('axios-retry')
+
+axiosRetry(axios, {
+  retries: 3,
+  retryDelay: axiosRetry.exponentialDelay,
+  retryCondition: (error) => {
+    return error.code === 'ECONNABORTED' || axiosRetry.isNetworkOrIdempotentRequestError(error);
+  }
+})
+
 const { getWeatherByCoords } = require('./OpenWeatherService')
 
 // Import models từ index (đã setup associations)
@@ -194,16 +204,17 @@ async function fetchOpenMeteoForecast(lat, lng) {
 // ─── Bước 3: Gọi AI FastAPI ──────────────────────────────────────────────────
 
 /**
- * Gọi AI FastAPI microservice để lấy flood_depth_cm.
+ * Gọi AI FastAPI microservice theo batch để lấy mảng flood_depth_cm.
  *
- * @param {object} features – object thời tiết theo schema AI service
- * @returns {Promise<number|null>} flood_depth_cm hoặc null nếu AI không khả dụng
+ * @param {Array} featuresArray – mảng các object thời tiết theo schema AI service
+ * @returns {Promise<Array|null>} mảng kết quả hoặc null nếu lỗi
  */
-async function callAIPredict(features) {
+async function callAIPredictBatch(featuresArray) {
+  if (!featuresArray || !featuresArray.length) return [];
   try {
     const res = await axios.post(
-      `${AI_SERVICE_URL}/api/predict`,
-      features,
+      `${AI_SERVICE_URL}/api/predict/batch`,
+      featuresArray,
       {
         timeout: AI_TIMEOUT_MS,
         headers: { 'Content-Type': 'application/json' },
@@ -212,13 +223,12 @@ async function callAIPredict(features) {
       }
     )
 
-    const depth = res.data?.flood_depth_cm
-    if (typeof depth !== 'number') {
+    if (!Array.isArray(res.data)) {
       console.error('[WeatherCron] AI trả về dữ liệu không hợp lệ:', res.data)
       return null
     }
 
-    return depth
+    return res.data
   } catch (err) {
     if (err.code === 'ECONNABORTED') {
       console.warn(`[WeatherCron] AI timeout sau ${AI_TIMEOUT_MS}ms.`)
@@ -259,6 +269,8 @@ async function processNode(node) {
   const wspds   = hourly.wind_speed_10m          // km/h
 
   const records = []
+  const featuresArray = []
+  const originalData = []
 
   for (let i = 0; i < Math.min(times.length, FORECAST_HOURS); i++) {
     const forecastTime = new Date(times[i])
@@ -276,21 +288,33 @@ async function processNode(node) {
     // Open-Meteo trả km/h → chuyển sang m/s để đồng nhất với feature AI
     const wspd   = (wspds[i] ?? 0) / 3.6
 
+    // Tính lượng mưa trượt (sliding window)
+    let prcp_3h = 0, prcp_6h = 0, prcp_12h = 0, prcp_24h = 0;
+    for (let j = 0; j < 24; j++) {
+      if (i - j >= 0) {
+        const p = prcps[i - j] ?? 0;
+        if (j < 3) prcp_3h += p;
+        if (j < 6) prcp_6h += p;
+        if (j < 12) prcp_12h += p;
+        prcp_24h += p;
+      }
+    }
+
     // Build feature object khớp với schema AI FastAPI (xem FloodAIService.js)
     const features = {
       prcp,
-      prcp_3h:              prcp,   // Không có tích luỹ từ forecast đơn giản → dùng prcp hiện tại
-      prcp_6h:              prcp,
-      prcp_12h:             prcp,
-      prcp_24h:             prcp,
+      prcp_3h,
+      prcp_6h,
+      prcp_12h,
+      prcp_24h,
       temp,
       rhum,
       wspd,
       pres,
       pressure_change_24h:  0,      // Không tính được từ forecast đơn giản
-      max_prcp_3h:          prcp,
-      max_prcp_6h:          prcp,
-      max_prcp_12h:         prcp,
+      max_prcp_3h:          prcp_3h, // ước lượng
+      max_prcp_6h:          prcp_6h, // ước lượng
+      max_prcp_12h:         prcp_12h, // ước lượng
       elevation:            Number(elevation)         || 5,
       slope:                Number(slope)             || 1,
       impervious_ratio:     Number(impervious_ratio)  || 0.5,
@@ -310,13 +334,22 @@ async function processNode(node) {
       rainy_season_flag: rainyMonths.includes(month) ? 1 : 0,
     }
 
-    // Bước 3: Gọi AI FastAPI
-    const depthCm = await callAIPredict(features)
+    featuresArray.push(features)
+    originalData.push({ forecastTime, prcp, temp })
+  }
 
-    // Nếu AI không phản hồi → bỏ qua giờ này (không insert null)
-    if (depthCm === null) continue
+  // Bước 3: Gọi AI FastAPI batch mode
+  const batchResults = await callAIPredictBatch(featuresArray)
+  if (!batchResults) {
+    console.warn(`[WeatherCron] Bỏ qua node ${node_id} – lỗi gọi AI batch.`)
+    return []
+  }
 
-    // Bước 4: Tính risk_level + sinh explanation
+  // Bước 4: Tính risk_level + sinh explanation
+  for (let i = 0; i < batchResults.length; i++) {
+    const depthCm = batchResults[i].flood_depth_cm;
+    const { forecastTime, prcp, temp } = originalData[i];
+
     const riskLevel   = calcRiskLevel(depthCm)
     const explanation = buildExplanation({ riskLevel, depthCm, prcp, temp })
 
@@ -396,21 +429,31 @@ async function runWeatherCron() {
       const maxLng = 106.0
       const makePoint = (lng, lat) => ({ type: 'Point', coordinates: [lng, lat] })
 
-      const created = []
-      for (let i = 1; i <= 50; i++) {
-        const lat = Number((minLat + Math.random() * (maxLat - minLat)).toFixed(6))
-        const lng = Number((minLng + Math.random() * (maxLng - minLng)).toFixed(6))
-        created.push({
-          node_id: 100000 + i,
-          latitude: lat,
-          longitude: lng,
-          elevation: Number((Math.random() * 25).toFixed(2)),
-          slope: Number((Math.random() * 10).toFixed(2)),
-          impervious_ratio: Number((0.05 + Math.random() * 0.9).toFixed(3)),
-          geom: makePoint(lng, lat),
-          // Các cột dist_to_* có thể null; query AI sẽ COALESCE về default.
-        })
-      }
+      const hotspots = [
+        { lat: 21.0253, lng: 105.8435 }, // Phan Bội Châu - Lý Thường Kiệt
+        { lat: 21.0118, lng: 105.8201 }, // Ngã tư Tây Sơn - Thái Hà
+        { lat: 21.0310, lng: 105.7992 }, // Phố Hoa Bằng
+        { lat: 21.0298, lng: 105.8385 }, // Nguyễn Khuyến - Cổng trường Lý Thường Kiệt
+        { lat: 21.0428, lng: 105.8285 }, // Thụy Khuê - Dốc La Pho
+        { lat: 20.9997, lng: 105.8675 }, // Minh Khai - Chân cầu Vĩnh Tuy
+        { lat: 20.9952, lng: 105.8115 }, // Nguyễn Trãi - Trước ĐH KHXH&NV
+        { lat: 21.0025, lng: 105.7465 }, // Đại lộ Thăng Long - Ngã ba Lê Trọng Tấn
+        { lat: 21.0445, lng: 105.8755 }, // Ngọc Lâm - Long Biên 1
+        { lat: 21.0555, lng: 105.7825 }, // Phạm Văn Đồng - Ngã ba Xuân Đỉnh
+        { lat: 20.9845, lng: 105.8423 }, // Giải Phóng - Bến xe Giáp Bát
+        { lat: 20.9912, lng: 105.7952 }, // Phùng Khoang
+        { lat: 21.1416, lng: 105.8973 }, // Xã Thư Lâm
+      ]
+
+      const created = hotspots.map((pt, index) => ({
+        node_id: 100000 + index + 1,
+        latitude: pt.lat,
+        longitude: pt.lng,
+        elevation: Number((Math.random() * 25).toFixed(2)),
+        slope: Number((Math.random() * 10).toFixed(2)),
+        impervious_ratio: Number((0.05 + Math.random() * 0.9).toFixed(3)),
+        geom: makePoint(pt.lng, pt.lat),
+      }))
 
       await GridNode.bulkCreate(created)
       nodes = await GridNode.findAll({

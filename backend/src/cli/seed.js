@@ -84,25 +84,31 @@ async function seedUsers() {
 }
 
 async function seedGridNodes() {
-  const minLat = 20.8
-  const maxLat = 21.3
-  const minLng = 105.5
-  const maxLng = 106.0
+  const hotspots = [
+    { lat: 21.0253, lng: 105.8435 }, // Phan Bội Châu - Lý Thường Kiệt
+    { lat: 21.0118, lng: 105.8201 }, // Ngã tư Tây Sơn - Thái Hà
+    { lat: 21.0310, lng: 105.7992 }, // Phố Hoa Bằng
+    { lat: 21.0298, lng: 105.8385 }, // Nguyễn Khuyến - Cổng trường Lý Thường Kiệt
+    { lat: 21.0428, lng: 105.8285 }, // Thụy Khuê - Dốc La Pho
+    { lat: 20.9997, lng: 105.8675 }, // Minh Khai - Chân cầu Vĩnh Tuy
+    { lat: 20.9952, lng: 105.8115 }, // Nguyễn Trãi - Trước ĐH KHXH&NV
+    { lat: 21.0025, lng: 105.7465 }, // Đại lộ Thăng Long - Ngã ba Lê Trọng Tấn
+    { lat: 21.0445, lng: 105.8755 }, // Ngọc Lâm - Long Biên 1
+    { lat: 21.0555, lng: 105.7825 }, // Phạm Văn Đồng - Ngã ba Xuân Đỉnh
+    { lat: 20.9845, lng: 105.8423 }, // Giải Phóng - Bến xe Giáp Bát
+    { lat: 20.9912, lng: 105.7952 }, // Phùng Khoang
+    { lat: 21.1416, lng: 105.8973 }, // Xã Thư Lâm
+  ]
 
-  const nodes = []
-  for (let i = 1; i <= 50; i++) {
-    const lat = Number(rand(minLat, maxLat).toFixed(6))
-    const lng = Number(rand(minLng, maxLng).toFixed(6))
-    nodes.push({
-      node_id: 100000 + i,
-      latitude: lat,
-      longitude: lng,
-      elevation: Number(rand(0, 25).toFixed(2)),
-      slope: Number(rand(0, 10).toFixed(2)),
-      impervious_ratio: Number(rand(0.05, 0.95).toFixed(3)),
-      geom: pointGeom(lng, lat),
-    })
-  }
+  const nodes = hotspots.map((pt, index) => ({
+    node_id: 100000 + index + 1,
+    latitude: pt.lat,
+    longitude: pt.lng,
+    elevation: Number(rand(0, 25).toFixed(2)),
+    slope: Number(rand(0, 10).toFixed(2)),
+    impervious_ratio: Number(rand(0.05, 0.95).toFixed(3)),
+    geom: pointGeom(pt.lng, pt.lat),
+  }))
 
   await GridNode.bulkCreate(nodes)
   return nodes
