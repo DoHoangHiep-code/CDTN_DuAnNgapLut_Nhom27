@@ -13,19 +13,13 @@ class WeatherController {
       const lngRaw = req.query.lng
       const district = typeof req.query.district === 'string' ? req.query.district : undefined
 
-      // Yêu cầu bắt buộc lat/lng để query Supabase thay vì trả dữ liệu giả.
-      // Dashboard gọi /api/v1/weather không có tham số → backend trả 400, UI dùng dữ liệu từ /dashboard
-      if (latRaw == null || lngRaw == null) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            message: 'Tham số lat và lon là bắt buộc. Ví dụ: /weather?lat=21.02&lon=105.83',
-          },
-        })
-      }
+      // Nếu không truyền tọa độ, mặc định sử dụng tọa độ trung tâm Hà Nội
+      // Cách này giúp API tương thích với nhánh main và tránh lỗi 400 (Bad Request) trên Frontend
+      const HANOI_LAT = 21.0285
+      const HANOI_LON = 105.8542
 
-      const lat = Number(latRaw)
-      const lng = Number(lngRaw)
+      const lat = latRaw != null ? Number(latRaw) : HANOI_LAT
+      const lng = lngRaw != null ? Number(lngRaw) : HANOI_LON
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         return res.status(400).json({ success: false, error: { message: 'Invalid lat/lng' } })
       }
