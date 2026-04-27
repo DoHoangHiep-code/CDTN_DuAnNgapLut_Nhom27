@@ -29,9 +29,9 @@ function toVN(isoStr: string): string {
 
 const LEVEL_STYLES: Record<string, string> = {
   'Khô ráo': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
-  '<15cm':   'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
+  '<15cm': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
   '15-30cm': 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
-  '>30cm':   'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  '>30cm': 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
 }
 
 function LevelBadge({ level }: { level: string }) {

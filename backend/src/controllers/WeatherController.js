@@ -17,10 +17,8 @@ class WeatherController {
       const lngRaw = req.query.lng
       const district = typeof req.query.district === 'string' ? req.query.district : undefined
 
-      // Nếu không có lat/lng → dùng tọa độ Hà Nội để gọi OpenWeatherMap thật
       const lat = latRaw != null ? Number(latRaw) : HANOI_LAT
       const lng = lngRaw != null ? Number(lngRaw) : HANOI_LON
-
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         return res.status(400).json({ success: false, error: { message: 'Invalid lat/lng' } })
       }
@@ -80,12 +78,12 @@ class WeatherController {
         }
         const forecast7d = Array.isArray(raw.forecast7d)
           ? raw.forecast7d.map((d) => ({
-              dateIso: String(d.date).slice(0, 10),
-              minTempC: d.minTemp ?? 0,
-              maxTempC: d.maxTemp ?? 0,
-              rainfallMm: d.totalRain ?? 0,
-              humidityPct: 0,
-            }))
+            dateIso: String(d.date).slice(0, 10),
+            minTempC: d.minTemp ?? 0,
+            maxTempC: d.maxTemp ?? 0,
+            rainfallMm: d.totalRain ?? 0,
+            humidityPct: 0,
+          }))
           : []
         return res.status(200).json({
           success: true,
