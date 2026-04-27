@@ -42,6 +42,22 @@ export async function getLiveWeather(lat: number, lon: number) {
   return res.data?.data ?? res.data
 }
 
+// ── Dự báo 7 ngày bằng CatBoost AI ──
+// Trả về mảng 7 phần tử: { dateIso, minTempC, maxTempC, rainfallMm, humidityPct, flood_depth_cm, risk_level, usingAI }
+export async function getForecast7dAI(lat?: number, lon?: number) {
+  const res = await apiV1.get<any>('/weather/forecast7d', { params: { lat, lon } })
+  return (res.data?.data ?? []) as Array<{
+    dateIso: string
+    minTempC: number
+    maxTempC: number
+    rainfallMm: number
+    humidityPct: number
+    flood_depth_cm: number
+    risk_level: string
+    usingAI: boolean
+  }>
+}
+
 export async function getReports(params?: { date?: string; district?: string }) {
   const res = await apiV1.get<any>('/reports', { params })
   return (res.data?.data ?? res.data) as ReportsResponse

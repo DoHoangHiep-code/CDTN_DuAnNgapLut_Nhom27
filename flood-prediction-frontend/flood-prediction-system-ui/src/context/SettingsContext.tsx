@@ -2,58 +2,82 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 
 // ---------- Kiểu dữ liệu ----------
 type ThemeMode = 'light' | 'dark'
+export type Language = 'vi' | 'en'
+export type MapStyle = 'streets' | 'satellite' | 'terrain'
+export type RefreshInterval = 0 | 5 | 15 | 30 | 60
 
-// Đã loại bỏ apiBaseUrl khỏi state:
-// API base URL phải được cấu hình qua biến môi trường (VITE_API_BASE_URL)
-// để tránh người dùng tự thay đổi endpoint – rủi ro bảo mật.
 type SettingsState = {
   theme: ThemeMode
   floodAlertsEnabled: boolean
+  language: Language
+  showRiskOverlay: boolean
+  showFloodMarkers: boolean
+  mapStyle: MapStyle
+  forecastRefreshInterval: RefreshInterval
+  showFloodDepth: boolean
+  showWeatherStats: boolean
+  compactSidebar: boolean
 }
 
 type SettingsContextValue = SettingsState & {
   setTheme: (theme: ThemeMode) => void
   toggleTheme: () => void
   setFloodAlertsEnabled: (enabled: boolean) => void
+  setLanguage: (lang: Language) => void
+  setShowRiskOverlay: (v: boolean) => void
+  setShowFloodMarkers: (v: boolean) => void
+  setMapStyle: (s: MapStyle) => void
+  setForecastRefreshInterval: (n: RefreshInterval) => void
+  setShowFloodDepth: (v: boolean) => void
+  setShowWeatherStats: (v: boolean) => void
+  setCompactSidebar: (v: boolean) => void
 }
 
 // ---------- Hằng số ----------
-const STORAGE_KEY = 'fps_settings_v1'
+const STORAGE_KEY = 'fps_settings_v2'
 
 const DEFAULTS: SettingsState = {
   theme: 'light',
   floodAlertsEnabled: true,
+  language: 'vi',
+  showRiskOverlay: true,
+  showFloodMarkers: true,
+  mapStyle: 'streets',
+  forecastRefreshInterval: 15,
+  showFloodDepth: true,
+  showWeatherStats: true,
+  compactSidebar: false,
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null)
 
-// ---------- Đọc dữ liệu từ localStorage ----------
 function readStored(): SettingsState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return DEFAULTS
-    const parsed = JSON.parse(raw) as Partial<SettingsState>
+    const p = JSON.parse(raw) as Partial<SettingsState>
     return {
-      // Bỏ qua trường apiBaseUrl cũ nếu còn sót lại trong localStorage
-      theme: parsed.theme === 'dark' || parsed.theme === 'light' ? parsed.theme : DEFAULTS.theme,
-      floodAlertsEnabled:
-        typeof parsed.floodAlertsEnabled === 'boolean'
-          ? parsed.floodAlertsEnabled
-          : DEFAULTS.floodAlertsEnabled,
+      theme: p.theme === 'dark' || p.theme === 'light' ? p.theme : DEFAULTS.theme,
+      floodAlertsEnabled: typeof p.floodAlertsEnabled === 'boolean' ? p.floodAlertsEnabled : DEFAULTS.floodAlertsEnabled,
+      language: p.language === 'vi' || p.language === 'en' ? p.language : DEFAULTS.language,
+      showRiskOverlay: typeof p.showRiskOverlay === 'boolean' ? p.showRiskOverlay : DEFAULTS.showRiskOverlay,
+      showFloodMarkers: typeof p.showFloodMarkers === 'boolean' ? p.showFloodMarkers : DEFAULTS.showFloodMarkers,
+      mapStyle: ['streets', 'satellite', 'terrain'].includes(p.mapStyle ?? '') ? p.mapStyle! : DEFAULTS.mapStyle,
+      forecastRefreshInterval: [0, 5, 15, 30, 60].includes(p.forecastRefreshInterval ?? -1) ? p.forecastRefreshInterval! : DEFAULTS.forecastRefreshInterval,
+      showFloodDepth: typeof p.showFloodDepth === 'boolean' ? p.showFloodDepth : DEFAULTS.showFloodDepth,
+      showWeatherStats: typeof p.showWeatherStats === 'boolean' ? p.showWeatherStats : DEFAULTS.showWeatherStats,
+      compactSidebar: typeof p.compactSidebar === 'boolean' ? p.compactSidebar : DEFAULTS.compactSidebar,
     }
   } catch {
     return DEFAULTS
   }
 }
 
-// ---------- Áp dụng theme lên thẻ <html> ----------
-// Tách thành hàm riêng để gọi được cả trong useEffect và khởi tạo ban đầu.
 function applyTheme(theme: ThemeMode) {
-  const root = document.documentElement
   if (theme === 'dark') {
-    root.classList.add('dark')
+    document.documentElement.classList.add('dark')
   } else {
-    root.classList.remove('dark')
+    document.documentElement.classList.remove('dark')
   }
 }
 
@@ -61,34 +85,27 @@ function applyTheme(theme: ThemeMode) {
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<SettingsState>(() => {
     const stored = readStored()
-    // Áp dụng theme ngay khi khởi tạo để đồng bộ với script chống FOUC ở index.html
     applyTheme(stored.theme)
     return stored
   })
 
-  // Đồng bộ class 'dark' mỗi khi theme thay đổi
-  useEffect(() => {
-    applyTheme(state.theme)
-  }, [state.theme])
+  useEffect(() => { applyTheme(state.theme) }, [state.theme])
+  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) }, [state])
 
-  // Lưu toàn bộ settings vào localStorage mỗi khi state thay đổi
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  }, [state])
-
-  const value: SettingsContextValue = useMemo(
-    () => ({
-      ...state,
-      // Đặt theme cụ thể
-      setTheme: (theme) => setState((s) => ({ ...s, theme })),
-      // Chuyển đổi qua lại giữa light/dark
-      toggleTheme: () =>
-        setState((s) => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' })),
-      // Cập nhật trạng thái bật/tắt cảnh báo ngập lụt
-      setFloodAlertsEnabled: (enabled) => setState((s) => ({ ...s, floodAlertsEnabled: enabled })),
-    }),
-    [state],
-  )
+  const value: SettingsContextValue = useMemo(() => ({
+    ...state,
+    setTheme: (theme) => setState((s) => ({ ...s, theme })),
+    toggleTheme: () => setState((s) => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' })),
+    setFloodAlertsEnabled: (enabled) => setState((s) => ({ ...s, floodAlertsEnabled: enabled })),
+    setLanguage: (language) => setState((s) => ({ ...s, language })),
+    setShowRiskOverlay: (showRiskOverlay) => setState((s) => ({ ...s, showRiskOverlay })),
+    setShowFloodMarkers: (showFloodMarkers) => setState((s) => ({ ...s, showFloodMarkers })),
+    setMapStyle: (mapStyle) => setState((s) => ({ ...s, mapStyle })),
+    setForecastRefreshInterval: (forecastRefreshInterval) => setState((s) => ({ ...s, forecastRefreshInterval })),
+    setShowFloodDepth: (showFloodDepth) => setState((s) => ({ ...s, showFloodDepth })),
+    setShowWeatherStats: (showWeatherStats) => setState((s) => ({ ...s, showWeatherStats })),
+    setCompactSidebar: (compactSidebar) => setState((s) => ({ ...s, compactSidebar })),
+  }), [state])
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>
 }
