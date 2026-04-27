@@ -7,7 +7,7 @@ import { RiskBadge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { RainChart } from '../components/RainChart'
 import { useAsync } from '../hooks/useAsync'
-import { getDashboard, getFloodPrediction, getWeather } from '../services/api'
+import { getDashboard, getFloodPrediction } from '../services/api'
 import { maxRisk } from '../utils/risk'
 import { useTranslation } from 'react-i18next'
 import { RainForecastChart } from '../components/RainForecastChart'
@@ -15,8 +15,6 @@ export function DashboardPage() {
   const { t } = useTranslation()
   // Gọi /dashboard để lấy forecast24h có kèm flood_depth_cm (phục vụ tooltip)
   const dashboard = useAsync(getDashboard, [])
-  // Vẫn giữ weather (demo) để không phá UI hiện tại; có thể bỏ sau khi đồng bộ hoàn toàn
-  const weather = useAsync(getWeather, [])
   const flood = useAsync(getFloodPrediction, [])
   const [mode, setMode] = useState<'24h' | '3d'>('24h')
 
@@ -31,15 +29,23 @@ export function DashboardPage() {
     return { overall, counts, total: districts.length }
   }, [flood.data])
 
-  const loading = dashboard.loading || weather.loading || flood.loading
+  const loading = dashboard.loading || flood.loading
   // Chỉ crash toàn trang nếu TẤT CẢ đều lỗi — nếu chỉ 1 lỗi thì render partial
-  const criticalError = dashboard.error && weather.error && flood.error
+  const criticalError = dashboard.error && flood.error
 
   if (loading) return <Spinner label="Loading dashboard…" />
-  if (criticalError) return <ErrorState error={dashboard.error!} onRetry={() => void (dashboard.reload(), weather.reload(), flood.reload())} />
-  if (!weather.data && !flood.data && !dashboard.data) return null
+  if (criticalError) return <ErrorState error={dashboard.error!} onRetry={() => void (dashboard.reload(), flood.reload())} />
+  if (!flood.data && !dashboard.data) return null
 
-  const w = weather.data?.current ?? { temperatureC: 0, humidityPct: 0, windKph: 0, rainfallMm: 0, observedAtIso: new Date().toISOString(), locationName: '—' }
+  // Dùng dữ liệu thực từ Supabase (weather_measurements) qua /api/v1/dashboard
+  const cw = dashboard.data?.currentWeather
+  const w = {
+    temperatureC: cw?.temperature ?? 0,
+    humidityPct:  cw?.humidity   ?? 0,
+    windKph:      cw?.windSpeed  ?? 0,
+    observedAtIso: new Date().toISOString(),
+    locationName: 'Supabase DB',
+  }
 
   return (
     <div className="space-y-5">
@@ -54,7 +60,7 @@ export function DashboardPage() {
             variant="ghost"
             size="sm"
             leftIcon={<RefreshCcw className="h-4 w-4" />}
-            onClick={() => void (weather.reload(), flood.reload())}
+            onClick={() => void (dashboard.reload(), flood.reload())}
           >
             {t('dashboard.refresh')}
           </Button>
@@ -131,7 +137,7 @@ export function DashboardPage() {
             {mode === '24h' ? (
               <RainForecastChart points={dashboard.data?.forecast24h ?? []} />
             ) : (
-              <RainChart mode="3d" forecast24h={weather.data?.forecast24h ?? []} forecast3d={weather.data?.forecast3d ?? []} />
+              <RainChart mode="3d" forecast24h={[]} forecast3d={dashboard.data?.forecast24h?.slice(0, 3) ?? []} />
             )}
           </div>
         </Card>
