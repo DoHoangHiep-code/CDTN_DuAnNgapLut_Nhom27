@@ -16,8 +16,12 @@ class ReportsRepository {
     })
   }
 
-  // GET danh sách báo cáo thực tế, join users để lấy full_name
-  async listActualFloodReports() {
+  // GET danh sách báo cáo thực tế, có phân trang (page/limit)
+  async listActualFloodReports({ page = 1, limit = 50 } = {}) {
+    const safeLimit  = Math.min(Math.max(parseInt(limit)  || 50,  1), 200)
+    const safePage   = Math.max(parseInt(page) || 1, 1)
+    const offset     = (safePage - 1) * safeLimit
+
     const sql = `
       SELECT
         afr.report_id,
@@ -26,14 +30,25 @@ class ReportsRepository {
         afr.longitude,
         afr.reported_level,
         afr.user_id,
-        u.full_name AS user_full_name
+        u.full_name AS user_full_name,
+        COUNT(*) OVER() AS total_count
       FROM actual_flood_reports afr
       LEFT JOIN users u ON u.user_id = afr.user_id
-      ORDER BY afr.created_at DESC;
+      ORDER BY afr.created_at DESC
+      LIMIT :limit OFFSET :offset;
     `
-    return this._withStatementTimeout(7000, (t) =>
-      this.sequelize.query(sql, { type: QueryTypes.SELECT, transaction: t }),
+    const rows = await this._withStatementTimeout(5000, (t) =>
+      this.sequelize.query(sql, {
+        type: QueryTypes.SELECT,
+        replacements: { limit: safeLimit, offset },
+        transaction: t,
+      }),
     )
+    const total = rows.length > 0 ? Number(rows[0].total_count) : 0
+    return {
+      rows,
+      pagination: { page: safePage, limit: safeLimit, total, totalPages: Math.ceil(total / safeLimit) },
+    }
   }
 
   // POST tạo báo cáo mới: tạo geom bằng PostGIS từ lat/lng (không xử lý geometry bằng JSON)
