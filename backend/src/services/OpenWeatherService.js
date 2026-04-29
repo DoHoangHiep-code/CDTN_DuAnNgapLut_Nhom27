@@ -1,98 +1,197 @@
 'use strict'
 
 /**
- * OpenWeatherService – gọi OpenWeatherMap Current Weather API theo tọa độ.
+ * OpenWeatherService – gọi OpenWeatherMap API theo tọa độ.
  *
- * Docs: https://openweathermap.org/current
- * Endpoint: GET https://api.openweathermap.org/data/2.5/weather
+ * Endpoints sử dụng:
+ *   • Current Weather : GET /data/2.5/weather
+ *   • 5-Day Forecast  : GET /data/2.5/forecast  (40 data points × 3h = 5 ngày)
  *
  * Cấu hình: đặt OPENWEATHER_API_KEY vào file .env
- * Fallback: nếu key không tồn tại hoặc API lỗi → trả null (không crash server)
+ * Fallback : nếu key không tồn tại hoặc API lỗi → trả null (không crash server)
  */
 
 const axios = require('axios')
 
-const OWM_BASE = 'https://api.openweathermap.org/data/2.5/weather'
-const OWM_TIMEOUT_MS = 6000 // 6 giây – tránh treo request
+const OWM_API_KEY = () => process.env.OPENWEATHER_API_KEY
+const OWM_BASE    = 'https://api.openweathermap.org/data/2.5'
+const OWM_TIMEOUT_MS = 8000   // 8 giây
+
+// ─── Kiểm tra API key ────────────────────────────────────────────────────────
+
+function _hasValidKey() {
+  const key = OWM_API_KEY()
+  return key && key !== 'your_openweathermap_api_key_here'
+}
+
+// ─── Xử lý lỗi chung ─────────────────────────────────────────────────────────
+
+function _handleAxiosError(err, label) {
+  if (err.code === 'ECONNABORTED') {
+    console.error(`[OWM/${label}] Timeout sau ${OWM_TIMEOUT_MS}ms.`)
+  } else if (err.response?.status === 401) {
+    console.error(`[OWM/${label}] API key không hợp lệ (HTTP 401).`)
+  } else if (err.response?.status === 429) {
+    console.error(`[OWM/${label}] Vượt rate limit (HTTP 429).`)
+  } else {
+    console.error(`[OWM/${label}] Lỗi:`, err.message)
+  }
+}
+
+// ─── 1. Current Weather ───────────────────────────────────────────────────────
 
 /**
  * Lấy dữ liệu thời tiết hiện tại từ OpenWeatherMap theo tọa độ GPS.
  *
- * @param {number} lat - Vĩ độ (latitude)
- * @param {number} lon - Kinh độ (longitude)
+ * @param {number} lat
+ * @param {number} lon
  * @returns {Promise<{
- *   rain1h: number,
- *   humidity: number,
- *   clouds: number,
- *   temp: number,
- *   description: string
+ *   rain1h: number, humidity: number, clouds: number, temp: number,
+ *   description: string, windSpeed: number, pressure: number
  * } | null>}
- *
- * Trả null nếu:
- *   - OPENWEATHER_API_KEY chưa được set
- *   - API key không hợp lệ / hết hạn
- *   - Timeout hoặc lỗi mạng
  */
 async function getWeatherByCoords(lat, lon) {
-  const apiKey = process.env.OPENWEATHER_API_KEY
-
-  // Kiểm tra key tồn tại
-  if (!apiKey || apiKey === 'your_openweathermap_api_key_here') {
-    console.warn('[OpenWeatherService] OPENWEATHER_API_KEY chưa được cấu hình trong .env')
+  if (!_hasValidKey()) {
+    console.warn('[OWM/Current] OPENWEATHER_API_KEY chưa được cấu hình trong .env')
     return null
   }
 
   try {
-    const res = await axios.get(OWM_BASE, {
+    const res = await axios.get(`${OWM_BASE}/weather`, {
       params: {
         lat,
         lon,
-        appid: apiKey,
-        units: 'metric', // Kelvin → Celsius tự động
-        lang: 'vi',      // Mô tả thời tiết bằng tiếng Việt
+        appid: OWM_API_KEY(),
+        units: 'metric',
+        lang:  'vi',
       },
       timeout: OWM_TIMEOUT_MS,
     })
 
     const d = res.data
-
     return {
-      // Lượng mưa 1h qua (mm) – trường có thể vắng mặt nếu không mưa
-      rain1h: d?.rain?.['1h'] ?? 0,
-
-      // Độ ẩm tương đối (%)
-      humidity: d?.main?.humidity ?? 0,
-
-      // Độ che phủ mây (%)
-      clouds: d?.clouds?.all ?? 0,
-
-      // Nhiệt độ (°C) – đã convert nhờ units=metric
-      temp: d?.main?.temp ?? 0,
-
-      // Mô tả ngắn gọn về thời tiết
+      rain1h:      d?.rain?.['1h']           ?? 0,
+      humidity:    d?.main?.humidity          ?? 0,
+      clouds:      d?.clouds?.all             ?? 0,
+      temp:        d?.main?.temp              ?? 0,
       description: d?.weather?.[0]?.description ?? 'Không rõ',
-
-      // Thêm tốc độ gió phòng khi cần dùng cho model (m/s)
-      windSpeed: d?.wind?.speed ?? 0,
-
-      // Áp suất khí quyển (hPa)
-      pressure: d?.main?.pressure ?? 1013,
+      windSpeed:   d?.wind?.speed             ?? 0,   // m/s
+      pressure:    d?.main?.pressure          ?? 1013, // hPa
     }
   } catch (err) {
-    // Phân loại lỗi để log rõ ràng hơn
-    if (err.code === 'ECONNABORTED') {
-      console.error(`[OpenWeatherService] Timeout sau ${OWM_TIMEOUT_MS}ms khi gọi API.`)
-    } else if (err.response?.status === 401) {
-      console.error('[OpenWeatherService] API key không hợp lệ hoặc đã hết hạn (HTTP 401).')
-    } else if (err.response?.status === 429) {
-      console.error('[OpenWeatherService] Vượt quá giới hạn request (HTTP 429 Too Many Requests).')
-    } else {
-      console.error('[OpenWeatherService] Lỗi khi gọi OpenWeatherMap:', err.message)
-    }
-
-    // Trả null an toàn – không throw để tránh crash toàn bộ server
+    _handleAxiosError(err, 'Current')
     return null
   }
 }
 
-module.exports = { getWeatherByCoords }
+// ─── 2. 5-Day / 3-Hour Forecast ──────────────────────────────────────────────
+
+/**
+ * Lấy dự báo 5 ngày (40 data points × 3h) từ OWM /data/2.5/forecast.
+ *
+ * Mỗi phần tử trong mảng trả về có shape:
+ * {
+ *   timeIso:   string   – ISO timestamp của đầu khoảng 3h
+ *   temp:      number   – °C (giữa khoảng 3h)
+ *   humidity:  number   – %
+ *   rain3h:    number   – mm mưa trong 3 giờ (rain["3h"])
+ *   pressure:  number   – hPa
+ *   windSpeed: number   – m/s
+ *   clouds:    number   – % mây che
+ *   description: string
+ * }
+ *
+ * Tại sao chọn endpoint này:
+ *   - Miễn phí, hoạt động trên mọi gói OWM kể cả Developer.
+ *   - Trả `rain["3h"]` đã tích lũy sẵn → tính prcp_3h, prcp_6h, prcp_12h, prcp_24h
+ *     cho AI chỉ cần cộng các steps, không phải interpolate thêm.
+ *   - 40 data points × 3h = đủ 5 ngày dự báo.
+ *
+ * @param {number} lat
+ * @param {number} lon
+ * @returns {Promise<Array<object>|null>}
+ */
+async function getOWMForecast5d(lat, lon) {
+  if (!_hasValidKey()) {
+    console.warn('[OWM/Forecast5d] OPENWEATHER_API_KEY chưa được cấu hình trong .env')
+    return null
+  }
+
+  try {
+    const res = await axios.get(`${OWM_BASE}/forecast`, {
+      params: {
+        lat,
+        lon,
+        appid:  OWM_API_KEY(),
+        units:  'metric',
+        lang:   'vi',
+        cnt:    40,   // tối đa 40 steps × 3h = 5 ngày
+      },
+      timeout: OWM_TIMEOUT_MS,
+    })
+
+    const list = res.data?.list
+    if (!Array.isArray(list) || !list.length) return null
+
+    return list.map((item) => ({
+      timeIso:     item.dt_txt + ':00+07:00',   // server UTC → giữ nguyên, frontend parse
+      timeUtc:     new Date(item.dt * 1000),     // Date object UTC
+      temp:        item.main?.temp        ?? 28,
+      tempMin:     item.main?.temp_min    ?? 26,
+      tempMax:     item.main?.temp_max    ?? 32,
+      humidity:    item.main?.humidity    ?? 70,
+      rain3h:      item.rain?.['3h']      ?? 0,  // mm tích lũy 3 giờ
+      pressure:    item.main?.pressure    ?? 1010,
+      windSpeed:   item.wind?.speed       ?? 0,   // m/s
+      clouds:      item.clouds?.all       ?? 0,
+      description: item.weather?.[0]?.description ?? 'Không rõ',
+      icon:        item.weather?.[0]?.icon        ?? '',
+    }))
+  } catch (err) {
+    _handleAxiosError(err, 'Forecast5d')
+    return null
+  }
+}
+
+// ─── 3. Helper: Aggregate 3h points → daily summary ──────────────────────────
+
+/**
+ * Gom nhóm mảng 3h data points từ OWM thành mảng daily (theo ngày ICT).
+ *
+ * @param {Array<object>} points – output của getOWMForecast5d()
+ * @param {number}        [maxDays=5]
+ * @returns {Array<{
+ *   dateIso: string, minTempC: number, maxTempC: number,
+ *   rainfallMm: number, humidityPct: number,
+ *   points: Array  – data points gốc của ngày đó (để AI inference)
+ * }>}
+ */
+function aggregateToDaily(points, maxDays = 5) {
+  if (!points || !points.length) return []
+
+  // Nhóm theo date_only (ICT = UTC+7)
+  const byDay = new Map()
+  for (const p of points) {
+    const ictMs   = p.timeUtc.getTime() + 7 * 3600 * 1000
+    const dateIso = new Date(ictMs).toISOString().slice(0, 10)
+    if (!byDay.has(dateIso)) byDay.set(dateIso, [])
+    byDay.get(dateIso).push(p)
+  }
+
+  const days = []
+  for (const [dateIso, pts] of byDay.entries()) {
+    if (days.length >= maxDays) break
+    days.push({
+      dateIso,
+      minTempC:   Math.round(Math.min(...pts.map(p => p.tempMin)) * 10) / 10,
+      maxTempC:   Math.round(Math.max(...pts.map(p => p.tempMax)) * 10) / 10,
+      rainfallMm: Math.round(pts.reduce((s, p) => s + p.rain3h, 0) * 10) / 10,
+      humidityPct: Math.round(pts.reduce((s, p) => s + p.humidity, 0) / pts.length),
+      points: pts,
+    })
+  }
+
+  return days
+}
+
+module.exports = { getWeatherByCoords, getOWMForecast5d, aggregateToDaily }
