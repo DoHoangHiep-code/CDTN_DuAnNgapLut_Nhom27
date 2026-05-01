@@ -81,7 +81,7 @@ export function App() {
         <Route
           path="settings"
           element={
-            <ProtectedRoute allow={['admin']}>
+            <ProtectedRoute allow={['user', 'expert', 'admin']}>
               <SettingsPage />
             </ProtectedRoute>
           }

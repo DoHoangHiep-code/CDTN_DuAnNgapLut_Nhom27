@@ -26,7 +26,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'weather', labelKey: 'nav.weather', to: '/weather', roles: ['user', 'expert', 'admin'], icon: CloudSun },
   { key: 'reports', labelKey: 'nav.reports', to: '/reports', roles: ['expert', 'admin'], icon: FileText },
   { key: 'users', labelKey: 'nav.users', to: '/admin/users', roles: ['admin'], icon: Users },
-  { key: 'settings', labelKey: 'nav.settings', to: '/settings', roles: ['admin'], icon: Settings },
+  { key: 'settings', labelKey: 'nav.settings', to: '/settings', roles: ['user', 'expert', 'admin'], icon: Settings },
   { key: 'logs', labelKey: 'nav.logs', to: '/logs', roles: ['admin'], icon: Terminal },
   { key: 'profile', labelKey: 'nav.profile', to: '/profile', roles: ['user', 'expert', 'admin'], icon: UserCircle2 },
 ]
