@@ -11,7 +11,7 @@ import { Spinner } from '../components/Spinner'
 import { ErrorState } from '../components/ErrorState'
 import { RiskBadge } from '../components/Badge'
 import { useAsync } from '../hooks/useAsync'
-import { getFloodPrediction, getWeather } from '../services/api'
+import { getFloodPrediction, getFloodPredictionBbox } from '../services/api'
 import type { RiskLevel } from '../utils/types'
 import { formatDepthCm } from '../utils/floodDepth'
 import Supercluster from 'supercluster'
@@ -322,8 +322,7 @@ function MapBridge({ onMap, onCenter }: { onMap: (m: L.Map) => void; onCenter: (
 export function MapPage() {
   const { t } = useTranslation()
   const { showRiskOverlay, showFloodMarkers, mapStyle } = useSettings()
-  const flood = useAsync(getFloodPrediction, [])
-  const weather = useAsync(getWeather, [])
+  const flood = useAsync(getFloodPrediction, [])  // dùng cho LocationSearch districts list
 
   const [searchInput, setSearchInput] = useState('')
   const [filterTerm, setFilterTerm] = useState('')
@@ -347,6 +346,13 @@ export function MapPage() {
   const defaultCenter: LatLngExpression = [21.0278, 105.8342]
   const defaultZoom = 12
 
+  // ── BBox dynamic fetch khi map di chuyển ──────────────────────────────────
+  // bboxData: nodes trong viewport hiện tại (tối đa 200)
+  const [bboxData, setBboxData] = useState<{ districts: FloodPoint[] }>({
+    districts: [],
+  })
+  const [isFetchingBbox, setIsFetchingBbox] = useState(false)
+
   const center = useMemo<LatLngExpression>(() => {
     const first = flood.data?.districts?.[0]
     if (!first) return [21.0278, 105.8342]
@@ -358,6 +364,7 @@ export function MapPage() {
     return flood.data?.districts?.find((d) => d.id === districtIdFromUrl)
   }, [flood.data, districtIdFromUrl])
 
+  // filteredDistricts: chỉ dùng cho LocationSearch onFilterChange (không dùng cho markers)
   const filteredDistricts = useMemo(() => {
     const list = flood.data?.districts ?? []
     const q = filterTerm.toLowerCase()
@@ -365,13 +372,8 @@ export function MapPage() {
     return list.filter((d) => d.name.toLowerCase().includes(q))
   }, [flood.data, filterTerm])
 
-  const floodPoints = useMemo<FloodPoint[]>(() => {
-    return filteredDistricts.map((d) => {
-      const position = centroid(d.polygon)
-      const depthCm = d.flood_depth_cm ?? 0
-      return { id: d.id, name: d.name, risk: d.risk, predictedRainfallMm: d.predictedRainfallMm, depthCm, position }
-    })
-  }, [filteredDistricts])
+  // floodPoints đã được thay bằng bboxData.districts (dynamic fetch theo viewport)
+  // Giữ filteredDistricts để onFilterChange vẫn hoạt động trên LocationSearch
 
   // Fly đến quận từ URL param khi dữ liệu sẵn sàng
   useEffect(() => {
@@ -379,6 +381,41 @@ export function MapPage() {
     const pos = centroid(districtFromUrl.polygon)
     map.flyTo(pos, 15, { animate: true, duration: 0.6 })
   }, [map, districtFromUrl])
+
+  // ── Fetch BBox khi map thay đổi bounds ────────────────────────────────────
+  // Delay 400ms sau khi map dừng để tránh quá nhiều request liên tiếp
+  useEffect(() => {
+    if (!map) return
+    const b = map.getBounds()
+
+    const timer = setTimeout(async () => {
+      setIsFetchingBbox(true)
+      try {
+        const result = await getFloodPredictionBbox({
+          minLat: b.getSouth(),
+          maxLat: b.getNorth(),
+          minLng: b.getWest(),
+          maxLng: b.getEast(),
+          limit: 200,
+        })
+        const pts: FloodPoint[] = (result?.districts ?? []).map((d) => ({
+          id:                   d.id,
+          name:                 d.name,
+          risk:                 (d.risk as RiskLevel) || 'safe',
+          predictedRainfallMm:  d.predictedRainfallMm ?? 0,
+          depthCm:              d.flood_depth_cm ?? 0,
+          position:             centroid(d.polygon),
+        }))
+        setBboxData({ districts: pts })
+      } catch (err) {
+        console.warn('[MapPage] BBox fetch lỗi:', err)
+      } finally {
+        setIsFetchingBbox(false)
+      }
+    }, 400)
+
+    return () => clearTimeout(timer)
+  }, [map, mapCenter])  // re-run khi mapCenter thay đổi (MapBridge cập nhật sau moveend)
 
   // Xử lý chọn kết quả từ Nominatim geocoding
   const handleGeoResult = useCallback((result: NominatimResult) => {
@@ -401,10 +438,9 @@ export function MapPage() {
     map?.flyTo(defaultCenter, defaultZoom)
   }, [map])
 
-  if (flood.loading || weather.loading) return <Spinner label="Loading map…" />
-  if (flood.error) return <ErrorState error={flood.error} onRetry={flood.reload} />
-  if (weather.error) return <ErrorState error={weather.error} onRetry={weather.reload} />
-  if (!flood.data || !weather.data) return null
+  if (flood.loading) return <Spinner label="Loading map…" />
+  if (flood.error)   return <ErrorState error={flood.error} onRetry={flood.reload} />
+  if (!flood.data)   return null
 
   return (
     <div className="space-y-4">
@@ -463,6 +499,14 @@ export function MapPage() {
               lon={mapCenter.lon}
             />
 
+            {/* ── Loading overlay khi đang fetch BBox ── */}
+            {isFetchingBbox && (
+              <div className="absolute top-4 left-1/2 z-[1000] -translate-x-1/2 flex items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-md backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+                Đang tải dữ liệu khu vực…
+              </div>
+            )}
+
             {/* ── Leaflet MapContainer ── */}
             <MapContainer
               center={center}
@@ -492,9 +536,10 @@ export function MapPage() {
               <ReverseGeocodeLayer onOpenReport={() => setReportModalOpen(true)} />
 
               {/* Các điểm ngập (có clustering) — ẩn khi tắt showFloodMarkers */}
+              {/* Dùng bboxData (dynamic) thay vì floodPoints (static toàn bộ) */}
               {showFloodMarkers && (
                 <FloodClustersLayer
-                  points={showRiskOverlay ? floodPoints : []}
+                  points={showRiskOverlay ? bboxData.districts : []}
                   onSelectPoint={(p) => {
                     map?.flyTo(p.position, 15, { animate: true, duration: 0.6 })
                   }}

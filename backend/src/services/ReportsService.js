@@ -6,10 +6,11 @@ class ReportsService {
     this.reportsRepository = reportsRepository // Inject repository để tách lớp dữ liệu khỏi business
   }
 
-  // Lấy danh sách reports, fallback rỗng để frontend không crash
-  async list() {
-    const rows = await this.reportsRepository.listActualFloodReports().catch(() => [])
-    return Array.isArray(rows) ? rows : []
+  // Lấy danh sách reports có phân trang, fallback {} nếu lỗi
+  async list({ page = 1, limit = 50 } = {}) {
+    const result = await this.reportsRepository.listActualFloodReports({ page, limit })
+      .catch(() => ({ rows: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0 } }))
+    return result
   }
 
   /**

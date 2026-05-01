@@ -37,14 +37,14 @@ export function DashboardPage() {
   if (criticalError) return <ErrorState error={dashboard.error!} onRetry={() => void (dashboard.reload(), flood.reload())} />
   if (!flood.data && !dashboard.data) return null
 
-  // Dùng dữ liệu thực từ Supabase (weather_measurements) qua /api/v1/dashboard
+  // Dùng dữ liệu thực từ Aiven (weather_measurements) qua /api/v1/dashboard
   const cw = dashboard.data?.currentWeather
   const w = {
     temperatureC: cw?.temperature ?? 0,
     humidityPct:  cw?.humidity   ?? 0,
     windKph:      cw?.windSpeed  ?? 0,
     observedAtIso: new Date().toISOString(),
-    locationName: 'Supabase DB',
+    locationName: 'Aiven DB',
   }
 
   return (

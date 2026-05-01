@@ -78,22 +78,13 @@ async function bootstrapAndStart() {
     await sequelize.authenticate()
     console.log('[DB] Kết nối thành công.')
 
-    // 1.1) Bật PostGIS trước khi sync để Sequelize tạo được cột GEOMETRY trên Supabase.
-    // Nếu extension chưa được bật, các bảng có trường geom sẽ lỗi "type geometry does not exist".
-    try {
-      await sequelize.query('CREATE EXTENSION IF NOT EXISTS postgis;')
-      console.log('[DB] PostGIS sẵn sàng.')
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown postgis error'
-      console.error('[DB] Không bật được PostGIS tự động:', msg)
-      console.error('[DB] Hãy bật extension "postgis" trong Supabase Dashboard > Database > Extensions.')
-      process.exit(1)
-    }
+    // 1.1) PostGIS đã được khởi tạo qua Migration 001. Không chạy ở đây để tránh lỗi read-only transaction.
+    console.log('[DB] PostGIS đã được setup qua Migration.')
 
     // 2) Tự đồng bộ schema: tạo bảng mới + điều chỉnh cột khi khác biệt.
     // Lưu ý: alter=true tiện cho môi trường dev/staging; production lớn nên cân nhắc migration chuẩn.
-    await sequelize.sync({ alter: true })
-    console.log('[DB] Đồng bộ schema thành công (sequelize.sync alter).')
+    // await sequelize.sync({ alter: true })
+    console.log('[DB] Đã bỏ qua sequelize.sync do quản lý bằng Migrations.')
 
     // 3) Chỉ listen khi DB đã sẵn sàng.
     app.listen(port, () => {
@@ -104,7 +95,7 @@ async function bootstrapAndStart() {
       startWeatherCron()
     })
   } catch (err) {
-    // Xử lý kỹ lỗi SSL/kết nối Supabase để dễ debug trên cloud.
+    // Xử lý kỹ lỗi SSL/kết nối Aiven để dễ debug trên cloud.
     const message = err instanceof Error ? err.message : 'Unknown bootstrap error'
     console.error('[Bootstrap] Không thể khởi động server:', message)
     if (String(message).toLowerCase().includes('ssl')) {

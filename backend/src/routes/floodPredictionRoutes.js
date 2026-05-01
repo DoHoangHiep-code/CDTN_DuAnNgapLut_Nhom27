@@ -12,7 +12,8 @@ const router = express.Router()
 
 const weatherRepository = new WeatherRepository({ sequelize })
 const predictionService = new PredictionService({ weatherRepository, sequelize })
-const controller = new FloodPredictionController({ predictionService })
+// sequelize inject: controller cần để chạy raw BBox query trực tiếp
+const controller = new FloodPredictionController({ predictionService, sequelize })
 
 // Route hiện có: batch prediction toàn bộ nodes
 router.get('/flood-prediction', controller.getFloodPrediction)
