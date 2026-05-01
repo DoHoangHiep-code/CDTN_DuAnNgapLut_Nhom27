@@ -210,7 +210,7 @@ class WeatherRepository {
     const tz = 'Asia/Ho_Chi_Minh'
     const sql = `
       SELECT
-        (time_bucket('1 day', (wm.time AT TIME ZONE :tz)))::timestamp AS date,
+        date_trunc('day', (wm.time AT TIME ZONE :tz))::timestamp AS date,
         MIN(wm.temp)::float AS "minTemp",
         MAX(wm.temp)::float AS "maxTemp",
         COALESCE(SUM(wm.prcp), 0)::float AS "totalRain"

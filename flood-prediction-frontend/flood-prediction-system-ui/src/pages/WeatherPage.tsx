@@ -11,8 +11,8 @@ import { ErrorState } from '../components/ErrorState'
 import { MiniFloodMap } from '../components/MiniFloodMap'
 import { LocationSearch } from '../components/LocationSearch'
 import { useAsync } from '../hooks/useAsync'
-import { getFloodPrediction, getWeather, getForecast7dAI } from '../services/api'
-import type { FloodDistrict, WeatherForecastDay } from '../utils/types'
+import { getWeather, getForecast7d } from '../services/api'
+import type { WeatherForecastDay } from '../utils/types'
 import { cn } from '../utils/cn'
 
 type WeatherKind = 'rain' | 'sun' | 'flood'
@@ -423,44 +423,38 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
 // ── WeatherPage ──────────────────────────────────────────────────────
 export function WeatherPage() {
   const { t } = useTranslation()
-  const flood = useAsync(getFloodPrediction, [])
+  // Không dùng getFloodPrediction() nữa – tránh scan 53K nodes
+  // LocationSearch vẫn hoạt động với Nominatim tìm kiếm địa chỉ tự do (chế độ geo-only)
   const [districtInput, setDistrictInput] = useState('')
   const [districtFilter, setDistrictFilter] = useState('')
   const [mapFlyTo, setMapFlyTo] = useState<LatLngExpression | null>(null)
   const forecastScrollRef = useRef<HTMLDivElement>(null)
 
-  const selectedDistrict = useMemo<FloodDistrict | undefined>(() => {
-    const list = flood.data?.districts ?? []
-    const q = districtFilter.trim().toLowerCase()
-    if (!list.length) return undefined
-    if (!q) return list[0]
-    return list.find((d) => d.name.toLowerCase().includes(q)) ?? list[0]
-  }, [flood.data, districtFilter])
+  // Lấy thời tiết Khu vực Trung tâm Hà Nội làm mặc định
+  const weather = useAsync(() => getWeather({ district: districtFilter || undefined }), [districtFilter])
+  const forecast7d = useAsync(getForecast7d, [])
 
-  const weather = useAsync(() => getWeather({ district: selectedDistrict?.name }), [selectedDistrict?.name])
-  const forecast7dAI = useAsync(getForecast7dAI, [])
+  const center: LatLngExpression = [21.0278, 105.8342] // Trung tâm Hà Nội
 
-  const center = useMemo<LatLngExpression>(() => {
-    const first = flood.data?.districts?.[0]
-    if (!first) return [21.0278, 105.8342]
-    return centroid(first.polygon)
-  }, [flood.data])
-
-  const forecast7d = forecast7dAI.data && forecast7dAI.data.length > 0
-    ? forecast7dAI.data.map((d) => ({
-        dateIso: d.dateIso, minTempC: d.minTempC, maxTempC: d.maxTempC,
-        rainfallMm: d.rainfallMm, humidityPct: d.humidityPct,
+  const forecast7dData = forecast7d.data && forecast7d.data.length > 0
+    ? forecast7d.data.map((d) => ({
+        dateIso: d.dateIso,
+        minTempC: d.minTempC,
+        maxTempC: d.maxTempC,
+        rainfallMm: d.rainfallMm,
+        humidityPct: d.humidityPct,
       }))
     : (weather.data?.forecast7d ?? [])
+  // source badge: lấy từ phần tử đầu tiên
+  const forecastSource = forecast7d.data?.[0]?.source ?? null
 
   function scrollForecast(dir: -1 | 1) {
     forecastScrollRef.current?.scrollBy({ left: dir * 280, behavior: 'smooth' })
   }
 
-  if (flood.loading || weather.loading || forecast7dAI.loading) return <Spinner label="Loading weather…" />
-  if (flood.error) return <ErrorState error={flood.error} onRetry={flood.reload} />
+  if (weather.loading || forecast7d.loading) return <Spinner label="Loading weather…" />
   if (weather.error) return <ErrorState error={weather.error} onRetry={weather.reload} />
-  if (!flood.data || !weather.data) return null
+  if (!weather.data) return null
 
   const current = weather.data.current
   const currentKind = kindFromRainfall(current.rainfallMm)
@@ -483,7 +477,7 @@ export function WeatherPage() {
         </div>
         <button
           type="button"
-          onClick={() => { void weather.reload(); void forecast7dAI.reload() }}
+          onClick={() => { void weather.reload(); void forecast7d.reload() }}
           className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:bg-slate-50 hover:shadow dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
         >
           <RefreshCcw className="h-3.5 w-3.5" /> Làm mới
@@ -575,28 +569,20 @@ export function WeatherPage() {
             <div className="min-w-0 flex-1">
               <LocationSearch
                 id="weather-location-search"
-                districts={flood.data.districts}
+                districts={[]}  // Nominatim geo-search mode: không cần list quận nội bộ
                 label={t('weather.searchDistrict')}
                 placeholder={t('floodMap.searchDistrict')}
                 value={districtInput}
                 onChange={setDistrictInput}
                 onFilterChange={setDistrictFilter}
-                onSelectDistrict={(d) => setMapFlyTo(centroid(d.polygon))}
+                onSelectGeoResult={(r) => setMapFlyTo([parseFloat(r.lat), parseFloat(r.lon)])}
               />
             </div>
-            {selectedDistrict && (
-              <div className="flex shrink-0 flex-col items-end">
-                <span className="text-[10px] font-semibold text-slate-400">Đang chọn</span>
-                <span className="max-w-[9rem] truncate text-sm font-extrabold text-slate-800 dark:text-slate-100">
-                  {selectedDistrict.name}
-                </span>
-              </div>
-            )}
           </div>
           <div className="min-h-0 flex-1 overflow-hidden rounded-2xl ring-1 ring-slate-200 shadow-sm dark:ring-slate-700">
             <MiniFloodMap
-              districts={flood.data.districts}
-              selectedDistrictId={selectedDistrict?.id}
+              districts={[]}
+              selectedDistrictId={undefined}
               center={center}
               zoom={12}
               flyTo={mapFlyTo}
@@ -621,37 +607,51 @@ export function WeatherPage() {
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
           <div>
-            <div className="text-sm font-extrabold text-slate-900 dark:text-slate-100">{t('weather.sevenDayForecast')}</div>
+            <div className="text-sm font-extrabold text-slate-900 dark:text-slate-100">Dự báo 7 ngày</div>
             <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              {formatDateFull(forecast7d[0]?.dateIso ?? new Date().toISOString())} →{' '}
-              {formatDateFull(forecast7d[forecast7d.length - 1]?.dateIso ?? new Date().toISOString())}
+              {formatDateFull(forecast7dData[0]?.dateIso ?? new Date().toISOString())} →{' '}
+              {formatDateFull(forecast7dData[forecast7dData.length - 1]?.dateIso ?? new Date().toISOString())}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {forecast7dAI.data && forecast7dAI.data.length > 0 && (
-              <span className="rounded-full bg-gradient-to-r from-sky-100 to-indigo-100 px-3 py-1 text-[11px] font-bold text-sky-700 dark:from-sky-900/40 dark:to-indigo-900/40 dark:text-sky-300 ring-1 ring-sky-200/50 dark:ring-sky-800/50">
+            {forecast7d.data && forecast7d.data.length > 0 && (
+              <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                 ✦ AI CatBoost
               </span>
             )}
-            {([-1, 1] as const).map((dir) => (
-              <button
-                key={dir}
-                type="button"
-                onClick={() => scrollForecast(dir)}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition-all hover:bg-slate-50 hover:shadow-md dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-              >
-                {dir === -1 ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              </button>
-            ))}
+            {forecastSource === 'database' && (
+              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                📦 Cronjob Cache
+              </span>
+            )}
+            {(forecastSource === 'live-owm' || forecastSource === 'live-owm-ai') && (
+              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                🌐 Live OWM
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => scrollForecast(-1)}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollForecast(1)}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
           </div>
         </div>
         <div
           ref={forecastScrollRef}
           className="flex gap-4 overflow-x-auto scroll-smooth p-5 scrollbar-hide"
         >
-          {forecast7d.map((d, i) => (
+          {forecast7dData.map((d, i) => (
             <div key={d.dateIso} className="w-48 min-w-[180px] shrink-0">
-              <WeatherForecastCard d={d} aiDay={forecast7dAI.data?.[i] ?? null} isFirst={i === 0} />
+              <WeatherForecastCard d={d} aiDay={forecast7d.data?.[i] ?? null} isFirst={i === 0} />
             </div>
           ))}
         </div>

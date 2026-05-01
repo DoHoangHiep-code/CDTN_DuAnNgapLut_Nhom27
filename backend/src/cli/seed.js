@@ -104,17 +104,17 @@ const DISTRICT_CENTERS = [
 ]
 
 async function seedGridNodes() {
+  const minLat = 20.8
+  const maxLat = 21.3
+  const minLng = 105.5
+  const maxLng = 106.0
+
   const nodes = []
   for (let i = 1; i <= 50; i++) {
-    const districtIdx = (i - 1) % HANOI_DISTRICTS.length
-    const [baseLat, baseLng] = DISTRICT_CENTERS[districtIdx]
-    // Thêm nhiễu nhỏ để mỗi node trong cùng quận có tọa độ khác nhau
-    const jitter = 0.008
-    const lat = Number((baseLat + (Math.random() - 0.5) * jitter).toFixed(6))
-    const lng = Number((baseLng + (Math.random() - 0.5) * jitter).toFixed(6))
+    const lat = Number(rand(minLat, maxLat).toFixed(6))
+    const lng = Number(rand(minLng, maxLng).toFixed(6))
     nodes.push({
       node_id: 100000 + i,
-      district_name: HANOI_DISTRICTS[districtIdx],
       latitude: lat,
       longitude: lng,
       elevation: Number(rand(0, 25).toFixed(2)),

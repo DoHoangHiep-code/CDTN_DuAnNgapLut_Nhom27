@@ -13,7 +13,7 @@ import { ErrorState } from '../components/ErrorState'
 import { Spinner } from '../components/Spinner'
 import { useAsync } from '../hooks/useAsync'
 import { useReverseGeocode } from '../hooks/useReverseGeocode'
-import { getFloodPrediction, getReports } from '../services/api'
+import { getReports } from '../services/api'
 import { LocationSearch } from '../components/LocationSearch'
 import type { ReportsResponse } from '../utils/types'
 import { useTranslation } from 'react-i18next'
@@ -139,14 +139,18 @@ export function ReportsPage() {
   const [districtInput, setDistrictInput] = useState('')
   const [districtFilter, setDistrictFilter] = useState('')
   const [exporting, setExporting] = useState(false)
+  const [page, setPage] = useState(1)
 
-  const flood = useAsync(getFloodPrediction, [])
+  // Không dùng getFloodPrediction() nữa (tránh scan 53K nodes)
+  // Danh sách quận được thay bằng Nominatim geo-search
   const reports = useAsync(
     () => getReports({ date: date || undefined, district: districtFilter || undefined }),
     [date, districtFilter],
   )
 
   const rows = useMemo(() => reports.data?.rows ?? [], [reports.data])
+  const pagination = reports.data?.pagination
+
   const coords = useMemo(() => rows.map((r) => ({ lat: r.latitude, lng: r.longitude })), [rows])
   const { getLocation } = useReverseGeocode(coords)
 
@@ -159,9 +163,8 @@ export function ReportsPage() {
     return counts
   }, [rows])
 
-  if (reports.loading || flood.loading) return <Spinner label="Loading reports…" />
+  if (reports.loading) return <Spinner label="Loading reports…" />
   if (reports.error) return <ErrorState error={reports.error} onRetry={reports.reload} />
-  if (flood.error) return <ErrorState error={flood.error} onRetry={flood.reload} />
 
   return (
     <div className="space-y-5">
@@ -322,6 +325,31 @@ export function ReportsPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination controls */}
+          {pagination && pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300"
+              >
+                ← Trước
+              </button>
+              <span className="text-xs text-slate-500">
+                Trang {pagination.page} / {pagination.totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page >= pagination.totalPages}
+                onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300"
+              >
+                Tiếp →
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Filter panel */}
@@ -348,6 +376,7 @@ export function ReportsPage() {
               )}
             </div>
 
+
             <div className="space-y-4 p-4">
               {/* Date filter */}
               <div>
@@ -369,7 +398,7 @@ export function ReportsPage() {
                 </label>
                 <LocationSearch
                   id="reports-location-search"
-                  districts={flood.data?.districts ?? []}
+                  districts={[]}
                   placeholder={t('floodMap.searchDistrict')}
                   value={districtInput}
                   onChange={setDistrictInput}

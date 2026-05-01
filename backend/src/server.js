@@ -13,6 +13,9 @@ const { adminUserRouter }      = require('./routes/adminUserRoutes')       // Ro
 const { reportsRouter }        = require('./routes/reportsRoutes')         // Router reports
 const { floodPredictionRouter} = require('./routes/floodPredictionRoutes') // Router compat /flood-prediction
 const { chatbotRouter }        = require('./routes/chatbotRoutes')         // Router chatbot AI
+const { healthCheckRouter }    = require('./routes/healthCheckRoutes')     // Router health-check cloud
+const { sequelize }            = require('./db/sequelize')                 // Sequelize instance để sync/auth
+require('./models') // Nạp toàn bộ model trước sync để Sequelize biết cần tạo/alter bảng nào
 
 // ── Weather Cronjob ──────────────────────────────────────────────────────────
 // Import service cronjob dự báo ngập lụt mỗi 6 tiếng
@@ -38,6 +41,7 @@ app.use('/api/v1', mapRouter)
 app.use('/api/v1', weatherRouter)
 app.use('/api/v1', floodPredictionRouter)
 app.use('/api/v1', chatbotRouter)
+app.use('/api/v1', healthCheckRouter)
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1', profileRouter)
 app.use('/api/v1', adminUserRouter)
@@ -65,13 +69,41 @@ app.use((err, _req, res, _next) => {
   return res.status(status).json({ success: false, error: { message } })
 })
 
-// ── Khởi động server ─────────────────────────────────────────────────────────
+// ── Khởi động server (có bootstrap DB cloud) ────────────────────────────────
 const port = Number(process.env.PORT || 3002)
-app.listen(port, () => {
-  console.log(`Backend listening on :${port}`)
 
-  // Đăng ký Weather Cronjob sau khi server đã listen thành công
-  // → tránh cron chạy trước khi DB connection sẵn sàng
-  startWeatherCron()
-})
+async function bootstrapAndStart() {
+  try {
+    // 1) Kiểm tra kết nối DB trước khi start server để fail-fast khi cấu hình sai.
+    await sequelize.authenticate()
+    console.log('[DB] Kết nối thành công.')
+
+    // 1.1) PostGIS đã được khởi tạo qua Migration 001. Không chạy ở đây để tránh lỗi read-only transaction.
+    console.log('[DB] PostGIS đã được setup qua Migration.')
+
+    // 2) Tự đồng bộ schema: tạo bảng mới + điều chỉnh cột khi khác biệt.
+    // Lưu ý: alter=true tiện cho môi trường dev/staging; production lớn nên cân nhắc migration chuẩn.
+    // await sequelize.sync({ alter: true })
+    console.log('[DB] Đã bỏ qua sequelize.sync do quản lý bằng Migrations.')
+
+    // 3) Chỉ listen khi DB đã sẵn sàng.
+    app.listen(port, () => {
+      console.log(`Backend listening on :${port}`)
+
+      // Đăng ký Weather Cronjob sau khi server đã listen thành công
+      // → tránh cron chạy trước khi DB connection sẵn sàng
+      startWeatherCron()
+    })
+  } catch (err) {
+    // Xử lý kỹ lỗi SSL/kết nối Aiven để dễ debug trên cloud.
+    const message = err instanceof Error ? err.message : 'Unknown bootstrap error'
+    console.error('[Bootstrap] Không thể khởi động server:', message)
+    if (String(message).toLowerCase().includes('ssl')) {
+      console.error('[Bootstrap] Gợi ý: kiểm tra DATABASE_URL và dialectOptions.ssl trong Sequelize.')
+    }
+    process.exit(1)
+  }
+}
+
+bootstrapAndStart()
 
