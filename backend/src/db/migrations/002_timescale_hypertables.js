@@ -12,7 +12,15 @@ module.exports = {
     if (!available) return
 
     await queryInterface.sequelize.query('CREATE EXTENSION IF NOT EXISTS timescaledb;')
+    
+    // TimescaleDB requires the partition column (time) to be part of any UNIQUE or PRIMARY KEY constraints.
+    // Drop the default PK and recreate it including 'time'.
+    await queryInterface.sequelize.query('ALTER TABLE weather_measurements DROP CONSTRAINT weather_measurements_pkey CASCADE;')
+    await queryInterface.sequelize.query('ALTER TABLE weather_measurements ADD PRIMARY KEY (measurement_id, time);')
     await queryInterface.sequelize.query("SELECT create_hypertable('weather_measurements', 'time', if_not_exists => TRUE);")
+
+    await queryInterface.sequelize.query('ALTER TABLE flood_predictions DROP CONSTRAINT flood_predictions_pkey CASCADE;')
+    await queryInterface.sequelize.query('ALTER TABLE flood_predictions ADD PRIMARY KEY (prediction_id, time);')
     await queryInterface.sequelize.query("SELECT create_hypertable('flood_predictions', 'time', if_not_exists => TRUE);")
   },
 

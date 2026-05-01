@@ -63,6 +63,11 @@ function buildExplanation({ riskLevel, depthCm, prcp, temp }) {
 async function ingestCurrentWeatherFromOWM() {
   const now       = new Date()
   const date_only = now.toISOString().slice(0, 10)
+  const rainyMonths = [5, 6, 7, 8, 9, 10]
+  const nowICT = new Date(now.getTime() + 7 * 3600 * 1000)
+  const hour   = nowICT.getUTCHours()
+  const month  = nowICT.getUTCMonth() + 1
+  const rainy_season_flag = rainyMonths.includes(month)
 
   console.log('[WeatherCron/OWM] Fetch current weather cho 8 trạm...')
   const stationWeatherMap = new Map()
@@ -97,6 +102,9 @@ async function ingestCurrentWeatherFromOWM() {
       node_id:       node.node_id,
       time:          now,
       date_only,
+      month,
+      hour,
+      rainy_season_flag,
       temp:          Number(w.temp)      || 0,
       rhum:          Number(w.humidity)  || 0,
       prcp:          Number(w.rain1h)    || 0,
@@ -104,13 +112,16 @@ async function ingestCurrentWeatherFromOWM() {
       prcp_6h:       Number(w.rain1h)    || 0,
       prcp_12h:      Number(w.rain1h)    || 0,
       prcp_24h:      Number(w.rain1h)    || 0,
-      wspd:          Number(w.windSpeed) || 0,   // m/s (OWM trả m/s)
+      wspd:          Number(w.windSpeed) || 0,
+      wdir:          Number(w.windDeg)   || 0,
       pres:          Number(w.pressure)  || 1013,
+      pressure_change_24h: 0,
+      max_prcp_3h:   Number(w.rain1h)    || 0,
+      max_prcp_6h:   Number(w.rain1h)    || 0,
+      max_prcp_12h:  Number(w.rain1h)    || 0,
       location_name: node.location_name ?? null,
-      visibility_km: null,
-      uv_index:      null,
-      dew_point_c:   null,
-      feels_like_c:  null,
+      visibility_km: w.visibility != null ? (w.visibility / 1000) : null,
+      feels_like_c:  Number(w.feels_like) || 0,
     })
   }
 
@@ -120,10 +131,12 @@ async function ingestCurrentWeatherFromOWM() {
   let written = 0
   for (let i = 0; i < records.length; i += BATCH) {
     await WeatherMeasurement.bulkCreate(records.slice(i, i + BATCH), {
+      conflictAttributes: ['node_id', 'time'],
       updateOnDuplicate: [
         'temp', 'rhum', 'prcp', 'prcp_3h', 'prcp_6h', 'prcp_12h', 'prcp_24h',
-        'wspd', 'pres', 'date_only', 'location_name',
-        'visibility_km', 'uv_index', 'dew_point_c', 'feels_like_c',
+        'wspd', 'wdir', 'pres', 'date_only', 'month', 'hour', 'rainy_season_flag',
+        'pressure_change_24h', 'max_prcp_3h', 'max_prcp_6h', 'max_prcp_12h',
+        'location_name', 'visibility_km', 'feels_like_c',
       ],
     })
     written += Math.min(BATCH, records.length - i)
@@ -200,10 +213,13 @@ async function processNodeWithOWMForecast(node, owmPoints) {
     const rainy_season_flag = rainyMonths.includes(month)
 
     const temp = p.temp
+    const feels_like_c = p.feels_like
     const rhum = p.humidity
     const prcp = p.rain3h            // mm trong 3h
     const pres = p.pressure
     const wspd = p.windSpeed         // m/s – đúng đơn vị AI expect
+    const wdir = p.windDeg
+    const visibility_km = p.visibility != null ? (p.visibility / 1000) : null
 
     // Tính prcp windows từ sliding window trên mảng 3h
     // Mỗi step = 3h → prcp_3h = 1 step, prcp_6h = 2 step, prcp_12h = 4 step, prcp_24h = 8 step
@@ -245,11 +261,8 @@ async function processNodeWithOWMForecast(node, owmPoints) {
     originalData.push({
       forecastTime: p.timeUtc,   // UTC
       prcp, temp, date_only, month, hour, rainy_season_flag,
-      // OWM /forecast không có visibility/UV/dew/feels_like trên free tier
-      visibility_km: null,
-      uv_index:      null,
-      dew_point_c:   null,
-      feels_like_c:  null,
+      visibility_km,
+      feels_like_c,
     })
 
     weatherRecords.push({
@@ -258,7 +271,7 @@ async function processNodeWithOWMForecast(node, owmPoints) {
       date_only,
       month,
       hour,
-      rainy_season_flag,
+      rainy_season_flag: rainyMonths.includes(month) ? true : false,
       location_name,
       temp,
       rhum,
@@ -268,11 +281,14 @@ async function processNodeWithOWMForecast(node, owmPoints) {
       prcp_12h,
       prcp_24h,
       wspd,
+      wdir,
       pres,
-      visibility_km: null,
-      uv_index:      null,
-      dew_point_c:   null,
-      feels_like_c:  null,
+      pressure_change_24h: 0,
+      max_prcp_3h:  prcp_3h,
+      max_prcp_6h:  prcp_6h,
+      max_prcp_12h: prcp_12h,
+      visibility_km,
+      feels_like_c,
     })
   }
 
@@ -319,10 +335,11 @@ async function upsertWeatherMeasurements(records) {
   let total = 0
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
     await WeatherMeasurement.bulkCreate(records.slice(i, i + BATCH_SIZE), {
+      conflictAttributes: ['node_id', 'time'],
       updateOnDuplicate: [
         'temp', 'rhum', 'prcp', 'prcp_3h', 'prcp_6h', 'prcp_12h', 'prcp_24h',
-        'wspd', 'pres', 'date_only',
-        'visibility_km', 'uv_index', 'dew_point_c', 'feels_like_c',
+        'wspd', 'wdir', 'pres', 'date_only',
+        'visibility_km', 'feels_like_c',
         'month', 'hour', 'rainy_season_flag', 'location_name',
       ],
     })
@@ -339,10 +356,11 @@ async function upsertPredictions(records) {
     return
   }
 
-  // Chia batch 200 để tránh Supabase reject
+  // Chia batch 200 để tránh Aiven reject
   const BATCH_SIZE = 200
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
     await FloodPrediction.bulkCreate(records.slice(i, i + BATCH_SIZE), {
+      conflictAttributes: ['node_id', 'time'],
       updateOnDuplicate: [
         'flood_depth_cm', 'risk_level', 'explanation',
         'date_only', 'month', 'hour', 'rainy_season_flag', 'location_name',
@@ -374,7 +392,7 @@ async function upsertPredictions(records) {
  *  Phase 0 – OWM Current (8 calls): Lấy thời tiết hiện tại → fan-out weather_measurements
  *  Phase 1 – OWM Forecast 5d (8 calls): Lấy 40 data points × 3h cho 8 trạm
  *  Phase 2 – AI Inference: Mỗi node trong cụm dùng forecast của trạm → gọi AI batch
- *  Phase 3 – Upsert: flood_predictions + weather_measurements lên Supabase
+ *  Phase 3 – Upsert: flood_predictions + weather_measurements lên Aiven
  *
  * Tổng API calls: 8 (current) + 8 (forecast) = 16 calls/lần chạy
  */
@@ -383,6 +401,16 @@ async function runWeatherCron() {
   console.log(`\n[WeatherCron] ⏰ Bắt đầu lúc ${new Date().toISOString()} (OWM Station-based)`)
   console.log(`[WeatherCron] Số trạm đại diện: ${WEATHER_STATIONS.length}`)
   console.log(`[WeatherCron] Nguồn dữ liệu: OpenWeatherMap /data/2.5/forecast (5d/3h)`)
+
+  try {
+    console.log('[WeatherCron] Đang dọn dẹp dữ liệu cũ (TRUNCATE) để tiết kiệm dung lượng DB...')
+    const { sequelize } = require('../models/index')
+    await sequelize.query('TRUNCATE TABLE weather_measurements CASCADE;')
+    await sequelize.query('TRUNCATE TABLE flood_predictions CASCADE;')
+    console.log('[WeatherCron] ✅ Đã TRUNCATE xong.')
+  } catch (err) {
+    console.warn('[WeatherCron] ⚠️ Không thể TRUNCATE (DB có thể đang bị khoá Read-Only):', err.message)
+  }
 
   try {
     // ── Phase 0: Ingest current weather từ OWM ───────────────────────────────

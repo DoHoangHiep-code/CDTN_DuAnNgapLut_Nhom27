@@ -28,8 +28,6 @@ module.exports = (sequelize) => {
 
       // ── Power BI dimensional fields ───────────────────────────────────────
       visibility_km:  { type: DataTypes.DECIMAL(6, 2),  allowNull: true }, // Tầm nhìn (km)
-      uv_index:       { type: DataTypes.DECIMAL(4, 1),  allowNull: true }, // Chỉ số UV
-      dew_point_c:    { type: DataTypes.DECIMAL(5, 2),  allowNull: true }, // Điểm sương (°C)
       feels_like_c:   { type: DataTypes.DECIMAL(5, 2),  allowNull: true }, // Cảm giác thực (°C)
 
       // ── BI Time-Intelligence fields ───────────────────────────────────────

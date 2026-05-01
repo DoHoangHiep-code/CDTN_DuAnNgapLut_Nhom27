@@ -3,9 +3,9 @@
 /**
  * import_grid_features.js  (v2 – Throttled Edition)
  * ─────────────────────────────────────────────────────────────────────────────
- * Nạp 53.291 điểm lưới từ CSV vào bảng grid_nodes trên Supabase.
+ * Nạp 53.291 điểm lưới từ CSV vào bảng grid_nodes trên Aiven.
  * Phiên bản này áp dụng "Throttling Strategy" để tránh Timeout:
- *   • BATCH_SIZE   = 200 rows/lần  (an toàn với Supabase connection pooler)
+ *   • BATCH_SIZE   = 200 rows/lần  (an toàn với Aiven connection pooler)
  *   • DELAY_MS     = 600 ms nghỉ giữa mỗi batch
  *   • MAX_RETRIES  = 3 lần thử lại mỗi batch nếu bị timeout/lỗi
  *   • Retry delay  = 2s (lần 1) → 4s (lần 2) → 8s (lần 3) — exponential backoff
@@ -25,10 +25,10 @@ const { GridNode } = require('../src/models')
 
 // ─── Cấu hình Throttling ─────────────────────────────────────────────────────
 
-const BATCH_SIZE   = 200    // Số rows mỗi lần bulkCreate (Supabase an toàn ≤500)
-const DELAY_MS     = 600    // Nghỉ giữa các batch (ms) – tránh quá tải connection pool
+const BATCH_SIZE   = 1000   // Số rows mỗi lần bulkCreate (Aiven có thể chịu tải tốt hơn)
+const DELAY_MS     = 100    // Nghỉ giữa các batch (ms)
 const MAX_RETRIES  = 3      // Số lần thử lại khi batch lỗi
-const RETRY_BASE_MS = 2000  // Base delay cho exponential backoff (ms)
+const RETRY_BASE_MS = 1000  // Base delay cho exponential backoff (ms)
 
 const CSV_PATH = path.join(__dirname, '..', 'data', 'Hanoi_Grid_Features_Final_v2.csv')
 
@@ -135,7 +135,7 @@ async function importGridFeatures() {
   // 2. Kết nối DB
   try {
     await sequelize.authenticate()
-    console.log('[DB] ✅ Kết nối Supabase thành công.')
+    console.log('[DB] ✅ Kết nối Aiven thành công.')
   } catch (err) {
     console.error('[DB] ❌ Kết nối thất bại:', err.message)
     process.exit(1)
@@ -231,7 +231,7 @@ async function importGridFeatures() {
   console.log(`    Thời gian        : ${elapsed}s`)
   console.log(`    Cấu hình         : batch=${BATCH_SIZE}, delay=${DELAY_MS}ms, retry=×${MAX_RETRIES}`)
   console.log('──────────────────────────────────────────────────────────────\n')
-  console.log('📋  Kiểm tra trên Supabase SQL Editor:')
+  console.log('📋  Kiểm tra trên Aiven SQL Editor:')
   console.log('    SELECT COUNT(*) FROM grid_nodes;')
   console.log('    SELECT node_id, grid_id, location_name, elevation')
   console.log('    FROM grid_nodes ORDER BY node_id ASC LIMIT 10;')

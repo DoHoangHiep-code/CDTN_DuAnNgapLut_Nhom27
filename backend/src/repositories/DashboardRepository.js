@@ -49,7 +49,7 @@ class DashboardRepository {
    * 24h hourly forecast: mưa (prcp) + độ ngập dự đoán (flood_depth_cm), bucket theo local hour.
    *
    * CRITICAL:
-   * - Dùng date_trunc() thay time_bucket() vì Supabase chạy PostgreSQL vanilla (không có TimescaleDB).
+   * - Dùng date_trunc() thay time_bucket() vì Aiven chạy PostgreSQL vanilla (không có TimescaleDB).
    * - Trả đúng field: time, prcp, flood_depth_cm (để tooltip dashboard hiển thị).
    */
   async getRainForecast24h() {

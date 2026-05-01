@@ -74,7 +74,7 @@ router.get('/weather/forecast7d', async (req, res, next) => {
     const lat = Number.isFinite(Number(req.query.lat)) ? Number(req.query.lat) : HANOI_LAT
     const lon = Number.isFinite(Number(req.query.lon)) ? Number(req.query.lon) : HANOI_LON
 
-    // ── Phase 1: Thử đọc từ DB (Supabase cache bởi Cronjob) ──────────────────
+    // ── Phase 1: Thử đọc từ DB (Aiven cache bởi Cronjob) ──────────────────
     const cacheThreshold = new Date(Date.now() - CACHE_MAX_AGE_H * 3600 * 1000)
 
     // Lấy 7 ngày tới từ flood_predictions (DB đã có dữ liệu thật từ Cronjob, có thể tối đa 5 ngày, sẽ pad)

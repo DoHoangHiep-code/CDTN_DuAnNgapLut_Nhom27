@@ -62,15 +62,15 @@ async function assignStations() {
   // Kết nối DB
   try {
     await sequelize.authenticate()
-    console.log('[DB] ✅ Kết nối Supabase thành công.')
+    console.log('[DB] ✅ Kết nối Aiven thành công.')
   } catch (err) {
     console.error('[DB] ❌ Kết nối thất bại:', err.message)
     process.exit(1)
   }
 
   // Sync schema để cột weather_station_id được tạo nếu chưa có
-  await sequelize.sync({ alter: true })
-  console.log('[DB] ✅ Schema sync OK.\n')
+  // await sequelize.sync({ alter: true })
+  // console.log('[DB] ✅ Schema sync OK.\n')
 
   // Lấy toàn bộ nodes (chỉ cần node_id, lat, lon)
   console.log('[Query] Đang lấy danh sách GridNode...')
@@ -136,7 +136,7 @@ async function assignStations() {
   console.log(`    Tổng nodes cập nhật : ${totalUpdated.toLocaleString('vi-VN')}`)
   console.log(`    Thời gian           : ${elapsed}s`)
   console.log('──────────────────────────────────────────────────────────────')
-  console.log('\n📋 Kiểm tra trên Supabase SQL Editor:')
+  console.log('\n📋 Kiểm tra trên Aiven SQL Editor:')
   console.log('    SELECT weather_station_id, COUNT(*) AS node_count')
   console.log('    FROM grid_nodes')
   console.log('    GROUP BY weather_station_id')
