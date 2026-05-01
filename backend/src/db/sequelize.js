@@ -4,14 +4,14 @@ const config = require('./config')
 const env = process.env.NODE_ENV || 'development'
 const cfg = config[env]
 
-// Ưu tiên dùng DATABASE_URL (phù hợp môi trường cloud như Supabase).
+// Ưu tiên dùng DATABASE_URL (phù hợp môi trường cloud như Aiven).
 // Nếu không có thì fallback về cấu hình cũ theo từng biến DB_*.
 // Ưu tiên pooler URL (IPv4) nếu có, vì nhiều mạng nội bộ không đi được IPv6 direct DB host.
 const rawDatabaseUrl = process.env.DATABASE_URL_POOLER || process.env.DATABASE_URL
 
 /**
  * Chuẩn hóa DATABASE_URL để tránh lỗi "Invalid URL" khi password có ký tự đặc biệt
- * như #, %, !, *... (rất hay gặp với Supabase URI).
+ * như #, %, !, *... (rất hay gặp với Aiven URI).
  */
 function normalizeDatabaseUrl(input) {
   if (typeof input !== 'string' || !input.trim()) return ''

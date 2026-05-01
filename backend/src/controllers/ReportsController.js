@@ -9,13 +9,14 @@ class ReportsController {
     this.createActualFloodReport = this.createActualFloodReport.bind(this) // Bind handler cho route /actual-flood
   }
 
-  // GET /api/v1/reports
-  async list(_req, res, next) {
+  // GET /api/v1/reports?page=1&limit=50
+  async list(req, res, next) {
     try {
-      const rows = await this.reportsService.list() // Lấy danh sách
+      const { page = 1, limit = 50 } = req.query
+      const result = await this.reportsService.list({ page, limit })
 
       // Chuẩn hoá shape trả về để frontend render/export ổn định
-      const mapped = rows.map((r) => ({
+      const mapped = result.rows.map((r) => ({
         id: `afr_${r.report_id}`,
         createdAtIso: r.created_at,
         latitude: Number(r.latitude),
@@ -24,10 +25,13 @@ class ReportsController {
         userFullName: r.user_full_name ?? null,
       }))
 
-      // Trả về dạng { rows: [...] } để tương thích UI cũ (từng dùng mock)
-      return res.status(200).json({ success: true, data: { rows: mapped } })
+      // Trả về dạng { rows, pagination } – backward compat: rows vẫn ở đó
+      return res.status(200).json({
+        success: true,
+        data: { rows: mapped, pagination: result.pagination },
+      })
     } catch (err) {
-      return next(err) // Đẩy lỗi cho global handler
+      return next(err)
     }
   }
 

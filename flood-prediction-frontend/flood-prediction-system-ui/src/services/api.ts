@@ -36,15 +36,52 @@ export async function getForecastLatest(lat: number, lon: number) {
   return res.data ?? null
 }
 
+// ── Flood prediction theo BBox viewport (thay thế getFloodPrediction() cho Map) ──
+// Chỉ trả nodes nằm trong khung hình hiện tại, giới hạn 200 records mỗi lần.
+// Endpoint: GET /api/v1/flood-prediction?min_lat=&max_lat=&min_lng=&max_lng=&limit=
+export async function getFloodPredictionBbox(bbox: {
+  minLat: number
+  maxLat: number
+  minLng: number
+  maxLng: number
+  limit?: number
+}) {
+  const res = await apiV1.get<any>('/flood-prediction', {
+    params: {
+      min_lat: bbox.minLat,
+      max_lat: bbox.maxLat,
+      min_lng: bbox.minLng,
+      max_lng: bbox.maxLng,
+      limit: bbox.limit ?? 200,
+    },
+  })
+  return (res.data?.data ?? res.data) as {
+    updatedAtIso: string
+    total: number
+    districts: Array<{
+      id: string
+      name: string
+      risk: string
+      predictedRainfallMm: number
+      flood_depth_cm: number
+      polygon: [number, number][]
+      updatedAtIso: string
+    }>
+  }
+}
+
+
 // ── Thời tiết thực tế từ OpenWeatherMap ──
 export async function getLiveWeather(lat: number, lon: number) {
   const res = await apiV1.get<any>('/weather/live', { params: { lat, lon } })
   return res.data?.data ?? res.data
 }
 
-// ── Dự báo 7 ngày bằng CatBoost AI ──
-// Trả về mảng 7 phần tử: { dateIso, minTempC, maxTempC, rainfallMm, humidityPct, flood_depth_cm, risk_level, usingAI }
-export async function getForecast7dAI(lat?: number, lon?: number) {
+// ── Dự báo 7 ngày từ OpenWeatherMap + CatBoost AI ──
+// Endpoint: GET /api/v1/weather/forecast7d
+// source: 'database' (Cronjob cache) hoặc 'live-owm' (real-time fallback)
+// Trả về mảng 7 phần tử
+export async function getForecast7d(lat?: number, lon?: number) {
   const res = await apiV1.get<any>('/weather/forecast7d', { params: { lat, lon } })
   return (res.data?.data ?? []) as Array<{
     dateIso: string
@@ -55,6 +92,7 @@ export async function getForecast7dAI(lat?: number, lon?: number) {
     flood_depth_cm: number
     risk_level: string
     usingAI: boolean
+    source: string
   }>
 }
 

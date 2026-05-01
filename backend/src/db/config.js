@@ -1,6 +1,15 @@
 require('dotenv').config();
+
+const dialectOptions = {
+  ssl: {
+    require: true,
+    rejectUnauthorized: false
+  }
+};
+
 module.exports = {
   development: {
+    use_env_variable: 'DATABASE_URL',
     username: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || '123456',
     database: process.env.DB_NAME || 'flood_prediction_db',
@@ -8,6 +17,7 @@ module.exports = {
     port: Number(process.env.DB_PORT || 5432),
     dialect: 'postgres',
     logging: false,
+    dialectOptions,
   },
   test: {
     username: process.env.DB_USER || 'postgres',
@@ -17,6 +27,7 @@ module.exports = {
     port: Number(process.env.DB_PORT || 5432),
     dialect: 'postgres',
     logging: false,
+    dialectOptions,
   },
   production: {
     username: process.env.DB_USER,
@@ -26,6 +37,7 @@ module.exports = {
     port: Number(process.env.DB_PORT || 5432),
     dialect: 'postgres',
     logging: false,
+    dialectOptions,
   },
 }
 
