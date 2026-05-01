@@ -19,7 +19,7 @@ import { LocationSearch, type NominatimResult } from '../components/LocationSear
 import { FloodReportModal } from '../components/FloodReportModal'
 import { FloodWarningCard } from '../components/FloodWarningCard'
 import { useSettings } from '../context/SettingsContext'
-
+import ExpertChatbot from '../components/ExpertChatbot/ExpertChatbot'
 // Tile URLs cho từng kiểu bản đồ
 const TILE_URLS: Record<string, string> = {
   streets: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -537,7 +537,8 @@ export function MapPage() {
           </div>
         </Card>
       </div>
-
+     {/* ── Chatbot chuyên gia ngập lụt ── */}
+      <ExpertChatbot />
       {/* ── Modal Báo cáo ngập lụt ── */}
       {/* Render ngoài luồng DOM bình thường nhờ fixed positioning trong FloodReportModal */}
       <FloodReportModal

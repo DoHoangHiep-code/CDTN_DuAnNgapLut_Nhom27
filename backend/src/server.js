@@ -15,6 +15,7 @@ const { floodPredictionRouter} = require('./routes/floodPredictionRoutes') // Ro
 const { chatbotRouter }        = require('./routes/chatbotRoutes')         // Router chatbot AI
 const { healthCheckRouter }    = require('./routes/healthCheckRoutes')     // Router health-check cloud
 const { sequelize }            = require('./db/sequelize')                 // Sequelize instance để sync/auth
+const expertChatRoutes = require('./routes/expertChat.routes')            // Chatboot
 require('./models') // Nạp toàn bộ model trước sync để Sequelize biết cần tạo/alter bảng nào
 
 // ── Weather Cronjob ──────────────────────────────────────────────────────────
@@ -55,7 +56,7 @@ app.get('/api/v1/cron/trigger', (_req, res) => {
   // Fire-and-forget: trả 200 ngay, cron chạy async
   manualTrigger().catch((err) => console.error('[CronTrigger] Lỗi:', err))
 })
-
+app.use('/api/v1/chat', expertChatRoutes)
 app.use('/api/v1', reportsRouter)
 
 // ── Serve static uploads ─────────────────────────────────────────────────────
