@@ -593,14 +593,14 @@ export function WeatherPage() {
 
         {/* District table (4/12) */}
         <div className="lg:col-span-4" style={{ height: 460 }}>
-          <DistrictRiskTable districts={flood.data.districts} />
+          <DistrictRiskTable districts={[]} />
         </div>
       </div>
 
       {/* ── Hàng 2: Biểu đồ mưa 24h + Tổng quan rủi ro ── */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Rain24hChart forecast24h={weather.data.forecast24h} />
-        <RiskOverview districts={flood.data.districts} />
+        <RiskOverview districts={[]} />
       </div>
 
       {/* ── 7-day forecast ── */}
