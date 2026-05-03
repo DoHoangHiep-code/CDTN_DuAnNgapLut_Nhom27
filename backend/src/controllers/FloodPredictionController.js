@@ -54,6 +54,9 @@ class FloodPredictionController {
     this.sequelize = sequelize
     this.getFloodPrediction = this.getFloodPrediction.bind(this)
     this.triggerBatch = this.triggerBatch.bind(this)
+    this.getAvailableTimes = this.getAvailableTimes.bind(this)
+    this.syncWithWeather = this.syncWithWeather.bind(this)
+    this.validateCoverage = this.validateCoverage.bind(this)
   }
 
   /**
@@ -61,6 +64,12 @@ class FloodPredictionController {
    *
    * BBox mode  → query DB trong viewport → trả districts paginated
    * Legacy mode → demoData (không AI real-time)
+   *
+   * Query params:
+   *  - min_lat, max_lat, min_lng, max_lng: bbox tọa độ
+   *  - prediction_time: ISO 8601 datetime (e.g., 2026-05-03T15:00:00Z)
+   *                     Nếu không có → lấy mới nhất (ORDER BY time DESC)
+   *  - limit: số records tối đa (mặc định 200, max 500)
    */
   async getFloodPrediction(req, res, next) {
     try {
@@ -85,10 +94,21 @@ class FloodPredictionController {
           })
         }
 
+        // Parse prediction_time (ISO 8601)
+        let predictionTime = req.query.prediction_time ? new Date(req.query.prediction_time) : null
+        let isValidTime = predictionTime && !isNaN(predictionTime.getTime())
+
+        // Validate time nếu được cung cấp
+        if (req.query.prediction_time && !isValidTime) {
+          return res.status(400).json({
+            success: false,
+            error: { message: 'prediction_time phải là ISO 8601 datetime hợp lệ.' },
+          })
+        }
+
         // Query flood_predictions JOIN grid_nodes trong bbox
         // Chỉ SELECT các cột cần thiết → giảm payload JSON
-        const rows = await this.sequelize.query(
-          `SELECT
+        let query = `SELECT
              gn.node_id,
              gn.latitude,
              gn.longitude,
@@ -101,19 +121,30 @@ class FloodPredictionController {
            LEFT JOIN LATERAL (
              SELECT risk_level, flood_depth_cm, time, explanation
              FROM   flood_predictions
-             WHERE  node_id = gn.node_id
+             WHERE  node_id = gn.node_id`
+
+        const replacements = { minLat, maxLat, minLng, maxLng, limit }
+
+        // Nếu có prediction_time → filter chính xác theo thời gian
+        // Nếu không → lấy mới nhất
+        if (isValidTime) {
+          query += ` AND time = :predictionTime`
+          replacements.predictionTime = predictionTime
+        }
+
+        query += `
              ORDER  BY time DESC
              LIMIT  1
            ) fp ON TRUE
            WHERE gn.latitude  BETWEEN :minLat AND :maxLat
              AND gn.longitude BETWEEN :minLng AND :maxLng
            ORDER BY gn.node_id
-           LIMIT :limit`,
-          {
-            replacements: { minLat, maxLat, minLng, maxLng, limit },
-            type: QueryTypes.SELECT,
-          },
-        )
+           LIMIT :limit`
+
+        const rows = await this.sequelize.query(query, {
+          replacements,
+          type: QueryTypes.SELECT,
+        })
 
         if (!rows || rows.length === 0) {
           // Viewport không có node nào → trả mảng rỗng (không fallback demoData)
@@ -165,6 +196,79 @@ class FloodPredictionController {
         success: true,
         count: results?.length ?? 0,
         data: results,
+      })
+    } catch (err) {
+      return next(err)
+    }
+  }
+
+  /**
+   * GET /api/v1/flood-prediction/available-times
+   * Lấy danh sách các thời gian dự báo có sẵn trong database.
+   * Trả về mảng ISO 8601 datetimes, sorted asc, max 100 records.
+   */
+  async getAvailableTimes(_req, res, next) {
+    try {
+      const rows = await this.sequelize.query(
+        `SELECT DISTINCT time
+         FROM flood_predictions
+         WHERE time IS NOT NULL
+         ORDER BY time ASC
+         LIMIT 100`,
+        {
+          type: QueryTypes.SELECT,
+        },
+      )
+
+      const times = rows.map((r) => r.time instanceof Date ? r.time.toISOString() : r.time)
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          times,
+          total: times.length,
+        },
+      })
+    } catch (err) {
+      return next(err)
+    }
+  }
+
+  /**
+   * POST /api/v1/flood-prediction/sync-with-weather
+   * Sincronizar predictions com weather_measurements
+   * Cria predictions para todos os weather records que não têm prediction
+   */
+  async syncWithWeather(req, res, next) {
+    try {
+      const limit = Math.min(parseInt(req.query.limit) || 200, 1000)
+      const batchSize = Math.min(parseInt(req.query.batch_size) || 20, 100)
+
+      console.log(`[API] Iniciando sync com limit=${limit}, batchSize=${batchSize}`)
+
+      const result = await this.predictionService.syncPredictionsWithWeather(limit, batchSize)
+
+      return res.status(200).json({
+        success: true,
+        data: result,
+      })
+    } catch (err) {
+      return next(err)
+    }
+  }
+
+  /**
+   * GET /api/v1/flood-prediction/validate-coverage
+   * Validar integridade de predictions vs weather_measurements
+   * Retorna: total weather records, total predictions, gaps, coverage %
+   */
+  async validateCoverage(_req, res, next) {
+    try {
+      const coverage = await this.predictionService.validateCoverage()
+
+      return res.status(200).json({
+        success: true,
+        data: coverage,
       })
     } catch (err) {
       return next(err)

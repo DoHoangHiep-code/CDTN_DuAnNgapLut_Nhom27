@@ -52,6 +52,9 @@ function extractPlaceNameFromMessage(message) {
 async function queryAreaByPlaceName(message) {
   const placeName = extractPlaceNameFromMessage(message)
 
+  console.log('[Chatbot] Original message:', message)
+  console.log('[Chatbot] Place extracted:', placeName)
+
   // 1. Thử tìm trực tiếp trong DB theo location_name, grid_id, node_id
   const directRows = await queryForExplanation(placeName)
 
@@ -196,19 +199,22 @@ async function geocodePlaceInHanoi(placeName) {
   return result
 }
 
-function normalizeText(str) {
-  return String(str || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 function extractPlaceNameFromMessage(message) {
   let text = normalizeText(message)
+
+  const patterns = [
+    /(?:o|tai|den|gan)\s+(.+)$/,
+    /(?:khu vuc)\s+(.+?)(?:\s+co\s+nguy\s+co|\s+nguy\s+co|\s+bi\s+ngap|$)/,
+    /(?:cua khu vuc)\s+(.+)$/,
+  ]
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    if (match && match[1]) {
+      text = match[1]
+      break
+    }
+  }
 
   const removeWords = [
     'vi sao',
@@ -220,12 +226,18 @@ function extractPlaceNameFromMessage(message) {
     'tinh trang ngap cua khu vuc',
     'tinh hinh ngap',
     'tinh trang ngap',
+    'trong 12h toi',
+    'trong 24h toi',
+    'trong 6h toi',
+    '12h toi',
+    '24h toi',
+    '6h toi',
+    'hien tai',
+    'bay gio',
     'khu vuc',
     'co nguy co cao',
     'nguy co cao',
     'ngap',
-    'hien tai',
-    'bay gio',
     'ha noi',
   ]
 
@@ -650,6 +662,171 @@ async function queryForExplanation(keyword) {
   })
 }
 
+async function queryForecastByTimeSteps(nodeId, forecastHours = 12) {
+  const sql = `
+    SELECT
+      fp.time,
+      fp.risk_level::text AS risk_level,
+      fp.flood_depth_cm,
+      fp.explanation,
+
+      wm.prcp,
+      wm.prcp_3h,
+      wm.prcp_6h,
+      wm.prcp_12h,
+      wm.prcp_24h,
+      wm.temp,
+      wm.rhum,
+      wm.wspd,
+      wm.pres,
+      wm.pressure_change_24h,
+      wm.max_prcp_3h,
+      wm.max_prcp_6h,
+      wm.max_prcp_12h,
+      wm.rainy_season_flag
+    FROM flood_predictions fp
+    LEFT JOIN LATERAL (
+      SELECT *
+      FROM weather_measurements wm
+      WHERE wm.node_id = fp.node_id
+      ORDER BY ABS(EXTRACT(EPOCH FROM (wm.time - fp.time))) ASC
+      LIMIT 1
+    ) wm ON true
+    WHERE fp.node_id = :node_id
+      AND fp.time BETWEEN NOW() - INTERVAL '3 hours'
+                      AND NOW() + (:forecast_hours * INTERVAL '1 hour')
+    ORDER BY fp.time ASC
+  `
+
+  return sequelize.query(sql, {
+    type: QueryTypes.SELECT,
+    replacements: {
+      node_id: nodeId,
+      forecast_hours: forecastHours,
+    },
+  })
+}
+
+function buildTimelineResponse(rows, forecastHours = 12) {
+  if (!rows.length) {
+    return `## Dự báo ngập theo từng mốc 3 giờ\n\n📭 Chưa có dữ liệu dự báo trong ${forecastHours} giờ tới cho khu vực này.`
+  }
+
+  const now = new Date()
+  const buckets = []
+
+  for (let start = 0; start < forecastHours; start += 3) {
+    const end = start + 3
+
+    const bucketRows = rows.filter(r => {
+      const diffHour = (new Date(r.time) - now) / 3600000
+
+      // Cho phép mốc gần hiện tại lệch nhẹ về quá khứ
+      if (start === 0) {
+        return diffHour >= -3 && diffHour < 3
+      }
+
+      return diffHour >= start && diffHour < end
+    })
+
+    if (!bucketRows.length) continue
+
+    const avg = (key) => {
+      const values = bucketRows.map(r => Number(r[key] || 0))
+      return values.reduce((a, b) => a + b, 0) / values.length
+    }
+
+    const max = (key) => {
+      return Math.max(...bucketRows.map(r => Number(r[key] || 0)))
+    }
+
+    const worstRow = bucketRows
+      .slice()
+      .sort((a, b) => Number(b.flood_depth_cm || 0) - Number(a.flood_depth_cm || 0))[0]
+
+    buckets.push({
+      label: `Trong ${end} giờ tới`,
+      time: worstRow.time,
+      risk_level: worstRow.risk_level,
+      max_depth: max('flood_depth_cm'),
+      avg_prcp: avg('prcp'),
+      avg_prcp_3h: avg('prcp_3h'),
+      avg_prcp_6h: avg('prcp_6h'),
+      avg_prcp_12h: avg('prcp_12h'),
+      avg_prcp_24h: avg('prcp_24h'),
+      avg_temp: avg('temp'),
+      avg_rhum: avg('rhum'),
+      avg_wspd: avg('wspd'),
+      avg_pres: avg('pres'),
+      max_prcp_3h: max('max_prcp_3h'),
+      max_prcp_6h: max('max_prcp_6h'),
+      max_prcp_12h: max('max_prcp_12h'),
+      explanation: worstRow.explanation,
+    })
+  }
+
+  if (!buckets.length) {
+    return `## Dự báo ngập theo từng mốc 3 giờ\n\n📭 Có dữ liệu node nhưng chưa có bản ghi dự báo phù hợp trong ${forecastHours} giờ tới.`
+  }
+
+  const mostDangerous = buckets
+    .slice()
+    .sort((a, b) => Number(b.max_depth || 0) - Number(a.max_depth || 0))[0]
+
+  let msg = `## Dự báo ngập theo từng mốc 3 giờ\n\n`
+
+  msg += `🚨 **Mốc cần chú ý nhất:** ${mostDangerous.label}\n`
+  msg += `- Nguy cơ: **${riskLabel(mostDangerous.risk_level)}**\n`
+  msg += `- Độ sâu ngập lớn nhất: **${Number(mostDangerous.max_depth).toFixed(1)} cm**\n\n`
+
+  msg += `---\n\n`
+
+  buckets.forEach(b => {
+    const isDanger =
+      b === mostDangerous ||
+      Number(b.max_depth || 0) >= 20 ||
+      ['high', 'severe'].includes(b.risk_level)
+
+    msg += `### ${isDanger ? '🚨 ' : ''}${b.label}\n\n`
+
+    if (isDanger) {
+      msg += `🚨 **Cảnh báo: Đây là mốc có nguy cơ cần chú ý.**\n\n`
+    }
+
+    msg += `- Thời điểm đại diện: **${formatVN(b.time)}**\n`
+    msg += `- Nguy cơ ngập: **${riskLabel(b.risk_level)}**\n`
+    msg += `- Độ sâu ngập lớn nhất: **${Number(b.max_depth).toFixed(1)} cm**\n\n`
+
+    msg += `**Nhóm thời tiết:**\n`
+    msg += `- Mưa hiện tại trung bình: **${b.avg_prcp.toFixed(2)} mm**\n`
+    msg += `- Mưa tích lũy 3h: **${b.avg_prcp_3h.toFixed(2)} mm**\n`
+    msg += `- Mưa tích lũy 6h: **${b.avg_prcp_6h.toFixed(2)} mm**\n`
+    msg += `- Mưa tích lũy 12h: **${b.avg_prcp_12h.toFixed(2)} mm**\n`
+    msg += `- Mưa tích lũy 24h: **${b.avg_prcp_24h.toFixed(2)} mm**\n`
+    msg += `- Mưa cực đại 3h: **${b.max_prcp_3h.toFixed(2)} mm**\n`
+    msg += `- Mưa cực đại 6h: **${b.max_prcp_6h.toFixed(2)} mm**\n`
+    msg += `- Mưa cực đại 12h: **${b.max_prcp_12h.toFixed(2)} mm**\n`
+    msg += `- Nhiệt độ: **${b.avg_temp.toFixed(1)}°C**\n`
+    msg += `- Độ ẩm: **${b.avg_rhum.toFixed(0)}%**\n`
+    msg += `- Gió: **${b.avg_wspd.toFixed(1)} km/h**\n`
+    msg += `- Áp suất: **${b.avg_pres.toFixed(1)} hPa**\n\n`
+
+    msg += `**Khả năng ngập lụt:**\n`
+
+    if (b.max_depth >= 50 || b.risk_level === 'severe') {
+      msg += `- Nguy cơ rất cao, không nên di chuyển qua khu vực này nếu không cần thiết.\n\n`
+    } else if (b.max_depth >= 20 || b.risk_level === 'high') {
+      msg += `- Nguy cơ cao, nên hạn chế di chuyển và tránh vùng trũng thấp.\n\n`
+    } else if (b.max_depth >= 5 || b.risk_level === 'medium') {
+      msg += `- Có khả năng ngập nhẹ đến trung bình, cần theo dõi thêm.\n\n`
+    } else {
+      msg += `- Tạm thời chưa có cảnh báo ngập đáng kể.\n\n`
+    }
+  })
+
+  return msg.trim()
+}
+
 function replyGreeting() {
   return `👋 Xin chào! Tôi là **AQUA Bot**.
 
@@ -1001,7 +1178,17 @@ router.post('/chatbot/ask', async (req, res, next) => {
 
       case 'AREA_STATUS':
         data = await queryAreaByPlaceName(message)
-        reply = await replyExplanation(data)
+
+        if (!data.length) {
+          reply = 'Không tìm thấy khu vực.'
+          break
+        }
+        const nodeId = data[0].node_id
+        const forecastHours = 12
+        const timelineRows = await queryForecastByTimeSteps(nodeId, forecastHours)
+        const timelineMsg = buildTimelineResponse(timelineRows, forecastHours)
+        const explainMsg = await replyExplanation(data)
+        reply = `${timelineMsg}\n\n---\n\n${explainMsg}`
         break
 
       case 'SAFE_ADVICE':

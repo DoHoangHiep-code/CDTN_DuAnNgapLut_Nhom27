@@ -40,6 +40,22 @@ const AI_SERVICE_URL  = process.env.AI_SERVICE_URL || 'http://localhost:8000'
 const AI_TIMEOUT_MS   = 10000   // 10 giây
 const NODE_BATCH_SIZE = 50      // Số node xử lý song song mỗi lần
 
+/**
+ * PREDICTION_UPSERT_STRATEGY:
+ * - 'UPDATE_RECENT_ONLY' (mặc định): Chỉ UPDATE predictions trong 6-12h tiếp theo
+ *   Cách hoạt động: UPDATE (6-12h tiếp theo) + INSERT (> 12h) + SKIP (quá khứ)
+ *   Lợi ích: Tránh ghi đè dự báo dài hạn, vẫn cập nhật thời tiết gần
+ * 
+ * - 'INSERT_ONLY': Chỉ INSERT predictions mới, không UPDATE gì cả
+ *   Cách hoạt động: Tất cả dùng ignoreDuplicates = true
+ *   Lợi ích: Giữ nguyên 100% dữ liệu cũ
+ * 
+ * - 'FULL_UPDATE': UPDATE tất cả (behavior cũ)
+ *   Cách hoạt động: updateOnDuplicate = true cho tất cả
+ *   Cảnh báo: Sẽ ghi đè toàn bộ dữ liệu cũ mỗi lần chạy
+ */
+const PREDICTION_UPSERT_STRATEGY = process.env.PREDICTION_UPSERT_STRATEGY || 'UPDATE_RECENT_ONLY'
+
 // ─── Helper: tính risk_level ──────────────────────────────────────────────────
 
 function calcRiskLevel(depthCm) {
@@ -348,39 +364,129 @@ async function upsertWeatherMeasurements(records) {
   console.log(`[WeatherCron] ✅ Đã cập nhật ${total.toLocaleString('vi-VN')} dòng weather_measurements.`)
 }
 
-// ─── Upsert flood_predictions ─────────────────────────────────────────────────
+// ─── Upsert flood_predictions (với strategy tránh ghi đè) ────────────────────
 
-async function upsertPredictions(records) {
+/**
+ * Upsert predictions với strategy tránh ghi đè dữ liệu cũ
+ * 
+ * Strategy: UPDATE_RECENT_ONLY (mặc định)
+ *   - UPDATE: predictions nằm trong 6h-12h tiếp theo từ NOW (to sync weather updates)
+ *   - INSERT: predictions nằm ngoài window trên (để giữ dự báo dài hạn)
+ *   - SKIP: predictions nằm trong quá khứ
+ * 
+ * @param {Array} records - Predictions cần upsert
+ * @param {string} strategy - 'UPDATE_RECENT_ONLY' | 'FULL_UPDATE' | 'INSERT_ONLY'
+ */
+async function upsertPredictions(records, strategy = 'UPDATE_RECENT_ONLY') {
   if (!records.length) {
     console.log('[WeatherCron] Không có bản ghi nào để upsert.')
     return
   }
 
-  // Chia batch 200 để tránh Aiven reject
-  const BATCH_SIZE = 200
-  for (let i = 0; i < records.length; i += BATCH_SIZE) {
-    await FloodPrediction.bulkCreate(records.slice(i, i + BATCH_SIZE), {
-      conflictAttributes: ['node_id', 'time'],
-      updateOnDuplicate: [
-        'flood_depth_cm', 'risk_level', 'explanation',
-        'date_only', 'month', 'hour', 'rainy_season_flag', 'location_name',
-      ],
-    })
-  }
+  const now = new Date()
+  const recentWindowStart = new Date(now.getTime() + 6 * 3600 * 1000)      // NOW + 6h
+  const recentWindowEnd = new Date(now.getTime() + 12 * 3600 * 1000)        // NOW + 12h
 
-  const nowIso = new Date().toISOString()
-  console.log(`[WeatherCron] ✅ Đã upsert ${records.length} bản ghi flood_predictions (${nowIso}).`)
+  if (strategy === 'UPDATE_RECENT_ONLY') {
+    // ── Chia records thành 3 nhóm: past, recent, future ─────────────────────
+    const pastRecords = []
+    const recentRecords = []
+    const futureRecords = []
 
-  try {
-    await SystemLog.create({
-      admin_id:     null,
-      event_type:   'CRONJOB_WEATHER',
-      event_source: 'services/weatherCron (OWM)',
-      message:      `Cronjob hoàn thành: Đã upsert ${records.length} dòng flood_predictions tại ${nowIso}`,
-      timestamp:    new Date(),
-    })
-  } catch (logErr) {
-    console.warn('[WeatherCron] Không ghi được SystemLog:', logErr.message)
+    for (const rec of records) {
+      const recTime = new Date(rec.time)
+      if (recTime < now) {
+        // Bỏ qua: dự báo trong quá khứ không hợp lệ
+        pastRecords.push(rec)
+      } else if (recTime >= recentWindowStart && recTime <= recentWindowEnd) {
+        // Update: dự báo trong 6-12h tiếp theo (có thể weather thay đổi)
+        recentRecords.push(rec)
+      } else {
+        // Insert: dự báo xa hơn 12h (giữ nguyên dự báo dài hạn)
+        futureRecords.push(rec)
+      }
+    }
+
+    console.log(`[WeatherCron/Upsert] Strategy: UPDATE_RECENT_ONLY`)
+    console.log(`  - Past (skipped): ${pastRecords.length}`)
+    console.log(`  - Recent (UPDATE 6-12h): ${recentRecords.length}`)
+    console.log(`  - Future (INSERT >12h): ${futureRecords.length}`)
+
+    // Upsert recent records WITH updateOnDuplicate (cho phép weather update)
+    if (recentRecords.length) {
+      const BATCH_SIZE = 200
+      for (let i = 0; i < recentRecords.length; i += BATCH_SIZE) {
+        await FloodPrediction.bulkCreate(recentRecords.slice(i, i + BATCH_SIZE), {
+          conflictAttributes: ['node_id', 'time'],
+          updateOnDuplicate: [
+            'flood_depth_cm', 'risk_level', 'explanation',
+            'date_only', 'month', 'hour', 'rainy_season_flag', 'location_name',
+          ],
+        })
+      }
+      console.log(`  ✅ Updated ${recentRecords.length} predictions trong 6-12h tiếp theo`)
+    }
+
+    // Insert future records WITHOUT updateOnDuplicate (tránh ghi đè)
+    if (futureRecords.length) {
+      const BATCH_SIZE = 200
+      for (let i = 0; i < futureRecords.length; i += BATCH_SIZE) {
+        const batch = futureRecords.slice(i, i + BATCH_SIZE)
+        try {
+          await FloodPrediction.bulkCreate(batch, {
+            ignoreDuplicates: true,  // Bỏ qua nếu đã tồn tại
+          })
+        } catch (err) {
+          console.warn(`[WeatherCron] Lỗi insert future batch ${i}:`, err.message)
+        }
+      }
+      console.log(`  ✅ Inserted ${futureRecords.length} predictions mới cho tương lai`)
+    }
+
+    const totalUpserted = recentRecords.length + futureRecords.length
+    console.log(`[WeatherCron] ✅ Tổng cộng upsert ${totalUpserted} predictions (skipped ${pastRecords.length})`)
+
+    // Ghi log
+    try {
+      await SystemLog.create({
+        admin_id: null,
+        event_type: 'CRONJOB_WEATHER',
+        event_source: 'services/weatherCron (OWM)',
+        message: `Cronjob hoàn thành: ${recentRecords.length} updated (6-12h), ${futureRecords.length} inserted (>12h), ${pastRecords.length} skipped (past)`,
+        timestamp: new Date(),
+      })
+    } catch (logErr) {
+      console.warn('[WeatherCron] Không ghi được SystemLog:', logErr.message)
+    }
+  } else if (strategy === 'INSERT_ONLY') {
+    // ── Chỉ INSERT, không UPDATE bất cứ gì ────────────────────────────────
+    const BATCH_SIZE = 200
+    let insertedCount = 0
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+      const batch = records.slice(i, i + BATCH_SIZE)
+      try {
+        const result = await FloodPrediction.bulkCreate(batch, {
+          ignoreDuplicates: true,
+        })
+        insertedCount += result.length
+      } catch (err) {
+        console.warn(`[WeatherCron] Lỗi insert batch ${i}:`, err.message)
+      }
+    }
+    console.log(`[WeatherCron] ✅ Strategy INSERT_ONLY: inserted ${insertedCount} predictions`)
+  } else {
+    // ── FULL_UPDATE: update tất cả (giữ lại behavior cũ) ──────────────────
+    const BATCH_SIZE = 200
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+      await FloodPrediction.bulkCreate(records.slice(i, i + BATCH_SIZE), {
+        conflictAttributes: ['node_id', 'time'],
+        updateOnDuplicate: [
+          'flood_depth_cm', 'risk_level', 'explanation',
+          'date_only', 'month', 'hour', 'rainy_season_flag', 'location_name',
+        ],
+      })
+    }
+    console.log(`[WeatherCron] ✅ Strategy FULL_UPDATE: upsert ${records.length} predictions`)
   }
 }
 
@@ -486,8 +592,8 @@ async function runWeatherCron() {
       }
       console.log('')
 
-      // Upsert kết quả của trạm này
-      await upsertPredictions(stationPredictions)
+      // Upsert kết quả của trạm này (với strategy tránh ghi đè dữ liệu lâu)
+      await upsertPredictions(stationPredictions, PREDICTION_UPSERT_STRATEGY)
       await upsertWeatherMeasurements(stationWeather)
 
       totalPredictions    += stationPredictions.length
@@ -517,7 +623,7 @@ async function runWeatherCron() {
             fallbackWeather.push(...r.weatherRecords)
           }
         }
-        await upsertPredictions(fallbackPreds)
+        await upsertPredictions(fallbackPreds, PREDICTION_UPSERT_STRATEGY)
         await upsertWeatherMeasurements(fallbackWeather)
         totalPredictions += fallbackPreds.length
       }
@@ -543,7 +649,8 @@ async function runWeatherCron() {
     console.log(`  Trạm fetch OK      : ${stationForecasts.size}/${WEATHER_STATIONS.length}`)
     console.log(`  Nodes xử lý        : ${totalNodesProcessed.toLocaleString('vi-VN')}`)
     console.log(`  flood_predictions  : ${totalPredictions.toLocaleString('vi-VN')} bản ghi`)
-    console.log(`  weather_measurements: ${totalWeatherRows.toLocaleString('vi-VN')} bản ghi\n`)
+    console.log(`  weather_measurements: ${totalWeatherRows.toLocaleString('vi-VN')} bản ghi`)
+    console.log(`  Upsert Strategy    : ${PREDICTION_UPSERT_STRATEGY}\n`)
 
   } catch (err) {
     console.error('[WeatherCron] ❌ Lỗi nghiêm trọng:', err)
@@ -553,6 +660,11 @@ async function runWeatherCron() {
 // ─── Khởi động Cronjob ────────────────────────────────────────────────────────
 
 function startWeatherCron() {
+  console.log('[WeatherCron] 📋 Config:')
+  console.log(`  • Upsert Strategy : ${PREDICTION_UPSERT_STRATEGY}`)
+  console.log(`  • Node Batch Size : ${NODE_BATCH_SIZE}`)
+  console.log(`  • AI Timeout      : ${AI_TIMEOUT_MS}ms`)
+  
   // "0 */6 * * *" → phút 0 của mỗi 6 tiếng
   cron.schedule('0 */6 * * *', () => {
     console.log('[WeatherCron] Cron trigger tự động...')

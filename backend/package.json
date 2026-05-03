@@ -9,7 +9,10 @@
     "db:migrate:undo:all": "sequelize-cli db:migrate:undo:all",
     "seed": "node src/cli/seed.js",
     "start": "node src/server.js",
-    "predict": "node src/cli/runPrediction.js"
+    "predict": "node src/cli/runPrediction.js",
+    "check-gaps": "node scripts/check_prediction_gaps.js",
+    "fill-gaps": "node scripts/fill_missing_predictions.js",
+    "fill-gaps:batch": "node scripts/fill_missing_predictions.js --batch"
   },
   "dependencies": {
     "axios": "^1.15.2",

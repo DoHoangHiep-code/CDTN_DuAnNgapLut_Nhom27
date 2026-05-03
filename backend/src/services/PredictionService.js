@@ -214,6 +214,139 @@ class PredictionService {
     console.log(`[PredictionService] WithNodes: ${out.length}/${nodeRows.length} nodes predicted.`)
     return out
   }
+
+  // -------------------------------------------------------------------------
+  // PUBLIC: Sincronizar predictions com weather_measurements
+  // Encontra e cria predictions para todos os gaps (weather sem prediction)
+  // -------------------------------------------------------------------------
+  async syncPredictionsWithWeather(limit = 200, batchSize = 20) {
+    console.log(`[PredictionService] Iniciando sync de predictions com weather (limit=${limit})...`)
+
+    // 1. Encontrar gaps: weather que não tem prediction
+    const gapQuery = `
+      SELECT DISTINCT
+        w.node_id,
+        w.time,
+        w.temp,
+        w.rhum,
+        w.prcp,
+        w.prcp_3h,
+        w.prcp_6h,
+        w.prcp_12h,
+        w.prcp_24h,
+        w.wspd,
+        w.pres,
+        w.pressure_change_24h,
+        w.max_prcp_3h,
+        w.max_prcp_6h,
+        w.max_prcp_12h,
+        gn.elevation,
+        gn.slope,
+        gn.impervious_ratio,
+        gn.dist_to_drain_km,
+        gn.dist_to_river_km,
+        gn.dist_to_pump_km,
+        gn.dist_to_main_road_km,
+        gn.dist_to_park_km,
+        gn.location_name
+      FROM weather_measurements w
+      LEFT JOIN grid_nodes gn ON w.node_id = gn.node_id
+      LEFT JOIN flood_predictions fp ON w.node_id = fp.node_id AND w.time = fp.time
+      WHERE fp.prediction_id IS NULL
+      ORDER BY w.time DESC, w.node_id
+      LIMIT :limit
+    `
+
+    const gaps = await this.sequelize.query(gapQuery, {
+      replacements: { limit },
+      type: this.sequelize.QueryTypes.SELECT,
+    })
+
+    if (!gaps.length) {
+      console.log(`[PredictionService] Nenhum gap encontrado. Sync completo! ✅`)
+      return { processed: 0, success: 0, failed: 0, gaps: 0 }
+    }
+
+    console.log(`[PredictionService] Encontrados ${gaps.length} gaps. Processando...`)
+
+    let success = 0
+    let failed = 0
+
+    // 2. Processar em chunks de batchSize
+    for (let i = 0; i < gaps.length; i += batchSize) {
+      const chunk = gaps.slice(i, i + batchSize)
+      const featuresArray = chunk.map(row => this._buildFeatures(row))
+
+      // Chamar AI em batch
+      const results = await this._callAIBatch(featuresArray)
+
+      if (results && Array.isArray(results)) {
+        for (let j = 0; j < chunk.length; j++) {
+          const row = chunk[j]
+          const result = results[j]
+
+          try {
+            if (result && result.flood_depth_cm !== undefined && result.risk_level) {
+              await this._savePrediction(
+                row.node_id,
+                row.time,
+                result.flood_depth_cm,
+                result.risk_level
+              )
+              success++
+            } else {
+              failed++
+            }
+          } catch (err) {
+            console.error(`[PredictionService] Erro salvando prediction node=${row.node_id}:`, err.message)
+            failed++
+          }
+        }
+      } else {
+        failed += chunk.length
+      }
+
+      console.log(`[PredictionService] Progresso: ${Math.min(i + batchSize, gaps.length)}/${gaps.length}`)
+    }
+
+    console.log(`[PredictionService] Sync concluído: ${success} sucesso, ${failed} falhas`)
+    return { processed: gaps.length, success, failed, gaps: gaps.length }
+  }
+
+  // -------------------------------------------------------------------------
+  // PUBLIC: Validar integridade de predictions vs weather
+  // Retorna estatísticas de cobertura
+  // -------------------------------------------------------------------------
+  async validateCoverage() {
+    const [weatherCount] = await this.sequelize.query(
+      `SELECT COUNT(*) as cnt FROM weather_measurements`,
+      { type: this.sequelize.QueryTypes.SELECT }
+    )
+
+    const [predictionCount] = await this.sequelize.query(
+      `SELECT COUNT(*) as cnt FROM flood_predictions`,
+      { type: this.sequelize.QueryTypes.SELECT }
+    )
+
+    const [gapCount] = await this.sequelize.query(
+      `SELECT COUNT(DISTINCT (w.node_id, w.time)) as gap_count
+       FROM weather_measurements w
+       LEFT JOIN flood_predictions fp ON w.node_id = fp.node_id AND w.time = fp.time
+       WHERE fp.prediction_id IS NULL`,
+      { type: this.sequelize.QueryTypes.SELECT }
+    )
+
+    const coverage = weatherCount.cnt > 0
+      ? ((weatherCount.cnt - gapCount.gap_count) / weatherCount.cnt * 100).toFixed(2)
+      : 0
+
+    return {
+      weatherTotal: weatherCount.cnt,
+      predictionTotal: predictionCount.cnt,
+      gaps: gapCount.gap_count,
+      coverage: `${coverage}%`,
+    }
+  }
 }
 
 module.exports = { PredictionService }

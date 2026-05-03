@@ -18,6 +18,11 @@ const controller = new FloodPredictionController({ predictionService, sequelize 
 // Route hiện có: batch prediction toàn bộ nodes
 router.get('/flood-prediction', controller.getFloodPrediction)
 router.post('/flood-prediction/run', controller.triggerBatch)
+router.get('/flood-prediction/available-times', controller.getAvailableTimes)
+
+// ── Routes mới: sync & validate ──────────────────────────────────────────
+router.post('/flood-prediction/sync-with-weather', controller.syncWithWeather)
+router.get('/flood-prediction/validate-coverage', controller.validateCoverage)
 
 // Route mới: dự đoán theo tọa độ cụ thể (dùng cho FloodWarningCard)
 // GET /api/v1/flood-prediction/by-location?lat=21.02&lon=105.83

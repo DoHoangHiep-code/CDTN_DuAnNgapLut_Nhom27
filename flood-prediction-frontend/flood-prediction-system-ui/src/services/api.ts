@@ -38,13 +38,14 @@ export async function getForecastLatest(lat: number, lon: number) {
 
 // ── Flood prediction theo BBox viewport (thay thế getFloodPrediction() cho Map) ──
 // Chỉ trả nodes nằm trong khung hình hiện tại, giới hạn 200 records mỗi lần.
-// Endpoint: GET /api/v1/flood-prediction?min_lat=&max_lat=&min_lng=&max_lng=&limit=
+// Endpoint: GET /api/v1/flood-prediction?min_lat=&max_lat=&min_lng=&max_lng=&limit=&prediction_time=
 export async function getFloodPredictionBbox(bbox: {
   minLat: number
   maxLat: number
   minLng: number
   maxLng: number
   limit?: number
+  predictionTime?: string // ISO 8601 datetime (e.g., 2026-05-03T15:00:00Z)
 }) {
   const res = await apiV1.get<any>('/flood-prediction', {
     params: {
@@ -53,6 +54,7 @@ export async function getFloodPredictionBbox(bbox: {
       min_lng: bbox.minLng,
       max_lng: bbox.maxLng,
       limit: bbox.limit ?? 200,
+      ...(bbox.predictionTime && { prediction_time: bbox.predictionTime }),
     },
   })
   return (res.data?.data ?? res.data) as {

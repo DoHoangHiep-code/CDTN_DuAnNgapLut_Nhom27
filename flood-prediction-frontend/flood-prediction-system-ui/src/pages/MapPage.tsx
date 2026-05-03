@@ -18,6 +18,7 @@ import Supercluster from 'supercluster'
 import { LocationSearch, type NominatimResult } from '../components/LocationSearch'
 import { FloodReportModal } from '../components/FloodReportModal'
 import { FloodWarningCard } from '../components/FloodWarningCard'
+import { TimeFilter } from '../components/TimeFilter'
 import { useSettings } from '../context/SettingsContext'
 
 // Tile URLs cho từng kiểu bản đồ
@@ -327,6 +328,9 @@ export function MapPage() {
   const [searchInput, setSearchInput] = useState('')
   const [filterTerm, setFilterTerm] = useState('')
 
+  // State cho time filter
+  const [predictionTime, setPredictionTime] = useState<string | null>(null)
+
   // Vị trí đã chọn để flyTo – có thể từ quận nội bộ hoặc kết quả Nominatim
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null)
 
@@ -364,17 +368,6 @@ export function MapPage() {
     return flood.data?.districts?.find((d) => d.id === districtIdFromUrl)
   }, [flood.data, districtIdFromUrl])
 
-  // filteredDistricts: chỉ dùng cho LocationSearch onFilterChange (không dùng cho markers)
-  const filteredDistricts = useMemo(() => {
-    const list = flood.data?.districts ?? []
-    const q = filterTerm.toLowerCase()
-    if (!q) return list
-    return list.filter((d) => d.name.toLowerCase().includes(q))
-  }, [flood.data, filterTerm])
-
-  // floodPoints đã được thay bằng bboxData.districts (dynamic fetch theo viewport)
-  // Giữ filteredDistricts để onFilterChange vẫn hoạt động trên LocationSearch
-
   // Fly đến quận từ URL param khi dữ liệu sẵn sàng
   useEffect(() => {
     if (!map || !districtFromUrl) return
@@ -397,6 +390,7 @@ export function MapPage() {
           minLng: b.getWest(),
           maxLng: b.getEast(),
           limit: 200,
+          predictionTime: predictionTime ?? undefined,
         })
         const pts: FloodPoint[] = (result?.districts ?? []).map((d) => ({
           id:                   d.id,
@@ -415,7 +409,7 @@ export function MapPage() {
     }, 400)
 
     return () => clearTimeout(timer)
-  }, [map, mapCenter])  // re-run khi mapCenter thay đổi (MapBridge cập nhật sau moveend)
+  }, [map, mapCenter, predictionTime])  // re-run khi predictionTime thay đổi
 
   // Xử lý chọn kết quả từ Nominatim geocoding
   const handleGeoResult = useCallback((result: NominatimResult) => {
@@ -455,7 +449,7 @@ export function MapPage() {
         <div className="col-span-12 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 lg:col-span-8">
           <div className="relative">
             {/* ── Thanh tìm kiếm nổi trên bản đồ ── */}
-            <div className="absolute top-4 left-4 z-[1000] w-full max-w-sm pointer-events-auto">
+            <div className="absolute top-4 left-4 z-[1000] w-full max-w-sm pointer-events-auto space-y-2">
               <LocationSearch
                 districts={flood.data.districts}
                 placeholder={t('floodMap.searchDistrict')}
@@ -470,6 +464,12 @@ export function MapPage() {
                   setPulseMarker(null)
                 }}
                 onSelectGeoResult={handleGeoResult}
+              />
+
+              {/* ── Time filter ── */}
+              <TimeFilter
+                selectedTime={predictionTime}
+                onTimeChange={setPredictionTime}
               />
             </div>
 
