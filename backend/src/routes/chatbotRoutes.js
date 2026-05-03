@@ -1,377 +1,957 @@
 'use strict'
-
-/**
- * chatbotRoutes.js – Route xử lý câu hỏi Chatbot AQUA Bot
- *
- * POST /api/v1/chatbot/ask
- * Body: { message: string }
- * Response: { reply: string, data?: object }
- *
- * Luồng:
- *  1. Phân tích intent từ tin nhắn người dùng (keyword-based)
- *  2. Query DB (flood_predictions + grid_nodes) theo intent
- *  3. Sinh câu trả lời tự nhiên tiếng Việt
- *  4. Trả về { reply, data? }
- */
-
-const express  = require('express')
+const axios = require('axios')
+const express = require('express')
 const { QueryTypes } = require('sequelize')
 const { sequelize } = require('../db/sequelize')
-
+const { explainWithAI } = require('../services/aiExplain.service')
 const router = express.Router()
 
-// ─── Cấu hình ─────────────────────────────────────────────────────────────────
-
-/** Múi giờ Việt Nam cho định dạng thời gian */
 const TZ = 'Asia/Ho_Chi_Minh'
-
-/** Số giờ tối đa bot sẽ lấy dự báo (4 ngày = 96h) */
 const FORECAST_HOURS = 96
+const GEOCODE_CACHE = new Map()
 
-// ─── Helper: định dạng thời gian tiếng Việt ──────────────────────────────────
+function normalizeText(str) {
+  return String(str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
-/**
- * Format ISO datetime → chuỗi dễ đọc tiếng Việt
- * @param {string|Date} dt
- * @returns {string} VD: "17:00, Thứ Năm 24/04"
- */
+function extractPlaceNameFromMessage(message) {
+  let text = normalizeText(message)
+
+  const removeWords = [
+    'vi sao',
+    'tai sao',
+    'nguyen nhan',
+    'giai thich',
+    'ly do',
+    'tinh hinh ngap cua khu vuc',
+    'tinh trang ngap cua khu vuc',
+    'tinh hinh ngap',
+    'tinh trang ngap',
+    'khu vuc',
+    'co nguy co cao',
+    'nguy co cao',
+    'ngap',
+    'hien tai',
+    'bay gio',
+    'ha noi',
+  ]
+
+  for (const word of removeWords) {
+    text = text.replaceAll(word, '')
+  }
+
+  return text.replace(/\s+/g, ' ').trim()
+}
+async function queryAreaByPlaceName(message) {
+  const placeName = extractPlaceNameFromMessage(message)
+
+  // 1. Thử tìm trực tiếp trong DB theo location_name, grid_id, node_id
+  const directRows = await queryForExplanation(placeName)
+
+  if (directRows.length > 0) {
+    return directRows
+  }
+
+  // 2. Nếu DB không có tên địa danh, gọi geocoding lấy tọa độ
+  const geo = await geocodePlaceInHanoi(placeName)
+
+  if (!geo) {
+    return []
+  }
+
+  // 3. Tìm grid_node gần nhất với tọa độ địa danh
+  const sql = `
+    SELECT
+      fp.node_id,
+      fp.risk_level::text AS risk_level,
+      fp.flood_depth_cm,
+      fp.explanation,
+      fp.time,
+
+      gn.location_name,
+      gn.grid_id,
+      gn.latitude,
+      gn.longitude,
+      gn.elevation,
+      gn.slope,
+      gn.impervious_ratio,
+      gn.dist_to_drain_km,
+      gn.dist_to_river_km,
+      gn.dist_to_pump_km,
+      gn.dist_to_main_road_km,
+      gn.dist_to_park_km,
+
+      wm.temp,
+      wm.rhum,
+      wm.prcp,
+      wm.prcp_3h,
+      wm.prcp_6h,
+      wm.prcp_12h,
+      wm.prcp_24h,
+      wm.wspd,
+      wm.pres,
+      wm.pressure_change_24h,
+      wm.max_prcp_3h,
+      wm.max_prcp_6h,
+      wm.max_prcp_12h,
+      wm.month,
+      wm.hour,
+      wm.rainy_season_flag,
+
+      :place_name AS input_place_name,
+      :display_name AS geocode_display_name,
+
+      (
+        6371 * acos(
+          LEAST(1, GREATEST(-1,
+            cos(radians(:lat)) * cos(radians(gn.latitude)) *
+            cos(radians(gn.longitude) - radians(:lon)) +
+            sin(radians(:lat)) * sin(radians(gn.latitude))
+          ))
+        )
+      ) AS distance_km
+
+    FROM grid_nodes gn
+
+    LEFT JOIN LATERAL (
+      SELECT *
+      FROM flood_predictions fp
+      WHERE fp.node_id = gn.node_id
+      ORDER BY fp.time DESC
+      LIMIT 1
+    ) fp ON true
+
+    LEFT JOIN LATERAL (
+      SELECT *
+      FROM weather_measurements wm
+      WHERE wm.node_id = gn.node_id
+      ORDER BY wm.time DESC
+      LIMIT 1
+    ) wm ON true
+
+    WHERE fp.prediction_id IS NOT NULL
+
+    ORDER BY distance_km ASC
+    LIMIT 5
+  `
+
+  return sequelize.query(sql, {
+    type: QueryTypes.SELECT,
+    replacements: {
+      lat: geo.latitude,
+      lon: geo.longitude,
+      place_name: geo.place_name,
+      display_name: geo.display_name,
+    },
+  })
+}
+
+async function geocodePlaceInHanoi(placeName) {
+  const cleanPlace = String(placeName || '').trim()
+
+  if (!cleanPlace) return null
+
+  const cacheKey = normalizeText(cleanPlace)
+
+  if (GEOCODE_CACHE.has(cacheKey)) {
+    return GEOCODE_CACHE.get(cacheKey)
+  }
+
+  const q = `${cleanPlace}, Hà Nội, Việt Nam`
+
+  const res = await axios.get('https://nominatim.openstreetmap.org/search', {
+    params: {
+      q,
+      format: 'json',
+      limit: 1,
+      countrycodes: 'vn',
+      addressdetails: 1,
+    },
+    headers: {
+      'User-Agent': 'AquaAlert-FloodPrediction/1.0',
+    },
+    timeout: 8000,
+  })
+
+  const item = Array.isArray(res.data) ? res.data[0] : null
+
+  if (!item) return null
+
+  const result = {
+    place_name: cleanPlace,
+    display_name: item.display_name,
+    latitude: Number(item.lat),
+    longitude: Number(item.lon),
+  }
+
+  GEOCODE_CACHE.set(cacheKey, result)
+
+  return result
+}
+
+function normalizeText(str) {
+  return String(str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function extractPlaceNameFromMessage(message) {
+  let text = normalizeText(message)
+
+  const removeWords = [
+    'vi sao',
+    'tai sao',
+    'nguyen nhan',
+    'giai thich',
+    'ly do',
+    'tinh hinh ngap cua khu vuc',
+    'tinh trang ngap cua khu vuc',
+    'tinh hinh ngap',
+    'tinh trang ngap',
+    'khu vuc',
+    'co nguy co cao',
+    'nguy co cao',
+    'ngap',
+    'hien tai',
+    'bay gio',
+    'ha noi',
+  ]
+
+  for (const word of removeWords) {
+    text = text.replaceAll(word, '')
+  }
+
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+async function geocodePlaceInHanoi(placeName) {
+  const cleanPlace = String(placeName || '').trim()
+
+  if (!cleanPlace) return null
+
+  const cacheKey = normalizeText(cleanPlace)
+  if (GEOCODE_CACHE.has(cacheKey)) {
+    return GEOCODE_CACHE.get(cacheKey)
+  }
+
+  const q = `${cleanPlace}, Hà Nội, Việt Nam`
+
+  const res = await axios.get('https://nominatim.openstreetmap.org/search', {
+    params: {
+      q,
+      format: 'json',
+      limit: 1,
+      countrycodes: 'vn',
+      addressdetails: 1,
+    },
+    headers: {
+      // Nên đổi thành email/project thật của bạn khi deploy
+      'User-Agent': 'AquaAlert-FloodPrediction/1.0',
+    },
+    timeout: 8000,
+  })
+
+  const item = Array.isArray(res.data) ? res.data[0] : null
+
+  if (!item) return null
+
+  const result = {
+    place_name: cleanPlace,
+    display_name: item.display_name,
+    latitude: Number(item.lat),
+    longitude: Number(item.lon),
+  }
+
+  GEOCODE_CACHE.set(cacheKey, result)
+  return result
+}
+
 function formatVN(dt) {
   return new Intl.DateTimeFormat('vi-VN', {
-    timeZone:  TZ,
-    weekday:   'short',
-    day:       '2-digit',
-    month:     '2-digit',
-    hour:      '2-digit',
-    minute:    '2-digit',
+    timeZone: TZ,
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(new Date(dt))
 }
 
-// ─── Helper: dịch risk_level sang tiếng Việt ────────────────────────────────
-
 const RISK_LABEL = {
-  safe:   'An toàn',
+  safe: 'An toàn',
   medium: 'Nguy cơ thấp',
-  high:   'Nguy cơ cao',
+  high: 'Nguy cơ cao',
   severe: 'Nguy hiểm nghiêm trọng',
 }
 
 const RISK_EMOJI = {
-  safe:   '🟢',
+  safe: '🟢',
   medium: '🟡',
-  high:   '🟠',
+  high: '🟠',
   severe: '🔴',
 }
 
 function riskLabel(level) {
-  return `${RISK_EMOJI[level] ?? '⚪'} ${RISK_LABEL[level] ?? level}`
+  return `${RISK_EMOJI[level] ?? '⚪'} ${RISK_LABEL[level] ?? level ?? 'Không xác định'}`
 }
 
-// ─── Helper: phân tích intent từ tin nhắn ────────────────────────────────────
-
-/**
- * Phân tích ý định người dùng dựa trên keyword matching (tiếng Việt)
- *
- * Intent list:
- *  - EXPLAIN_RISK    : "vì sao", "tại sao", "nguyên nhân", "giải thích"
- *  - SPECIFIC_TIME   : "17h", "sáng", "chiều", "ngày mai", "hôm nay" + "ngập"
- *  - CURRENT_STATUS  : "hiện tại", "bây giờ", "đang"
- *  - WORST_AREA      : "khu vực nào", "đâu nguy hiểm", "nặng nhất"
- *  - SAFE_ADVICE     : "an toàn", "nên ra ngoài", "có thể đi"
- *  - FORECAST_4DAYS  : "dự báo", "tương lai", "4 ngày", "96 giờ"
- *  - GREETING        : "xin chào", "hello", "hi", "chào"
- *  - UNKNOWN         : fallback
- *
- * @param {string} msg
- * @returns {string} intent key
- */
 function detectIntent(msg) {
-  const m = msg.toLowerCase()
+  const m = normalizeText(msg)
 
-  // Chào hỏi
-  if (/\b(xin chào|hello|hi|chào bot|chào aqua)\b/.test(m)) return 'GREETING'
+  if (/\b(xin chao|hello|hi|chao bot|chao aqua)\b/.test(m)) return 'GREETING'
 
-  // Giải thích lý do
-  if (/(vì sao|tại sao|nguyên nhân|giải thích|lý do|sao lại|vì lý do gì)/.test(m)) return 'EXPLAIN_RISK'
+  if (/(vi sao|tai sao|nguyen nhan|giai thich|ly do|sao lai|vi ly do gi)/.test(m)) {
+    return 'EXPLAIN_RISK'
+  }
 
-  // Hỏi khu vực nguy hiểm nhất
-  if (/(khu vực nào|đâu nguy hiểm|nặng nhất|nguy hiểm nhất|khu nào ngập|ngập nặng)/.test(m)) return 'WORST_AREA'
+  if (/(khu vuc nao|dau nguy hiem|nang nhat|nguy hiem nhat|khu nao ngap|ngap nang)/.test(m)) {
+    return 'WORST_AREA'
+  }
 
-  // Hỏi thời điểm cụ thể (có giờ hoặc ngày kèm theo từ ngập)
-  if (/(\d{1,2}h|\d{1,2}:\d{2}|sáng|chiều|tối|trưa|ngày mai|hôm nay|ngày kia)/.test(m) &&
-      /(ngập|mưa|lũ|dự báo|nguy cơ)/.test(m)) return 'SPECIFIC_TIME'
+  if (/(tinh hinh ngap|tinh trang ngap|ngap cua khu vuc|khu vuc .* ngap|ngap o|ngap tai)/.test(m)) {
+    return 'AREA_STATUS'
+  }
 
-  // Hỏi tình trạng hiện tại
-  if (/(hiện tại|bây giờ|đang ngập|lúc này|ngay bây giờ|hiện giờ)/.test(m)) return 'CURRENT_STATUS'
+  if (/(\d{1,2}h|\d{1,2}:\d{2}|sang|chieu|toi|trua|ngay mai|hom nay|ngay kia)/.test(m) &&
+      /(ngap|mua|lu|du bao|nguy co)/.test(m)) {
+    return 'SPECIFIC_TIME'
+  }
 
-  // Hỏi lời khuyên an toàn
-  if (/(an toàn không|nên đi không|có thể ra|nên ở nhà|nguy hiểm không)/.test(m)) return 'SAFE_ADVICE'
+  if (/(hien tai|bay gio|dang ngap|luc nay|ngay bay gio|hien gio)/.test(m)) {
+    return 'CURRENT_STATUS'
+  }
 
-  // Dự báo 4 ngày
-  if (/(dự báo|ngập lụt|lũ lụt|4 ngày|96 giờ|tuần|sắp tới|trong thời gian)/.test(m)) return 'FORECAST_4DAYS'
+  if (/(an toan khong|co an toan khong|nen di khong|co nen di khong|co nen ra ngoai khong|nen ra ngoai khong|co the ra|co the ra ngoai|nen o nha|nguy hiem khong|toi nen lam gi|nen lam gi tiep|lam gi tiep theo|can lam gi)/.test(m)) {
+  return 'SAFE_ADVICE'
+}
+
+  if (/(du bao|ngap lut|lu lut|4 ngay|96 gio|tuan|sap toi|trong thoi gian)/.test(m)) {
+    return 'FORECAST_4DAYS'
+  }
 
   return 'UNKNOWN'
 }
 
-// ─── Query functions ──────────────────────────────────────────────────────────
+function extractKeyword(message) {
+  return message
+    .replace(/vì sao/gi, '')
+    .replace(/tại sao/gi, '')
+    .replace(/nguyên nhân/gi, '')
+    .replace(/giải thích/gi, '')
+    .replace(/khu vực/gi, '')
+    .replace(/ngập/gi, '')
+    .replace(/nguy cơ/gi, '')
+    .replace(/cao/gi, '')
+    .replace(/[?.!,]/g, '')
+    .trim()
+}
 
-/**
- * Lấy tóm tắt dự báo: đếm số node theo từng mức risk trong 4 ngày tới
- */
+function buildSafeFeatures(r) {
+  const time = r.time ? new Date(r.time) : new Date()
+
+  const hour = Number(r.hour ?? time.getHours())
+  const month = Number(r.month ?? time.getMonth() + 1)
+
+  const startOfYear = new Date(time.getFullYear(), 0, 0)
+  const dayofyear = Math.floor((time - startOfYear) / (1000 * 60 * 60 * 24))
+  const dayofweek = time.getDay()
+
+  return {
+    prcp: Number(r.prcp ?? 0),
+    prcp_3h: Number(r.prcp_3h ?? 0),
+    prcp_6h: Number(r.prcp_6h ?? 0),
+    prcp_12h: Number(r.prcp_12h ?? 0),
+    prcp_24h: Number(r.prcp_24h ?? 0),
+
+    temp: Number(r.temp ?? 0),
+    rhum: Number(r.rhum ?? 0),
+    wspd: Number(r.wspd ?? 0),
+    pres: Number(r.pres ?? 0),
+    pressure_change_24h: Number(r.pressure_change_24h ?? 0),
+
+    max_prcp_3h: Number(r.max_prcp_3h ?? 0),
+    max_prcp_6h: Number(r.max_prcp_6h ?? 0),
+    max_prcp_12h: Number(r.max_prcp_12h ?? 0),
+
+    elevation: Number(r.elevation ?? 0),
+    slope: Number(r.slope ?? 0),
+    impervious_ratio: Number(r.impervious_ratio ?? 0),
+
+    dist_to_drain_km: Number(r.dist_to_drain_km ?? 0),
+    dist_to_river_km: Number(r.dist_to_river_km ?? 0),
+    dist_to_pump_km: Number(r.dist_to_pump_km ?? 0),
+    dist_to_main_road_km: Number(r.dist_to_main_road_km ?? 0),
+    dist_to_park_km: Number(r.dist_to_park_km ?? 0),
+
+    hour,
+    dayofweek,
+    month,
+    dayofyear,
+
+    hour_sin: Math.sin((2 * Math.PI * hour) / 24),
+    hour_cos: Math.cos((2 * Math.PI * hour) / 24),
+    month_sin: Math.sin((2 * Math.PI * month) / 12),
+    month_cos: Math.cos((2 * Math.PI * month) / 12),
+
+    rainy_season_flag: r.rainy_season_flag === true ? 1 : 0,
+  }
+}
+
+function buildReasonList(row) {
+  const f = buildSafeFeatures(row)
+  const reasons = []
+
+  if (f.prcp_24h >= 100) reasons.push(`Mưa tích lũy 24h cao: **${f.prcp_24h} mm**`)
+  if (f.prcp_6h >= 60) reasons.push(`Mưa 6h gần đây lớn: **${f.prcp_6h} mm**`)
+  if (f.max_prcp_3h >= 30) reasons.push(`Cường độ mưa cực đại 3h cao: **${f.max_prcp_3h} mm**`)
+  if (f.elevation <= 1.5) reasons.push(`Cao độ địa hình thấp: **${f.elevation} m**`)
+  if (f.slope <= 1) reasons.push(`Độ dốc nhỏ: **${f.slope}**, nước thoát chậm`)
+  if (f.impervious_ratio >= 0.7) reasons.push(`Tỷ lệ bê tông hóa cao: **${f.impervious_ratio}**`)
+  if (f.dist_to_drain_km <= 0.3) reasons.push(`Gần hệ thống thoát nước: **${f.dist_to_drain_km} km**, dễ quá tải`)
+  if (f.dist_to_river_km <= 0.5) reasons.push(`Gần sông/kênh rạch: **${f.dist_to_river_km} km**`)
+  if (f.rainy_season_flag === 1) reasons.push('Đang trong mùa mưa')
+
+  return { features: f, reasons }
+}
+
 async function queryForecastSummary() {
   const sql = `
     SELECT
-      fp.risk_level,
+      fp.risk_level::text AS risk_level,
       COUNT(DISTINCT fp.node_id) AS node_count,
-      MIN(fp.flood_depth_cm)     AS min_depth,
-      MAX(fp.flood_depth_cm)     AS max_depth,
-      AVG(fp.flood_depth_cm)     AS avg_depth
+      MIN(fp.flood_depth_cm) AS min_depth,
+      MAX(fp.flood_depth_cm) AS max_depth,
+      AVG(fp.flood_depth_cm) AS avg_depth
     FROM flood_predictions fp
     WHERE fp.time BETWEEN NOW() AND NOW() + INTERVAL '${FORECAST_HOURS} hours'
     GROUP BY fp.risk_level
     ORDER BY
-      CASE fp.risk_level
+      CASE fp.risk_level::text
         WHEN 'severe' THEN 4
-        WHEN 'high'   THEN 3
+        WHEN 'high' THEN 3
         WHEN 'medium' THEN 2
-        ELSE 1
+        WHEN 'safe' THEN 1
+        ELSE 0
       END DESC
   `
   return sequelize.query(sql, { type: QueryTypes.SELECT })
 }
 
-/**
- * Lấy dự báo tại thời điểm hiện tại (±30 phút)
- */
 async function queryCurrentStatus() {
   const sql = `
     SELECT
-      fp.risk_level,
-      fp.flood_depth_cm,
-      fp.explanation,
-      fp.time,
-      gn.latitude,
-      gn.longitude
-    FROM flood_predictions fp
-    JOIN grid_nodes gn ON gn.node_id = fp.node_id
-    WHERE fp.time BETWEEN NOW() - INTERVAL '30 minutes'
-                      AND NOW() + INTERVAL '30 minutes'
-    ORDER BY fp.flood_depth_cm DESC
-    LIMIT 10
-  `
-  return sequelize.query(sql, { type: QueryTypes.SELECT })
-}
-
-/**
- * Lấy node + thời điểm có nguy cơ cao nhất trong 4 ngày tới
- */
-async function queryWorstArea() {
-  const sql = `
-    SELECT
       fp.node_id,
-      fp.risk_level,
+      fp.risk_level::text AS risk_level,
       fp.flood_depth_cm,
       fp.explanation,
       fp.time,
-      gn.latitude,
-      gn.longitude
-    FROM flood_predictions fp
-    JOIN grid_nodes gn ON gn.node_id = fp.node_id
-    WHERE fp.time BETWEEN NOW() AND NOW() + INTERVAL '${FORECAST_HOURS} hours'
-      AND fp.risk_level IN ('high', 'severe')
-    ORDER BY fp.flood_depth_cm DESC
-    LIMIT 5
-  `
-  return sequelize.query(sql, { type: QueryTypes.SELECT })
-}
 
-/**
- * Lấy dự báo theo giờ cụ thể (target: số giờ từ hiện tại)
- * @param {number} hoursOffset - số giờ từ bây giờ (0 = giờ tiếp theo, 12 = ngày mai buổi trưa…)
- */
-async function queryByTime(hoursOffset) {
-  const sql = `
-    SELECT
-      fp.risk_level,
-      fp.flood_depth_cm,
-      fp.explanation,
-      fp.time
-    FROM flood_predictions fp
-    WHERE fp.time BETWEEN (NOW() + INTERVAL '${hoursOffset} hours')
-                      AND (NOW() + INTERVAL '${hoursOffset + 2} hours')
-    ORDER BY fp.flood_depth_cm DESC
-    LIMIT 10
-  `
-  return sequelize.query(sql, { type: QueryTypes.SELECT })
-}
-
-/**
- * Lấy dự báo chi tiết để giải thích nguyên nhân
- * (Lấy các bản ghi có nguy cơ cao nhất + explanation đầy đủ)
- */
-async function queryForExplanation() {
-  const sql = `
-    SELECT
-      fp.risk_level,
-      fp.flood_depth_cm,
-      fp.explanation,
-      fp.time,
+      gn.location_name,
       gn.latitude,
       gn.longitude,
       gn.elevation,
       gn.slope,
-      gn.impervious_ratio
+      gn.impervious_ratio,
+      gn.dist_to_drain_km,
+      gn.dist_to_river_km,
+      gn.dist_to_pump_km,
+      gn.dist_to_main_road_km,
+      gn.dist_to_park_km,
+
+      wm.temp,
+      wm.rhum,
+      wm.prcp,
+      wm.prcp_3h,
+      wm.prcp_6h,
+      wm.prcp_12h,
+      wm.prcp_24h,
+      wm.wspd,
+      wm.pres,
+      wm.pressure_change_24h,
+      wm.max_prcp_3h,
+      wm.max_prcp_6h,
+      wm.max_prcp_12h,
+      wm.month,
+      wm.hour,
+      wm.rainy_season_flag
     FROM flood_predictions fp
     JOIN grid_nodes gn ON gn.node_id = fp.node_id
-    WHERE fp.time BETWEEN NOW() AND NOW() + INTERVAL '24 hours'
-      AND fp.risk_level IN ('high', 'severe')
-    ORDER BY fp.flood_depth_cm DESC
+    LEFT JOIN LATERAL (
+      SELECT *
+      FROM weather_measurements wm
+      WHERE wm.node_id = fp.node_id
+      ORDER BY ABS(EXTRACT(EPOCH FROM (wm.time - fp.time))) ASC
+      LIMIT 1
+    ) wm ON true
+    WHERE fp.time BETWEEN NOW() - INTERVAL '30 minutes'
+                      AND NOW() + INTERVAL '30 minutes'
+    ORDER BY fp.flood_depth_cm DESC NULLS LAST
+    LIMIT 10
+  `
+  return sequelize.query(sql, { type: QueryTypes.SELECT })
+}
+
+async function queryWorstArea() {
+  const sql = `
+    SELECT
+      fp.node_id,
+      fp.risk_level::text AS risk_level,
+      fp.flood_depth_cm,
+      fp.explanation,
+      fp.time,
+
+      gn.location_name,
+      gn.latitude,
+      gn.longitude,
+      gn.elevation,
+      gn.slope,
+      gn.impervious_ratio,
+      gn.dist_to_drain_km,
+      gn.dist_to_river_km,
+      gn.dist_to_pump_km,
+      gn.dist_to_main_road_km,
+      gn.dist_to_park_km,
+
+      wm.temp,
+      wm.rhum,
+      wm.prcp,
+      wm.prcp_3h,
+      wm.prcp_6h,
+      wm.prcp_12h,
+      wm.prcp_24h,
+      wm.wspd,
+      wm.pres,
+      wm.pressure_change_24h,
+      wm.max_prcp_3h,
+      wm.max_prcp_6h,
+      wm.max_prcp_12h,
+      wm.month,
+      wm.hour,
+      wm.rainy_season_flag
+    FROM flood_predictions fp
+    JOIN grid_nodes gn ON gn.node_id = fp.node_id
+    LEFT JOIN LATERAL (
+      SELECT *
+      FROM weather_measurements wm
+      WHERE wm.node_id = fp.node_id
+      ORDER BY ABS(EXTRACT(EPOCH FROM (wm.time - fp.time))) ASC
+      LIMIT 1
+    ) wm ON true
+    WHERE fp.time BETWEEN NOW() AND NOW() + INTERVAL '${FORECAST_HOURS} hours'
+    ORDER BY fp.flood_depth_cm DESC NULLS LAST
     LIMIT 5
   `
   return sequelize.query(sql, { type: QueryTypes.SELECT })
 }
 
-// ─── Response generators ──────────────────────────────────────────────────────
-
-/** Sinh câu trả lời cho GREETING */
-function replyGreeting() {
-  return `👋 Xin chào! Tôi là **AQUA Bot** – trợ lý thông minh của hệ thống AQUAALERT.\n\nTôi có thể giúp bạn:\n🌊 Dự báo nguy cơ ngập lụt 4 ngày tới\n📍 Xác định khu vực nguy hiểm nhất\n🔍 Giải thích nguyên nhân nguy cơ ngập\n⚠️ Tư vấn an toàn khi có cảnh báo\n\nHãy hỏi tôi bất cứ điều gì!`
+async function queryByTime(hoursOffset) {
+  const sql = `
+    SELECT
+      fp.node_id,
+      fp.risk_level::text AS risk_level,
+      fp.flood_depth_cm,
+      fp.explanation,
+      fp.time,
+      gn.location_name
+    FROM flood_predictions fp
+    JOIN grid_nodes gn ON gn.node_id = fp.node_id
+    WHERE fp.time BETWEEN (NOW() + INTERVAL '${hoursOffset} hours')
+                      AND (NOW() + INTERVAL '${hoursOffset + 2} hours')
+    ORDER BY fp.flood_depth_cm DESC NULLS LAST
+    LIMIT 10
+  `
+  return sequelize.query(sql, { type: QueryTypes.SELECT })
 }
 
-/** Sinh câu trả lời cho FORECAST_4DAYS từ summary data */
+async function queryForExplanation(keyword) {
+  const replacements = {}
+
+  let whereKeyword = ''
+  if (keyword) {
+    replacements.keyword = `%${keyword}%`
+    replacements.node_id = Number(keyword) || -1
+
+    whereKeyword = `
+      AND (
+        LOWER(COALESCE(gn.location_name, '')) LIKE LOWER(:keyword)
+        OR LOWER(COALESCE(gn.grid_id, '')) LIKE LOWER(:keyword)
+        OR gn.node_id = :node_id
+      )
+    `
+  }
+
+  const sql = `
+    SELECT
+      fp.node_id,
+      fp.risk_level::text AS risk_level,
+      fp.flood_depth_cm,
+      fp.explanation,
+      fp.time,
+
+      gn.location_name,
+      gn.grid_id,
+      gn.latitude,
+      gn.longitude,
+      gn.elevation,
+      gn.slope,
+      gn.impervious_ratio,
+      gn.dist_to_drain_km,
+      gn.dist_to_river_km,
+      gn.dist_to_pump_km,
+      gn.dist_to_main_road_km,
+      gn.dist_to_park_km,
+
+      wm.temp,
+      wm.rhum,
+      wm.prcp,
+      wm.prcp_3h,
+      wm.prcp_6h,
+      wm.prcp_12h,
+      wm.prcp_24h,
+      wm.wspd,
+      wm.pres,
+      wm.pressure_change_24h,
+      wm.max_prcp_3h,
+      wm.max_prcp_6h,
+      wm.max_prcp_12h,
+      wm.month,
+      wm.hour,
+      wm.rainy_season_flag
+    FROM flood_predictions fp
+    JOIN grid_nodes gn ON gn.node_id = fp.node_id
+    LEFT JOIN LATERAL (
+      SELECT *
+      FROM weather_measurements wm
+      WHERE wm.node_id = fp.node_id
+      ORDER BY ABS(EXTRACT(EPOCH FROM (wm.time - fp.time))) ASC
+      LIMIT 1
+    ) wm ON true
+    WHERE fp.time BETWEEN NOW() AND NOW() + INTERVAL '24 hours'
+    ${whereKeyword}
+    ORDER BY fp.flood_depth_cm DESC NULLS LAST
+    LIMIT 5
+  `
+
+  return sequelize.query(sql, {
+    type: QueryTypes.SELECT,
+    replacements,
+  })
+}
+
+function replyGreeting() {
+  return `👋 Xin chào! Tôi là **AQUA Bot**.
+
+Tôi có thể giúp bạn:
+- Dự báo nguy cơ ngập lụt
+- Xác định khu vực nguy hiểm nhất
+- Giải thích vì sao khu vực có nguy cơ cao
+- Tư vấn an toàn khi có cảnh báo`
+}
+
 function replyForecast(rows) {
   if (!rows.length) {
-    return '📭 Hiện chưa có dữ liệu dự báo trong DB. Vui lòng kích hoạt Cronjob để cập nhật dữ liệu.'
+    return '📭 Hiện chưa có dữ liệu dự báo trong DB.'
   }
 
   const lines = rows.map(r => {
-    const depth = Number(r.avg_depth).toFixed(1)
-    return `  ${riskLabel(r.risk_level)}: **${r.node_count} điểm đo** (TB ${depth}cm, max ${Number(r.max_depth).toFixed(0)}cm)`
+    return `${riskLabel(r.risk_level)}: **${r.node_count} điểm đo**, TB **${Number(r.avg_depth || 0).toFixed(1)}cm**, max **${Number(r.max_depth || 0).toFixed(1)}cm**`
   })
 
-  return `📊 **Dự báo ngập lụt 4 ngày tới:**\n\n${lines.join('\n')}\n\n💡 Bạn muốn biết khu vực nào nguy hiểm nhất? Hỏi tôi "Đâu nguy hiểm nhất?" nhé!`
+  return `📊 **Dự báo ngập lụt 4 ngày tới:**\n\n${lines.join('\n')}`
 }
 
-/** Sinh câu trả lời cho CURRENT_STATUS */
 function replyCurrentStatus(rows) {
   if (!rows.length) {
-    return '✅ Hiện tại không có dữ liệu ngập tại thời điểm này. Có thể chưa có dữ liệu gần với thời điểm hiện tại, hoặc khu vực đang an toàn.'
+    return '✅ Hiện chưa có dữ liệu dự báo gần thời điểm hiện tại.'
   }
 
-  const worstRow = rows[0]
-  const worstRisk = worstRow.risk_level
-  const count = rows.length
+  const worst = rows[0]
 
   let msg = `🕐 **Tình trạng hiện tại (${formatVN(new Date())}):**\n\n`
+  msg += `Khu vực rủi ro cao nhất: **${worst.location_name || `Node ${worst.node_id}`}**\n`
+  msg += `Mức rủi ro: **${riskLabel(worst.risk_level)}**\n`
+  msg += `Độ sâu ngập dự báo: **${Number(worst.flood_depth_cm || 0).toFixed(1)}cm**\n`
 
-  if (worstRisk === 'safe') {
-    msg += '✅ Tất cả các điểm đo đang ở mức **An toàn**. Không có nguy cơ ngập trong thời điểm này.'
-  } else {
-    msg += `⚠️ Phát hiện **${count} điểm đo** có nguy cơ ngập:\n`
-    msg += `  Mức nguy hiểm cao nhất: **${riskLabel(worstRisk)}** (${Number(worstRow.flood_depth_cm).toFixed(1)}cm)\n`
-    if (worstRow.explanation) {
-      msg += `\n💬 ${worstRow.explanation}`
-    }
+  if (worst.explanation) {
+    msg += `\n💬 ${worst.explanation}`
   }
 
   return msg
 }
 
-/** Sinh câu trả lời cho WORST_AREA */
 function replyWorstArea(rows) {
   if (!rows.length) {
-    return '✅ Tuyệt vời! Trong 4 ngày tới, không có khu vực nào được dự báo ở mức nguy cơ cao hoặc nghiêm trọng.'
+    return '✅ Trong 4 ngày tới chưa có dữ liệu khu vực nguy hiểm.'
   }
 
-  let msg = `🚨 **Top khu vực nguy cơ cao nhất (4 ngày tới):**\n\n`
+  let msg = `🚨 **Top khu vực nguy cơ cao nhất:**\n\n`
 
   rows.forEach((r, i) => {
-    const time = formatVN(r.time)
-    msg += `**${i + 1}.** Node ${r.node_id} (${Number(r.latitude).toFixed(4)}°N, ${Number(r.longitude).toFixed(4)}°E)\n`
-    msg += `   ${riskLabel(r.risk_level)} – Độ ngập dự báo: **${Number(r.flood_depth_cm).toFixed(1)}cm**\n`
-    msg += `   ⏰ Thời điểm: ${time}\n\n`
+    msg += `**${i + 1}. ${r.location_name || `Node ${r.node_id}`}**\n`
+    msg += `- Mức rủi ro: ${riskLabel(r.risk_level)}\n`
+    msg += `- Độ sâu dự báo: **${Number(r.flood_depth_cm || 0).toFixed(1)}cm**\n`
+    msg += `- Thời điểm: ${formatVN(r.time)}\n`
+    msg += `- Tọa độ: ${Number(r.latitude).toFixed(4)}, ${Number(r.longitude).toFixed(4)}\n\n`
   })
 
-  msg += '⚠️ Khuyến cáo: Hạn chế di chuyển qua các khu vực trên khi có cảnh báo!'
-
-  return msg
+  return msg.trim()
 }
 
-/** Sinh câu trả lời cho EXPLAIN_RISK – đây là tính năng "chí mạng" */
-function replyExplanation(rows) {
+function calculateInternalRiskScore(f) {
+  let score = 0
+  const reasons = []
+
+  if (f.prcp >= 20) {
+    score += 1
+    reasons.push(`mưa hiện tại đạt **${f.prcp} mm**, cho thấy đang có mưa đáng kể.`)
+  }
+
+  if (f.prcp_3h >= 50) {
+    score += 2
+    reasons.push(`mưa 3 giờ gần nhất đạt **${f.prcp_3h} mm**, cho thấy cường độ mưa ngắn hạn lớn.`)
+  }
+
+  if (f.prcp_6h >= 80) {
+    score += 2
+    reasons.push(`mưa 6 giờ đạt **${f.prcp_6h} mm**, nghĩa là nước mưa tích lũy liên tục trong nhiều giờ.`)
+  }
+
+  if (f.prcp_24h >= 120) {
+    score += 2
+    reasons.push(`tổng mưa 24 giờ đạt **${f.prcp_24h} mm**, làm hệ thống thoát nước dễ bị quá tải.`)
+  }
+
+  if (f.elevation <= 6) {
+    score += 1
+    reasons.push(`cao độ chỉ khoảng **${f.elevation} m**, đây là vùng thấp nên nước dễ dồn về.`)
+  }
+
+  if (f.slope <= 2) {
+    score += 1
+    reasons.push(`độ dốc khoảng **${f.slope}**, nước chảy chậm và dễ lưu lại trên bề mặt.`)
+  }
+
+  if (f.impervious_ratio >= 0.7) {
+    score += 1
+    reasons.push(`tỷ lệ bê tông hóa **${f.impervious_ratio}**, nước khó thấm xuống đất và tạo dòng chảy mặt lớn.`)
+  }
+
+  if (f.dist_to_drain_km <= 0.4) {
+    score += 1
+    reasons.push(`khoảng cách tới hệ thống thoát nước chỉ **${f.dist_to_drain_km} km**, có thể là khu vực tập trung dòng chảy hoặc điểm nghẽn thoát nước.`)
+  }
+
+  if (f.dist_to_river_km <= 1.5) {
+    score += 1
+    reasons.push(`khu vực cách sông khoảng **${f.dist_to_river_km} km**, khi mưa lớn có thể chịu ảnh hưởng bởi mực nước sông hoặc thoát nước chậm.`)
+  }
+
+  if (f.rainy_season_flag === 1) {
+    score += 1
+    reasons.push(`thời điểm hiện tại nằm trong mùa mưa, xác suất xuất hiện mưa lớn và ngập cục bộ cao hơn.`)
+  }
+
+  return {
+    score: Math.min(score, 12),
+    maxScore: 12,
+    reasons,
+  }
+}
+
+function getRiskText(score) {
+  if (score >= 10) return 'RẤT CAO'
+  if (score >= 7) return 'CAO'
+  if (score >= 4) return 'TRUNG BÌNH'
+  return 'THẤP'
+}
+
+async function replyExplanation(rows) {
   if (!rows.length) {
-    return '🔍 Hiện tại không tìm thấy khu vực nào có nguy cơ cao để giải thích. Có thể điều kiện thời tiết đang thuận lợi!'
+    return '🔍 Tôi chưa tìm thấy khu vực phù hợp để giải thích. Bạn có thể hỏi theo tên khu vực, grid_id hoặc node_id.'
   }
 
-  const r = rows[0] // Lấy trường hợp nguy hiểm nhất để giải thích
+  const r = rows[0]
+  const { features } = buildReasonList(r)
+  let aiExplain = null
 
-  let msg = `🔬 **Giải thích nguyên nhân nguy cơ ngập cao:**\n\n`
-  msg += `📍 **Khu vực:** (${Number(r.latitude).toFixed(4)}°N, ${Number(r.longitude).toFixed(4)}°E)\n`
-  msg += `📊 **Độ ngập dự báo:** ${Number(r.flood_depth_cm).toFixed(1)}cm\n`
-  msg += `⏰ **Thời điểm:** ${formatVN(r.time)}\n\n`
-
-  // Giải thích từ DB (do weatherCron sinh ra)
-  if (r.explanation) {
-    msg += `💬 **Phân tích:** ${r.explanation}\n\n`
+  try {
+    aiExplain = await explainWithAI(features)
+  } catch (err) {
+    console.error('AI explain error:', err.message)
   }
 
-  // Giải thích bổ sung từ đặc điểm địa lý node
-  msg += `🌍 **Đặc điểm địa lý tại điểm này:**\n`
-  msg += `  • Cao độ: **${Number(r.elevation).toFixed(1)}m** (${Number(r.elevation) < 5 ? 'địa hình thấp, dễ tích nước' : 'tương đối cao'})\n`
-  msg += `  • Độ dốc: **${Number(r.slope).toFixed(2)}°** (${Number(r.slope) < 1 ? 'gần như phẳng, nước thoát chậm' : 'có độ dốc nhất định'})\n`
-  msg += `  • Tỷ lệ bê tông hóa: **${(Number(r.impervious_ratio) * 100).toFixed(0)}%** (${Number(r.impervious_ratio) > 0.6 ? 'đô thị hóa cao, nước mưa không thấm được' : 'còn diện tích xanh'})\n\n`
+  const risk = calculateInternalRiskScore(features)
+  const riskText = getRiskText(risk.score)
 
-  msg += `🤖 *Dự báo được tính bằng mô hình AI CatBoost dựa trên dữ liệu thời tiết Open-Meteo.*`
+  let msg = ''
 
-  return msg
+  msg += `## Đánh giá nhanh:\n\n`
+  msg += `- Mức nguy cơ ngập: **${riskText}**\n\n`
+  msg += `- Điểm rủi ro nội bộ: **${risk.score}/${risk.maxScore}**\n\n`
+
+  msg += `📍 **Khu vực:** ${r.location_name || `Node ${r.node_id}`}\n`
+
+  if (r.input_place_name) {
+    msg += `🔎 **Địa danh bạn nhập:** ${r.input_place_name}\n`
+  }
+
+  if (r.geocode_display_name) {
+    msg += `🗺️ **Đã map tới tọa độ:** ${r.geocode_display_name}\n`
+  }
+
+  if (r.distance_km !== undefined) {
+    msg += `🧭 **Node gần nhất:** Node ${r.node_id}, cách địa danh khoảng **${Number(r.distance_km).toFixed(2)} km**\n`
+  }
+
+  msg += `🌊 **Độ sâu ngập dự báo:** **${Number(r.flood_depth_cm || 0).toFixed(1)} cm**\n`
+  msg += `⏰ **Thời điểm dự báo:** ${formatVN(r.time)}\n\n`
+
+  msg += `## Vì sao khu vực này có nguy cơ ngập?\n\n`
+
+  if (risk.reasons.length) {
+    risk.reasons.forEach((reason, index) => {
+      msg += `${index + 1}. ${reason}\n\n`
+    })
+  } else {
+    msg += `Hiện chưa có yếu tố đơn lẻ nào vượt ngưỡng mạnh, nhưng mô hình vẫn đánh giá dựa trên tổ hợp các biến mưa, địa hình, đô thị hóa, thoát nước và thời gian.\n\n`
+  }
+
+  msg += `## Phân tích chuyên sâu:\n\n`
+
+  msg += `### 1. Nhóm yếu tố mưa\n\n`
+  msg += `Mưa hiện tại là **${features.prcp} mm**, mưa 3 giờ là **${features.prcp_3h} mm**, mưa 6 giờ là **${features.prcp_6h} mm** và mưa 24 giờ là **${features.prcp_24h} mm**. `
+  msg += `Nếu mưa lớn kéo dài trong 3 đến 6 giờ, nước chưa kịp thoát sẽ tích tụ trên mặt đường. Khi tổng mưa 24 giờ cao, đất và hệ thống thoát nước đã gần bão hòa, nên chỉ cần thêm một trận mưa ngắn cũng có thể gây ngập.\n\n`
+
+  msg += `### 2. Nhóm yếu tố địa hình\n\n`
+  msg += `Cao độ khu vực là **${features.elevation} m** và độ dốc là **${features.slope}**. `
+  msg += `Vùng có cao độ thấp thường là nơi nước từ các khu vực cao hơn chảy về. Nếu độ dốc nhỏ, nước chảy chậm, thời gian lưu nước trên bề mặt lâu hơn và nguy cơ ngập tăng.\n\n`
+
+  msg += `### 3. Nhóm yếu tố đô thị hóa\n\n`
+  msg += `Tỷ lệ bê tông hóa là **${features.impervious_ratio}**. `
+  msg += `Khi tỷ lệ bê tông hóa cao, nước mưa không thấm được xuống đất mà biến thành dòng chảy mặt. Điều này làm tăng áp lực cho cống, mương, kênh thoát nước và dễ gây ngập cục bộ tại các nút giao hoặc khu dân cư thấp.\n\n`
+
+  msg += `### 4. Nhóm yếu tố thoát nước\n\n`
+  msg += `Khoảng cách tới hệ thống thoát nước là **${features.dist_to_drain_km} km**, tới sông là **${features.dist_to_river_km} km** và tới trạm bơm là **${features.dist_to_pump_km} km**. `
+  msg += `Nếu khu vực gần điểm thoát nước nhưng vẫn có mưa lớn, có thể đây là vùng tập trung nước hoặc nơi hệ thống thoát nước đang quá tải. Nếu xa trạm bơm, khả năng tiêu thoát nước cưỡng bức có thể chậm hơn.\n\n`
+
+  msg += `### 5. Feature important từ mô hình CatBoost\n\n`
+
+if (aiExplain && aiExplain.top_features) {
+  aiExplain.top_features.forEach((f, index) => {
+    msg += `${index + 1}. **${f.feature}** = ${f.value} → ảnh hưởng: ${f.importance.toFixed(4)}\n`
+  })
+} else {
+  msg += `Không lấy được dữ liệu SHAP từ AI service.\n`
 }
 
-/** Sinh câu trả lời cho SAFE_ADVICE */
+  msg += `\n## Kết luận:\n\n`
+  msg += `Khu vực này có nguy cơ ngập chủ yếu do sự kết hợp giữa mưa tích lũy lớn, địa hình thấp, bề mặt bê tông hóa cao và khả năng thoát nước có thể bị quá tải. `
+  msg += `Đây không phải chỉ do một yếu tố riêng lẻ, mà là kết quả cộng hưởng giữa thời tiết, địa hình và hạ tầng đô thị.\n\n`
+
+  msg += `## Khuyến nghị:\n\n`
+  msg += `- Theo dõi thêm lượng mưa trong 1 đến 3 giờ tới.\n\n`
+  msg += `- Kiểm tra các điểm trũng, hầm, nút giao và tuyến đường gần khu vực này.\n\n`
+  msg += `- Nếu mưa tiếp tục tăng, nên cảnh báo người dân hạn chế di chuyển qua vùng thấp.\n\n`
+  msg += `- Không đi qua đoạn đường ngập nếu không rõ độ sâu.\n\n`
+  msg += `- Ưu tiên tuyến đường cao, thoáng và tránh khu vực gần sông/kênh rạch khi mưa lớn.\n`
+
+  return msg  
+}
+
 function replySafeAdvice(summaryRows) {
-  const hasHighRisk = summaryRows.some(r => ['high', 'severe'].includes(r.risk_level))
+  const hasSevereRisk = summaryRows.some(r => r.risk_level === 'severe')
+  const hasHighRisk = summaryRows.some(r => r.risk_level === 'high')
+  const hasMediumRisk = summaryRows.some(r => r.risk_level === 'medium')
 
-  if (!summaryRows.length || !hasHighRisk) {
-    return `✅ **Tình trạng an toàn!**\n\nHiện tại và 4 ngày tới không có khu vực nào được dự báo ngập ở mức nguy hiểm.\n\n🚗 Bạn có thể di chuyển bình thường. Tuy nhiên hãy theo dõi thông báo cập nhật!`
+  if (!summaryRows.length) {
+    return `📭 Hiện hệ thống chưa có đủ dữ liệu dự báo để đưa ra khuyến nghị chính xác.
+
+Bạn nên:
+- Theo dõi bản đồ ngập trong ứng dụng
+- Hạn chế đi qua khu vực trũng thấp nếu trời đang mưa
+- Hỏi thêm: **"Khu vực nguy hiểm nhất"** hoặc **"Tình trạng ngập hiện tại"**`
   }
 
-  const severeRow = summaryRows.find(r => r.risk_level === 'severe')
-  const highRow   = summaryRows.find(r => r.risk_level === 'high')
-  const worstRow  = severeRow ?? highRow
+  if (!hasSevereRisk && !hasHighRisk && !hasMediumRisk) {
+    return `✅ **Có thể ra ngoài, nhưng vẫn nên theo dõi thời tiết.**
 
-  let msg = `⚠️ **Cảnh báo! Có nguy cơ ngập trong 4 ngày tới:**\n\n`
+Hiện hệ thống chưa ghi nhận khu vực có nguy cơ ngập đáng kể trong dữ liệu dự báo.
 
-  if (severeRow) {
-    msg += `🔴 **${severeRow.node_count} điểm đo** ở mức **Nguy hiểm nghiêm trọng** (tới ${Number(worstRow.max_depth).toFixed(0)}cm)\n\n`
-  } else if (highRow) {
-    msg += `🟠 **${highRow.node_count} điểm đo** ở mức **Nguy cơ cao** (tới ${Number(worstRow.max_depth).toFixed(0)}cm)\n\n`
+Khuyến nghị:
+- Có thể di chuyển bình thường
+- Mang áo mưa nếu trời có dấu hiệu mưa
+- Tránh đi qua hầm chui, đường trũng thấp khi mưa lớn
+- Theo dõi bản đồ ngập nếu thời tiết xấu hơn`
   }
 
-  msg += `📋 **Khuyến nghị:**\n`
-  msg += `  • Hạn chế di chuyển vào giờ cao điểm nguy cơ\n`
-  msg += `  • Không đi qua vùng trũng thấp khi trời mưa lớn\n`
-  msg += `  • Chuẩn bị dụng cụ phòng lụt nếu cần\n`
-  msg += `  • Theo dõi bản đồ ngập lụt tại mục **Bản đồ** trong ứng dụng\n\n`
-  msg += `💡 Hỏi "Đâu nguy hiểm nhất?" để xem chi tiết khu vực cần tránh.`
+  if (hasSevereRisk || hasHighRisk) {
+    const severeRow = summaryRows.find(r => r.risk_level === 'severe')
+    const highRow = summaryRows.find(r => r.risk_level === 'high')
+    const worstRow = severeRow || highRow
 
-  return msg
+    return `⚠️ **Không nên ra ngoài nếu không thật sự cần thiết.**
+
+Hệ thống đang ghi nhận nguy cơ ngập cao trong thời gian tới.
+
+Mức cảnh báo cao nhất: **${riskLabel(worstRow.risk_level)}**
+Số điểm ảnh hưởng: **${worstRow.node_count} điểm đo**
+Độ sâu ngập lớn nhất dự báo: **${Number(worstRow.max_depth || 0).toFixed(1)}cm**
+
+Bạn nên:
+- Hạn chế di chuyển, đặc biệt khi trời mưa lớn
+- Tránh vùng trũng, hầm chui, khu vực gần sông/kênh rạch
+- Không đi qua đoạn đường ngập nếu không rõ độ sâu
+- Theo dõi mục bản đồ ngập trước khi chọn lộ trình
+- Hỏi thêm: **"Khu vực nguy hiểm nhất"** để biết nơi cần tránh`
+  }
+
+  if (hasMediumRisk) {
+    const mediumRow = summaryRows.find(r => r.risk_level === 'medium')
+
+    return `🟡 **Có thể ra ngoài nhưng cần thận trọng.**
+
+Hiện có một số điểm được dự báo ở mức nguy cơ thấp/trung bình.
+
+Số điểm ảnh hưởng: **${mediumRow.node_count} điểm đo**
+Độ sâu ngập lớn nhất dự báo: **${Number(mediumRow.max_depth || 0).toFixed(1)}cm**
+
+Bạn nên:
+- Ưu tiên tuyến đường chính, tránh đường trũng thấp
+- Theo dõi thời tiết trước khi đi
+- Không đi qua khu vực nước dâng nhanh
+- Hỏi thêm: **"Tình trạng ngập hiện tại"** để kiểm tra trước khi di chuyển`
+  }
+
+  return `✅ Hiện chưa có cảnh báo nghiêm trọng. Bạn có thể di chuyển nhưng nên tiếp tục theo dõi tình hình.`
 }
 
-/** Câu trả lời khi không hiểu ý định */
 function replyUnknown() {
-  return `🤔 Xin lỗi, tôi chưa hiểu câu hỏi của bạn.\n\nBạn có thể hỏi tôi:\n• **"Dự báo ngập 4 ngày tới thế nào?"**\n• **"Đâu là khu vực nguy hiểm nhất?"**\n• **"Vì sao khu vực X có nguy cơ cao?"**\n• **"Hiện tại có ngập không?"**\n• **"Có nên ra ngoài không?"**`
+  return `🤔 Tôi chưa hiểu câu hỏi.
+
+Bạn có thể hỏi:
+- **"Tình trạng ngập hiện tại"**
+- **"Khu vực nguy hiểm nhất"**
+- **"Vì sao khu vực X có nguy cơ cao?"**
+- **"Dự báo ngập 4 ngày tới thế nào?"**
+- **"Có nên ra ngoài không?"**`
 }
 
-// ─── Route chính ──────────────────────────────────────────────────────────────
-
-/**
- * POST /api/v1/chatbot/ask
- * Body: { message: string }
- * Trả về: { reply: string, intent: string, data?: object }
- */
 router.post('/chatbot/ask', async (req, res, next) => {
   try {
-    const message = (req.body?.message ?? '').trim()
+    const message = String(req.body?.message || req.body?.question || '').trim()
 
-    // Validate input
     if (!message) {
       return res.status(400).json({
         success: false,
@@ -379,82 +959,77 @@ router.post('/chatbot/ask', async (req, res, next) => {
       })
     }
 
-    // Giới hạn độ dài để tránh spam
     if (message.length > 500) {
       return res.status(400).json({
         success: false,
-        error: { message: 'Câu hỏi quá dài (tối đa 500 ký tự).' },
+        error: { message: 'Câu hỏi quá dài, tối đa 500 ký tự.' },
       })
     }
 
-    // Bước 1: Phân tích intent
     const intent = detectIntent(message)
-    console.log(`[Chatbot] Intent: ${intent} | Message: "${message.substring(0, 50)}"`)
+    const keyword = extractKeyword(message)
+
+    console.log(`[Chatbot] Intent: ${intent} | Message: "${message.substring(0, 80)}"`)
 
     let reply = ''
-    let data  = null
+    let data = null
 
-    // Bước 2: Query DB và sinh câu trả lời theo intent
     switch (intent) {
-
       case 'GREETING':
         reply = replyGreeting()
         break
 
-      case 'FORECAST_4DAYS': {
-        const rows = await queryForecastSummary()
-        reply = replyForecast(rows)
-        data  = rows
+      case 'FORECAST_4DAYS':
+        data = await queryForecastSummary()
+        reply = replyForecast(data)
         break
-      }
 
-      case 'CURRENT_STATUS': {
-        const rows = await queryCurrentStatus()
-        reply = replyCurrentStatus(rows)
-        data  = rows
+      case 'CURRENT_STATUS':
+        data = await queryCurrentStatus()
+        reply = replyCurrentStatus(data)
         break
-      }
 
-      case 'WORST_AREA': {
-        const rows = await queryWorstArea()
-        reply = replyWorstArea(rows)
-        data  = rows
+      case 'WORST_AREA':
+        data = await queryWorstArea()
+        reply = replyWorstArea(data)
         break
-      }
 
-      case 'EXPLAIN_RISK': {
-        const rows = await queryForExplanation()
-        reply = replyExplanation(rows)
-        data  = rows
-        break
-      }
+      case 'EXPLAIN_RISK':
+         data = await queryAreaByPlaceName(message)
+         reply = await replyExplanation(data)
+         break
 
-      case 'SAFE_ADVICE': {
-        const rows = await queryForecastSummary()
-        reply = replySafeAdvice(rows)
-        data  = rows
+      case 'AREA_STATUS':
+        data = await queryAreaByPlaceName(message)
+        reply = await replyExplanation(data)
         break
-      }
+
+      case 'SAFE_ADVICE':
+        data = await queryForecastSummary()
+        reply = replySafeAdvice(data)
+        break
 
       case 'SPECIFIC_TIME': {
-        // Tìm offset giờ từ tin nhắn (đơn giản: +12h cho ngày mai, +24h cho ngày kia)
         const m = message.toLowerCase()
         let offset = 0
-        if (/(ngày mai|tomorrow)/.test(m))      offset = 12
-        else if (/(ngày kia|day after)/.test(m)) offset = 36
-        else if (/chiều/.test(m))                offset = 6
-        else if (/tối/.test(m))                  offset = 10
 
-        const rows = await queryByTime(offset)
-        if (!rows.length) {
-          reply = `📭 Không tìm thấy dữ liệu dự báo cho khoảng thời gian đó. Có thể dữ liệu chưa được cập nhật.`
+        if (/(ngày mai|tomorrow)/.test(m)) offset = 12
+        else if (/(ngày kia|day after)/.test(m)) offset = 36
+        else if (/chiều/.test(m)) offset = 6
+        else if (/tối/.test(m)) offset = 10
+
+        data = await queryByTime(offset)
+
+        if (!data.length) {
+          reply = '📭 Không tìm thấy dữ liệu dự báo cho khoảng thời gian đó.'
         } else {
-          const worst = rows[0]
+          const worst = data[0]
           reply = `⏰ **Dự báo lúc ~${formatVN(worst.time)}:**\n\n`
-          reply += `Mức độ nguy hiểm cao nhất: **${riskLabel(worst.risk_level)}** (${Number(worst.flood_depth_cm).toFixed(1)}cm)\n`
+          reply += `Khu vực: **${worst.location_name || `Node ${worst.node_id}`}**\n`
+          reply += `Mức nguy hiểm cao nhất: **${riskLabel(worst.risk_level)}**\n`
+          reply += `Độ sâu ngập dự báo: **${Number(worst.flood_depth_cm || 0).toFixed(1)}cm**\n`
           if (worst.explanation) reply += `\n💬 ${worst.explanation}`
         }
-        data = rows
         break
       }
 
@@ -463,12 +1038,16 @@ router.post('/chatbot/ask', async (req, res, next) => {
     }
 
     return res.status(200).json({
-      success: true,
-      data: { reply, intent, extraData: data },
-    })
-
+  success: true,
+  data: {
+    answer: reply,
+    reply,
+    intent,
+    extraData: data,
+  },
+})
   } catch (err) {
-    console.error('[Chatbot] Lỗi xử lý:', err.message)
+    console.error('[Chatbot] Lỗi xử lý:', err)
     return next(err)
   }
 })

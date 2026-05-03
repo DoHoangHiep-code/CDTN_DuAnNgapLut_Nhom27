@@ -14,18 +14,48 @@ interface Props {
 }
 
 async function askChatbot(question: string): Promise<string> {
-  const res = await apiV1.post<{ success: boolean; data: { answer: string } }>('/chatbot/ask', { question })
-  return res.data?.data?.answer ?? res.data?.data ?? 'Không có phản hồi.'
+  const res = await apiV1.post('/chatbot/ask', {
+    message: question,
+  })
+
+  console.log('Chatbot response full:', JSON.stringify(res.data, null, 2))
+
+  if (!res.data?.success) {
+    return res.data?.error?.message || 'Chatbot lỗi.'
+  }
+
+  const answer =
+    res.data?.data?.answer ||
+    res.data?.data?.reply ||
+    res.data?.answer ||
+    res.data?.reply
+
+  if (typeof answer === 'string' && answer.trim()) {
+    return answer
+  }
+
+  return 'Bot có phản hồi nhưng không tìm thấy nội dung trả lời. Hãy kiểm tra backend trả về field data.answer hoặc data.reply.'
 }
 
-function renderText(text: string) {
-  // Bold: **text** → <strong>
-  const parts = text.split(/(\*\*[^*]+\*\*)/g)
-  return parts.map((p, i) =>
-    p.startsWith('**') && p.endsWith('**')
-      ? <strong key={i}>{p.slice(2, -2)}</strong>
-      : <span key={i}>{p}</span>
-  )
+function renderText(text: unknown) {
+  const safeText =
+    typeof text === 'string'
+      ? text
+      : JSON.stringify(text, null, 2)
+
+  return safeText.split('\n').map((line, lineIndex) => {
+    const parts = line.split(/(\*\*[^*]+\*\*)/g)
+
+    return (
+      <div key={lineIndex}>
+        {parts.map((p, i) =>
+          p.startsWith('**') && p.endsWith('**')
+            ? <strong key={i}>{p.slice(2, -2)}</strong>
+            : <span key={i}>{p}</span>
+        )}
+      </div>
+    )
+  })
 }
 
 export function ChatInterface({ onClose }: Props) {
@@ -61,7 +91,16 @@ export function ChatInterface({ onClose }: Props) {
 
     try {
       const answer = await askChatbot(text)
-      setMessages((prev) => [...prev, { id: `b-${Date.now()}`, role: 'bot', text: answer, ts: new Date() }])
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `b-${Date.now()}`,
+          role: 'bot',
+          text: typeof answer === 'string' ? answer : JSON.stringify(answer, null, 2),
+          ts: new Date(),
+        },
+      ])
     } catch {
       setMessages((prev) => [
         ...prev,
