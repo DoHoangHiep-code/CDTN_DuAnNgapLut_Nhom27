@@ -4,11 +4,14 @@ Dự đoán độ ngập lụt bằng CatBoost model đã train sẵn.
 
 Chạy: uvicorn main:app --host 0.0.0.0 --port 8000
 """
-
 import math
 import logging
 from contextlib import asynccontextmanager
-
+import math
+import logging
+from contextlib import asynccontextmanager
+import numpy as np
+import shap
 import uvicorn
 from catboost import CatBoostRegressor
 from fastapi import FastAPI, HTTPException
@@ -19,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 MODEL_PATH = "../ai/catboost_flood_model_final_full_data.cbm"
 _model: CatBoostRegressor | None = None
+_explainer = None
 
 
 @asynccontextmanager
@@ -27,6 +31,10 @@ async def lifespan(app: FastAPI):
     logger.info("Đang tải model CatBoost từ: %s", MODEL_PATH)
     _model = CatBoostRegressor()
     _model.load_model(MODEL_PATH)
+
+    # 👉 THÊM DÒNG NÀY
+    global _explainer
+    _explainer = shap.TreeExplainer(_model)
     logger.info("Model tải thành công. Features: %s", _model.feature_names_)
     yield
     logger.info("AI service đang tắt.")
@@ -184,6 +192,55 @@ def predict_flood_batch(items: list[WeatherData]):
         logger.error("Lỗi batch predict: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/explain")
+def explain_flood(data: WeatherData):
+    """
+    Trả về:
+    - prediction (depth)
+    - risk_level
+    - top feature importance (SHAP)
+    """
 
+    if _model is None or _explainer is None:
+        raise HTTPException(status_code=503, detail="Model chưa sẵn sàng.")
+
+    try:
+        data_dict = data.model_dump()
+        row = [data_dict[f] for f in FEATURE_ORDER]
+        X = np.array([row])
+
+        # --- Prediction ---
+        raw = _model.predict(X)
+        flood_depth_cm = max(0.0, float(raw[0]))
+
+        # --- SHAP ---
+        shap_values = _explainer.shap_values(X)[0]
+
+        # Combine feature + shap
+        feature_importance = []
+        for i, feat in enumerate(FEATURE_ORDER):
+            feature_importance.append({
+                "feature": feat,
+                "value": float(row[i]),
+                "importance": float(shap_values[i])
+            })
+
+        # Sort theo độ ảnh hưởng
+        feature_importance = sorted(
+            feature_importance,
+            key=lambda x: abs(x["importance"]),
+            reverse=True
+        )[:10]
+
+        return {
+            "prediction": round(flood_depth_cm, 2),
+            "risk_level": depth_to_risk(flood_depth_cm),
+            "top_features": feature_importance
+        }
+
+    except Exception as e:
+        logger.error("Lỗi explain: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    

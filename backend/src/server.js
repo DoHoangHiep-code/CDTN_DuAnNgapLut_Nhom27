@@ -12,9 +12,10 @@ const { profileRouter }        = require('./routes/profileRoutes')         // Ro
 const { adminUserRouter }      = require('./routes/adminUserRoutes')       // Router admin CRUD users
 const { reportsRouter }        = require('./routes/reportsRoutes')         // Router reports
 const { floodPredictionRouter} = require('./routes/floodPredictionRoutes') // Router compat /flood-prediction
-const { chatbotRouter }        = require('./routes/chatbotRoutes')         // Router chatbot AI
 const { healthCheckRouter }    = require('./routes/healthCheckRoutes')     // Router health-check cloud
 const { sequelize }            = require('./db/sequelize')                 // Sequelize instance để sync/auth
+const { chatbotRouter }        = require('./routes/chatbotRoutes')         // Router chatbot
+
 require('./models') // Nạp toàn bộ model trước sync để Sequelize biết cần tạo/alter bảng nào
 
 // ── Weather Cronjob ──────────────────────────────────────────────────────────
@@ -45,6 +46,7 @@ app.use('/api/v1', healthCheckRouter)
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1', profileRouter)
 app.use('/api/v1', adminUserRouter)
+app.use('/api/v1', chatbotRouter)
 
 // ── Route kích hoạt Cronjob thủ công (CHỈ dùng khi dev/test) ────────────────
 // QUAN TRỌNG: Phải đặt TRƯỚC reportsRouter vì router.use(verifyToken) bên trong
