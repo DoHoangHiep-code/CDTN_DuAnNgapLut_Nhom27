@@ -18,7 +18,7 @@
 
 require('dotenv').config()
 
-const WEATHER_STATIONS = require('../../config/weatherStations')
+const { WeatherStation } = require('../models')
 
 const cron       = require('node-cron')
 const axiosRetry = require('axios-retry').default || require('axios-retry')
@@ -33,6 +33,7 @@ axiosRetry(axios, {
 
 const { getWeatherByCoords, getOWMForecast5d } = require('./OpenWeatherService')
 const { GridNode, FloodPrediction, WeatherMeasurement, SystemLog } = require('../models')
+const { sequelize } = require('../db/sequelize')
 
 // ─── Cấu hình ────────────────────────────────────────────────────────────────
 
@@ -69,12 +70,13 @@ async function ingestCurrentWeatherFromOWM() {
   const month  = nowICT.getUTCMonth() + 1
   const rainy_season_flag = rainyMonths.includes(month)
 
-  console.log('[WeatherCron/OWM] Fetch current weather cho 8 trạm...')
+  const stations = await WeatherStation.findAll({ raw: true })
+  console.log(`[WeatherCron/OWM] Fetch current weather cho ${stations.length} trạm...`)
   const stationWeatherMap = new Map()
 
   await Promise.allSettled(
-    WEATHER_STATIONS.map(async (station) => {
-      const w = await getWeatherByCoords(station.lat, station.lon)
+    stations.map(async (station) => {
+      const w = await getWeatherByCoords(station.latitude, station.longitude)
       if (w) {
         stationWeatherMap.set(station.id, w)
         console.log(`  [Trạm ${station.id}] ✅ ${station.name} — temp=${w.temp}°C rain=${w.rain1h}mm`)
@@ -83,7 +85,7 @@ async function ingestCurrentWeatherFromOWM() {
       }
     })
   )
-  console.log(`[WeatherCron/OWM] Lấy được ${stationWeatherMap.size}/8 trạm.\n`)
+  console.log(`[WeatherCron/OWM] Lấy được ${stationWeatherMap.size}/${stations.length} trạm.\n`)
 
   if (!stationWeatherMap.size) return 0
 
@@ -107,6 +109,8 @@ async function ingestCurrentWeatherFromOWM() {
       rainy_season_flag,
       temp:          Number(w.temp)      || 0,
       rhum:          Number(w.humidity)  || 0,
+      // Lưu clouds để BI/AI có thể phân tích tương quan mây che - mưa - ngập
+      clouds:        Number(w.clouds)    || 0,
       prcp:          Number(w.rain1h)    || 0,
       prcp_3h:       Number(w.rain1h)    || 0,
       prcp_6h:       Number(w.rain1h)    || 0,
@@ -134,7 +138,7 @@ async function ingestCurrentWeatherFromOWM() {
       conflictAttributes: ['node_id', 'time'],
       updateOnDuplicate: [
         'temp', 'rhum', 'prcp', 'prcp_3h', 'prcp_6h', 'prcp_12h', 'prcp_24h',
-        'wspd', 'wdir', 'pres', 'date_only', 'month', 'hour', 'rainy_season_flag',
+        'clouds', 'wspd', 'wdir', 'pres', 'date_only', 'month', 'hour', 'rainy_season_flag',
         'pressure_change_24h', 'max_prcp_3h', 'max_prcp_6h', 'max_prcp_12h',
         'location_name', 'visibility_km', 'feels_like_c',
       ],
@@ -181,10 +185,11 @@ async function callAIPredictBatch(featuresArray) {
  * Xử lý một GridNode với mảng data points OWM 3h đã fetch sẵn cho trạm.
  *
  * @param {object}  node       – GridNode plain object
- * @param {Array}   owmPoints  – output của getOWMForecast5d() cho trạm đó
+ * @param {Array}   owmPoints      – output của getOWMForecast5d() cho trạm đó
+ * @param {Map}     presHistoryMap – Map(timestampMs => pressure) lịch sử 48h của trạm
  * @returns {Promise<{predictionRecords: Array, weatherRecords: Array}>}
  */
-async function processNodeWithOWMForecast(node, owmPoints) {
+async function processNodeWithOWMForecast(node, owmPoints, presHistoryMap) {
   const {
     node_id, elevation, slope, impervious_ratio,
     location_name = null,
@@ -218,8 +223,28 @@ async function processNodeWithOWMForecast(node, owmPoints) {
     const prcp = p.rain3h            // mm trong 3h
     const pres = p.pressure
     const wspd = p.windSpeed         // m/s – đúng đơn vị AI expect
+    const clouds = p.clouds          // % mây che
     const wdir = p.windDeg
     const visibility_km = p.visibility != null ? (p.visibility / 1000) : null
+
+    // Tìm áp suất 24h trước (24h = 86400000ms)
+    const time24hAgo = p.timeUtc.getTime() - 86400000
+    let pres24hAgo = null
+    
+    // Thử tìm trong owmPoints (nếu điểm này ở tương lai > 24h)
+    const pastPointInOwm = owmPoints.find(op => op.timeUtc.getTime() === time24hAgo)
+    if (pastPointInOwm) {
+      pres24hAgo = pastPointInOwm.pressure
+    } else if (presHistoryMap) {
+      // Tìm trong lịch sử DB (với sai số cho phép +- 1 giờ vì cronjob chạy có thể trễ vài phút)
+      for (const [tMs, pastP] of presHistoryMap.entries()) {
+         if (Math.abs(tMs - time24hAgo) <= 3600000) {
+            pres24hAgo = pastP
+            break
+         }
+      }
+    }
+    const pressure_change_24h = pres24hAgo ? Number((pres - pres24hAgo).toFixed(2)) : 0
 
     // Tính prcp windows từ sliding window trên mảng 3h
     // Mỗi step = 3h → prcp_3h = 1 step, prcp_6h = 2 step, prcp_12h = 4 step, prcp_24h = 8 step
@@ -238,7 +263,7 @@ async function processNodeWithOWMForecast(node, owmPoints) {
     featuresArray.push({
       prcp, prcp_3h, prcp_6h, prcp_12h, prcp_24h,
       temp, rhum, wspd, pres,
-      pressure_change_24h: 0,
+      pressure_change_24h,
       max_prcp_3h:  prcp_3h,
       max_prcp_6h:  prcp_6h,
       max_prcp_12h: prcp_12h,
@@ -275,6 +300,7 @@ async function processNodeWithOWMForecast(node, owmPoints) {
       location_name,
       temp,
       rhum,
+      clouds,
       prcp,
       prcp_3h,
       prcp_6h,
@@ -318,6 +344,7 @@ async function processNodeWithOWMForecast(node, owmPoints) {
       hour,
       rainy_season_flag,
       flood_depth_cm: depthCm,
+      target:         depthCm > 10 ? 1 : 0,
       risk_level:     riskLevel,
       explanation,
       location_name,
@@ -338,7 +365,7 @@ async function upsertWeatherMeasurements(records) {
       conflictAttributes: ['node_id', 'time'],
       updateOnDuplicate: [
         'temp', 'rhum', 'prcp', 'prcp_3h', 'prcp_6h', 'prcp_12h', 'prcp_24h',
-        'wspd', 'wdir', 'pres', 'date_only',
+        'clouds', 'wspd', 'wdir', 'pres', 'date_only',
         'visibility_km', 'feels_like_c',
         'month', 'hour', 'rainy_season_flag', 'location_name',
       ],
@@ -356,13 +383,13 @@ async function upsertPredictions(records) {
     return
   }
 
-  // Chia batch 200 để tránh Aiven reject
+  // Chia batch 200 để tránh CockroachDB reject
   const BATCH_SIZE = 200
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
     await FloodPrediction.bulkCreate(records.slice(i, i + BATCH_SIZE), {
       conflictAttributes: ['node_id', 'time'],
       updateOnDuplicate: [
-        'flood_depth_cm', 'risk_level', 'explanation',
+        'flood_depth_cm', 'target', 'risk_level', 'explanation',
         'date_only', 'month', 'hour', 'rainy_season_flag', 'location_name',
       ],
     })
@@ -392,58 +419,81 @@ async function upsertPredictions(records) {
  *  Phase 0 – OWM Current (8 calls): Lấy thời tiết hiện tại → fan-out weather_measurements
  *  Phase 1 – OWM Forecast 5d (8 calls): Lấy 40 data points × 3h cho 8 trạm
  *  Phase 2 – AI Inference: Mỗi node trong cụm dùng forecast của trạm → gọi AI batch
- *  Phase 3 – Upsert: flood_predictions + weather_measurements lên Aiven
+ *  Phase 3 – Upsert: flood_predictions + weather_measurements lên CockroachDB
  *
  * Tổng API calls: 8 (current) + 8 (forecast) = 16 calls/lần chạy
  */
 async function runWeatherCron() {
   const startTime = Date.now()
   console.log(`\n[WeatherCron] ⏰ Bắt đầu lúc ${new Date().toISOString()} (OWM Station-based)`)
-  console.log(`[WeatherCron] Số trạm đại diện: ${WEATHER_STATIONS.length}`)
+  const stations = await WeatherStation.findAll({ raw: true })
+  console.log(`[WeatherCron] Số trạm đại diện: ${stations.length}`)
   console.log(`[WeatherCron] Nguồn dữ liệu: OpenWeatherMap /data/2.5/forecast (5d/3h)`)
 
-  try {
-    console.log('[WeatherCron] Đang dọn dẹp dữ liệu cũ (TRUNCATE) để tiết kiệm dung lượng DB...')
-    const { sequelize } = require('../models/index')
-    await sequelize.query('TRUNCATE TABLE weather_measurements CASCADE;')
-    await sequelize.query('TRUNCATE TABLE flood_predictions CASCADE;')
-    console.log('[WeatherCron] ✅ Đã TRUNCATE xong.')
-  } catch (err) {
-    console.warn('[WeatherCron] ⚠️ Không thể TRUNCATE (DB có thể đang bị khoá Read-Only):', err.message)
-  }
+  // ── Lưu ý: KHÔNG Truncate. Dữ liệu lịch sử được bảo toàn. ────────────────────
+  // Toàn bộ việc ghi DB dùng INSERT ... ON CONFLICT DO UPDATE (UPSERT) để cập nhật
+  // các bản ghi trùng key thay vì xóa toàn bộ bảng mỗi lần chạy cron.
+  // Data retention (xóa data cũ >30 ngày) được xử lý riêng bởi backupCron.js.
 
   try {
     // ── Phase 0: Ingest current weather từ OWM ───────────────────────────────
     const owmRows = await ingestCurrentWeatherFromOWM()
     console.log(`[WeatherCron/OWM] Fan-out xong: ${owmRows.toLocaleString('vi-VN')} bản ghi.\n`)
 
-    // ── Phase 1: Fetch OWM Forecast 5d cho 8 trạm song song ─────────────────
-    console.log('\n[Phase 1] Fetch OWM Forecast 5d cho 8 trạm...')
+    // ── Phase 1: Fetch OWM Forecast 5d cho các trạm song song ─────────────────
+    console.log(`\n[Phase 1] Fetch OWM Forecast 5d cho ${stations.length} trạm...`)
     const stationForecasts = new Map()   // stationId → owmPoints[]
 
-    await Promise.allSettled(
-      WEATHER_STATIONS.map(async (station) => {
-        const points = await getOWMForecast5d(station.lat, station.lon)
-        if (points && points.length) {
-          stationForecasts.set(station.id, points)
-          console.log(`  [Trạm ${station.id}] ✅ ${station.name} — ${points.length} data points (${(points.length * 3)}h)`)
-        } else {
-          console.warn(`  [Trạm ${station.id}] ⚠️  ${station.name} — fetch thất bại`)
-        }
-      })
-    )
-    console.log(`[Phase 1] ✅ Lấy được ${stationForecasts.size}/${WEATHER_STATIONS.length} trạm.\n`)
+    // Chia mảng station ra thành các chunk để fetch dần dần (mỗi lần 10-15 trạm),
+    // giúp tránh tình trạng bị server chối từ kết nối (Too Many Requests / Connection Reset)
+    const MAX_CONCURRENT_REQUESTS = 10
+    let fetchedStations = 0
+    
+    for (let chunkStart = 0; chunkStart < stations.length; chunkStart += MAX_CONCURRENT_REQUESTS) {
+      const chunk = stations.slice(chunkStart, chunkStart + MAX_CONCURRENT_REQUESTS)
+      await Promise.allSettled(
+        chunk.map(async (station) => {
+          const points = await getOWMForecast5d(station.latitude, station.longitude)
+          if (points && points.length) {
+            stationForecasts.set(station.id, points)
+            console.log(`  [Trạm ${station.id}] ✅ ${station.name} — ${points.length} data points (${(points.length * 3)}h)`)
+          } else {
+            console.warn(`  [Trạm ${station.id}] ⚠️  ${station.name} — fetch thất bại`)
+          }
+        })
+      )
+      fetchedStations += chunk.length
+      // Tạm nghỉ 1s giữa các đợt gọi API OWM để tránh bị cấm do rate limit.
+      if (fetchedStations < stations.length) {
+         await new Promise(r => setTimeout(r, 1000))
+      }
+    }
+    
+    console.log(`[Phase 1] ✅ Lấy được ${stationForecasts.size}/${stations.length} trạm.\n`)
 
     let totalPredictions    = 0
     let totalWeatherRows    = 0
     let totalNodesProcessed = 0
 
     // ── Phase 2: Xử lý từng trạm ─────────────────────────────────────────────
-    for (const station of WEATHER_STATIONS) {
+    for (const station of stations) {
       const owmPoints = stationForecasts.get(station.id)
       if (!owmPoints) {
         console.warn(`[Phase 2] Bỏ qua trạm ${station.id} – không có forecast.`)
         continue
+      }
+
+      // Lấy lịch sử áp suất 48h qua của trạm này từ bảng weather_measurements
+      // (Do Trạm ảo lấy chính node_id làm ID, nên ta query node_id = station.id)
+      const pastPresRows = await sequelize.query(`
+        SELECT time, pres 
+        FROM weather_measurements
+        WHERE node_id = :stationId AND time >= NOW() - INTERVAL '48 hours'
+      `, { replacements: { stationId: station.id }, type: sequelize.QueryTypes.SELECT })
+
+      const presHistoryMap = new Map()
+      for (const r of pastPresRows) {
+        presHistoryMap.set(new Date(r.time).getTime(), Number(r.pres))
       }
 
       // Lấy tất cả nodes thuộc trạm này
@@ -470,7 +520,7 @@ async function runWeatherCron() {
       for (let bi = 0; bi < stationNodes.length; bi += NODE_BATCH_SIZE) {
         const nodeBatch  = stationNodes.slice(bi, bi + NODE_BATCH_SIZE)
         const batchRes   = await Promise.allSettled(
-          nodeBatch.map(node => processNodeWithOWMForecast(node, owmPoints))
+          nodeBatch.map(node => processNodeWithOWMForecast(node, owmPoints, presHistoryMap))
         )
 
         for (const r of batchRes) {
@@ -540,7 +590,7 @@ async function runWeatherCron() {
 
     console.log(`\n[WeatherCron] 🏁 Hoàn thành sau ${elapsed}s`)
     console.log(`  API nguồn          : OpenWeatherMap /data/2.5/forecast`)
-    console.log(`  Trạm fetch OK      : ${stationForecasts.size}/${WEATHER_STATIONS.length}`)
+    console.log(`  Trạm fetch OK      : ${stationForecasts.size}/${stations.length}`)
     console.log(`  Nodes xử lý        : ${totalNodesProcessed.toLocaleString('vi-VN')}`)
     console.log(`  flood_predictions  : ${totalPredictions.toLocaleString('vi-VN')} bản ghi`)
     console.log(`  weather_measurements: ${totalWeatherRows.toLocaleString('vi-VN')} bản ghi\n`)
@@ -553,15 +603,15 @@ async function runWeatherCron() {
 // ─── Khởi động Cronjob ────────────────────────────────────────────────────────
 
 function startWeatherCron() {
-  // "0 */6 * * *" → phút 0 của mỗi 6 tiếng
-  cron.schedule('0 */6 * * *', () => {
+  // "0 * * * *" → phút 0 của mỗi giờ (V2: tăng tần suất từ 6h → 1h)
+  cron.schedule('0 * * * *', () => {
     console.log('[WeatherCron] Cron trigger tự động...')
     runWeatherCron()
   }, {
     timezone: 'Asia/Ho_Chi_Minh',
   })
 
-  console.log('[WeatherCron] ✅ Đã đăng ký cron schedule: mỗi 6 tiếng (0h/6h/12h/18h ICT).')
+  console.log('[WeatherCron] ✅ Đã đăng ký cron schedule: mỗi 1 tiếng (phút 0 mỗi giờ, ICT).')
   console.log('[WeatherCron] Nguồn dữ liệu: OpenWeatherMap Developer Plan')
 }
 

@@ -69,9 +69,14 @@ async function getWeatherByCoords(lat, lon) {
     })
 
     const d = res.data
+    // Safeguard chống nhiễu: mưa cực nhỏ (dưới 0.5mm/h) coi như 0
+    // Lý do: một số trạm/giờ có thể trả số rất nhỏ do làm tròn/độ ẩm → gây lệch feature AI.
+    const rain1hRaw = d?.rain?.['1h'] ?? 0
+    const rain1h = Number(rain1hRaw) < 0.5 ? 0 : Number(rain1hRaw) || 0
     return {
-      rain1h: d?.rain?.['1h'] ?? 0,
+      rain1h,
       humidity: d?.main?.humidity ?? 0,
+      // clouds có thể nằm ở clouds.all; nếu thiếu thì fallback 0 để không phá schema allowNull=false
       clouds: d?.clouds?.all ?? 0,
       temp: d?.main?.temp ?? 0,
       feels_like: d?.main?.feels_like ?? 0,
@@ -136,7 +141,11 @@ async function getOWMForecast5d(lat, lon) {
     const list = res.data?.list
     if (!Array.isArray(list) || !list.length) return null
 
-    return list.map((item) => ({
+    return list.map((item) => {
+      // Safeguard tương tự current: nếu mưa 3h quá nhỏ thì ép về 0 (giảm nhiễu tích lũy)
+      const rain3hRaw = item.rain?.['3h'] ?? 0
+      const rain3h = Number(rain3hRaw) < 0.5 ? 0 : Number(rain3hRaw) || 0
+      return {
       timeIso: item.dt_txt + ':00+07:00',   // server UTC → giữ nguyên, frontend parse
       timeUtc: new Date(item.dt * 1000),     // Date object UTC
       temp: item.main?.temp ?? 28,
@@ -144,7 +153,7 @@ async function getOWMForecast5d(lat, lon) {
       tempMin: item.main?.temp_min ?? 26,
       tempMax: item.main?.temp_max ?? 32,
       humidity: item.main?.humidity ?? 70,
-      rain3h: item.rain?.['3h'] ?? 0,  // mm tích lũy 3 giờ
+      rain3h,  // mm tích lũy 3 giờ (đã safeguard)
       pressure: item.main?.pressure ?? 1010,
       windSpeed: item.wind?.speed ?? 0,   // m/s
       windDeg: item.wind?.deg ?? 0,
@@ -152,7 +161,8 @@ async function getOWMForecast5d(lat, lon) {
       visibility: item.visibility ?? 10000,
       description: item.weather?.[0]?.description ?? 'Không rõ',
       icon: item.weather?.[0]?.icon ?? '',
-    }))
+      }
+    })
   } catch (err) {
     _handleAxiosError(err, 'Forecast5d')
     return null

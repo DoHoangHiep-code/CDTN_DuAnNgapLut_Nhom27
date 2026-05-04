@@ -11,6 +11,7 @@ module.exports = (sequelize) => {
       // ── Khí tượng cơ bản ──────────────────────────────────────────────────
       temp:    { type: DataTypes.DECIMAL(6, 2),  allowNull: true }, // Nhiệt độ (°C)
       rhum:    { type: DataTypes.DECIMAL(5, 2),  allowNull: true }, // Độ ẩm (%)
+      clouds:  { type: DataTypes.INTEGER,        allowNull: false, defaultValue: 0 }, // Tỷ lệ mây (%)
       prcp:    { type: DataTypes.DECIMAL(8, 3),  allowNull: true }, // Mưa 1h (mm)
       prcp_3h: { type: DataTypes.DECIMAL(8, 3),  allowNull: true }, // Mưa 3h (mm)
       prcp_6h: { type: DataTypes.DECIMAL(8, 3),  allowNull: true }, // Mưa 6h (mm)
