@@ -101,8 +101,8 @@ export async function getReports(params?: { date?: string; district?: string }) 
   return (res.data?.data ?? res.data) as ReportsResponse
 }
 
-export async function getDashboard() {
-  const res = await apiV1.get<any>('/dashboard')
+export async function getDashboard(params?: { hours?: number; search?: string }) {
+  const res = await apiV1.get<any>('/dashboard', { params })
   return (res.data?.data ?? res.data) as DashboardResponse
 }
 
