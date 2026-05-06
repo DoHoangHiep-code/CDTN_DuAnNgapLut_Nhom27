@@ -173,6 +173,20 @@ async function main() {
   }
 
   console.log()
+  console.log(`\n[IDW] Đang cập nhật node_count cho các trạm ảo...`)
+  const countSql = `
+    UPDATE weather_stations AS ws
+    SET node_count = count_data.c
+    FROM (
+      SELECT st1_id, COUNT(*) AS c
+      FROM grid_nodes
+      WHERE st1_id IS NOT NULL
+      GROUP BY st1_id
+    ) AS count_data
+    WHERE ws.id = count_data.st1_id
+  `
+  await sequelize.query(countSql)
+
   console.log(`\n[IDW] ✅ Hoàn thành!`)
   console.log(`  Tổng nodes      : ${nodes.length.toLocaleString('vi-VN')}`)
   console.log(`  In-bounds (IDW) : ${(nodes.length - outOfBounds).toLocaleString('vi-VN')}`)

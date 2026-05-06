@@ -8,10 +8,11 @@ Chạy: uvicorn main:app --host 0.0.0.0 --port 8000
 import math
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 
 import uvicorn
 from catboost import CatBoostRegressor
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -162,24 +163,34 @@ def predict_flood(data: WeatherData):
 
 
 @app.post("/api/predict/batch")
-def predict_flood_batch(items: list[WeatherData]):
+async def predict_flood_batch(request: Request):
     """
     Dự đoán hàng loạt cho nhiều node cùng lúc.
+    Nhận raw JSON array để tránh Pydantic parse overhead.
     Trả về list[{flood_depth_cm, risk_level}].
     """
     if _model is None:
         raise HTTPException(status_code=503, detail="Model chưa sẵn sàng.")
+
+    try:
+        items: list[dict] = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"JSON parse error: {e}")
+
     if not items:
         return []
 
     try:
-        matrix = [[row.model_dump()[feat] for feat in FEATURE_ORDER] for row in items]
+        matrix = [[row[feat] for feat in FEATURE_ORDER] for row in items]
         raw = _model.predict(matrix)
         results = []
         for val in raw:
             depth = max(0.0, float(val))
             results.append({"flood_depth_cm": round(depth, 2), "risk_level": depth_to_risk(depth)})
         return results
+    except KeyError as e:
+        logger.error("Feature thiếu trong batch: %s", e)
+        raise HTTPException(status_code=422, detail=f"Feature '{e}' thiếu trong request.")
     except Exception as e:
         logger.error("Lỗi batch predict: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
