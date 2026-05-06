@@ -32,11 +32,13 @@ class DashboardService {
     const cached = this.cache.get(this.cacheKey)
     if (cached) return cached
 
-    const [weatherRow, rainRows, riskRows, alertRows] = await Promise.all([
+    const [weatherRow, rainRows, riskRows, alertRows, tempHumRows, riskTrendRows] = await Promise.all([
       this.dashboardRepository.getCurrentWeather().catch(() => null),
       this.dashboardRepository.getRainForecast24h().catch(() => []),
       this.dashboardRepository.getCurrentFloodRiskCounts().catch(() => []),
       this.dashboardRepository.getRecentAlerts(10).catch(() => []),
+      this.dashboardRepository.getTempHumidity24h().catch(() => []),
+      this.dashboardRepository.getRiskTrend7d().catch(() => []),
     ])
 
     const currentWeather = {
@@ -72,12 +74,35 @@ class DashboardService {
         }))
       : []
 
+    // temp + rhum 24h — mỗi bucket là 1 giờ
+    const tempHumidity24h = Array.isArray(tempHumRows)
+      ? tempHumRows.map((r) => ({
+          time: String(r.time),
+          temp: Number(r.temp) || 0,
+          rhum: Number(r.rhum) || 0,
+        }))
+      : []
+
+    // risk trend 7 ngày: gom thành mảng { date, safe, medium, high, severe }
+    const riskTrendMap = new Map()
+    for (const r of (riskTrendRows || [])) {
+      if (!riskTrendMap.has(r.date)) {
+        riskTrendMap.set(r.date, { date: r.date, safe: 0, medium: 0, high: 0, severe: 0 })
+      }
+      const entry = riskTrendMap.get(r.date)
+      if (r.risk_level && Object.prototype.hasOwnProperty.call(entry, r.risk_level)) {
+        entry[r.risk_level] = Number(r.count) || 0
+      }
+    }
+    const riskTrend7d = Array.from(riskTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date))
+
     const payload = {
       alerts,
       currentWeather,
-      // Giữ lại rainForecast để không phá các client cũ (backward-compatible)
       rainForecast: forecast24h.map((p) => ({ time: p.time, value: p.prcp })),
       forecast24h,
+      tempHumidity24h,
+      riskTrend7d,
       riskSummary: { ...riskCounts, overall },
     }
 

@@ -71,10 +71,26 @@ export type DashboardForecastPoint = {
   flood_depth_cm: number // cm
 }
 
+export type DashboardTempHumPoint = {
+  time: string   // "HH:mm"
+  temp: number   // °C
+  rhum: number   // %
+}
+
+export type DashboardRiskTrendDay = {
+  date: string   // "MM-DD"
+  safe: number
+  medium: number
+  high: number
+  severe: number
+}
+
 export type DashboardResponse = {
   currentWeather: { temperature: number; humidity: number; windSpeed: number }
   riskSummary: { safe: number; medium: number; high: number; severe: number; overall: RiskLevel }
   alerts: any[]
   forecast24h: DashboardForecastPoint[]
+  tempHumidity24h: DashboardTempHumPoint[]
+  riskTrend7d: DashboardRiskTrendDay[]
 }
 
