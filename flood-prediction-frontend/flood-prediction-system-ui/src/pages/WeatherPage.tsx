@@ -19,7 +19,7 @@ type WeatherKind = 'rain' | 'sun' | 'flood'
 
 function kindFromRainfall(mm: number): WeatherKind {
   if (mm >= 60) return 'flood'
-  if (mm >= 25) return 'rain'
+  if (mm > 0) return 'rain'
   return 'sun'
 }
 

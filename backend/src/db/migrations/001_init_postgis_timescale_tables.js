@@ -4,27 +4,44 @@
 module.exports = {
   async up(queryInterface, Sequelize) {
     // Extensions
-    await queryInterface.sequelize.query('CREATE EXTENSION IF NOT EXISTS postgis;')
+    try {
+      await queryInterface.sequelize.query('CREATE EXTENSION IF NOT EXISTS postgis;')
+    } catch (err) {
+      console.warn('PostGIS extension creation failed, it might be natively supported by CockroachDB')
+    }
+    
     // TimescaleDB: chỉ tạo nếu extension thực sự có sẵn trên instance này
     // (tránh crash trên PostgreSQL standard không cài TimescaleDB)
-    const tsdbRows = await queryInterface.sequelize.query(
-      "SELECT 1 AS ok FROM pg_available_extensions WHERE name = 'timescaledb' LIMIT 1;",
-    )
-    const tsdbAvailable = Array.isArray(tsdbRows?.[0]) ? tsdbRows[0].length > 0 : false
-    if (tsdbAvailable) {
-      await queryInterface.sequelize.query('CREATE EXTENSION IF NOT EXISTS timescaledb;')
+    try {
+      const tsdbRows = await queryInterface.sequelize.query(
+        "SELECT 1 AS ok FROM pg_available_extensions WHERE name = 'timescaledb' LIMIT 1;",
+      )
+      const tsdbAvailable = Array.isArray(tsdbRows?.[0]) ? tsdbRows[0].length > 0 : false
+      if (tsdbAvailable) {
+        await queryInterface.sequelize.query('CREATE EXTENSION IF NOT EXISTS timescaledb;')
+      }
+    } catch (err) {
+      console.warn('TimescaleDB check failed, likely CockroachDB.')
     }
 
     // Enums
-    await queryInterface.sequelize.query(
-      "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN CREATE TYPE user_role AS ENUM ('admin','expert','user'); END IF; END $$;",
-    )
-    await queryInterface.sequelize.query(
-      "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'risk_level') THEN CREATE TYPE risk_level AS ENUM ('safe','medium','high','severe'); END IF; END $$;",
-    )
-    await queryInterface.sequelize.query(
-      "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'reported_level') THEN CREATE TYPE reported_level AS ENUM ('Khô ráo','<15cm','15-30cm','>30cm'); END IF; END $$;",
-    )
+    const enums = [
+      { name: 'user_role', values: "'admin','expert','user'" },
+      { name: 'risk_level', values: "'safe','medium','high','severe'" },
+      { name: 'reported_level', values: "'Khô ráo','<15cm','15-30cm','>30cm'" }
+    ];
+    for (const e of enums) {
+      try {
+        await queryInterface.sequelize.query(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '${e.name}') THEN CREATE TYPE ${e.name} AS ENUM (${e.values}); END IF; END $$;`);
+      } catch (err) {
+        console.warn(`DO block failed for ${e.name}, attempting direct CREATE TYPE for CockroachDB...`);
+        try {
+          await queryInterface.sequelize.query(`CREATE TYPE ${e.name} AS ENUM (${e.values});`);
+        } catch (crdbErr) {
+          console.warn(`Enum ${e.name} creation failed or already exists.`);
+        }
+      }
+    }
 
     // users
     await queryInterface.createTable('users', {

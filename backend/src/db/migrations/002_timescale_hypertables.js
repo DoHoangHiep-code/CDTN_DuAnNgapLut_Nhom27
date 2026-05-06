@@ -5,12 +5,16 @@ module.exports = {
   async up(queryInterface) {
     // PostgreSQL 18 may not have a compatible TimescaleDB build installed.
     // To avoid blocking environments that don't ship the extension, we detect availability and skip safely.
-    const rows = await queryInterface.sequelize.query(
-      "SELECT 1 AS ok FROM pg_available_extensions WHERE name = 'timescaledb' LIMIT 1;",
-    )
-    const available = Array.isArray(rows?.[0]) ? rows[0].length > 0 : false
+    let available = false;
+    try {
+      const rows = await queryInterface.sequelize.query(
+        "SELECT 1 AS ok FROM pg_available_extensions WHERE name = 'timescaledb' LIMIT 1;",
+      )
+      available = Array.isArray(rows?.[0]) ? rows[0].length > 0 : false
+    } catch (err) {
+      console.warn('TimescaleDB check failed, assuming not available (likely CockroachDB)');
+    }
     if (!available) return
-
     await queryInterface.sequelize.query('CREATE EXTENSION IF NOT EXISTS timescaledb;')
     
     // TimescaleDB requires the partition column (time) to be part of any UNIQUE or PRIMARY KEY constraints.

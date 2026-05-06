@@ -14,12 +14,13 @@ const { reportsRouter }        = require('./routes/reportsRoutes')         // Ro
 const { floodPredictionRouter} = require('./routes/floodPredictionRoutes') // Router compat /flood-prediction
 const { chatbotRouter }        = require('./routes/chatbotRoutes')         // Router chatbot AI
 const { healthCheckRouter }    = require('./routes/healthCheckRoutes')     // Router health-check cloud
+const { statisticsRouter }     = require('./routes/statisticsRoutes')      // Router statistics
 const { sequelize }            = require('./db/sequelize')                 // Sequelize instance để sync/auth
 require('./models') // Nạp toàn bộ model trước sync để Sequelize biết cần tạo/alter bảng nào
 
-// ── Weather Cronjob ──────────────────────────────────────────────────────────
-// Import service cronjob dự báo ngập lụt mỗi 6 tiếng
+// ── Weather & Backup Cronjobs ─────────────────────────────────────────────────
 const { startWeatherCron, manualTrigger } = require('./services/weatherCron')
+const { startBackupCron }                 = require('./services/backupCron')
 
 const app = express() // Khởi tạo app Express
 
@@ -56,6 +57,7 @@ app.get('/api/v1/cron/trigger', (_req, res) => {
   manualTrigger().catch((err) => console.error('[CronTrigger] Lỗi:', err))
 })
 
+app.use('/api/v1', statisticsRouter)
 app.use('/api/v1', reportsRouter)
 
 // ── Serve static uploads ─────────────────────────────────────────────────────
@@ -93,9 +95,10 @@ async function bootstrapAndStart() {
       // Đăng ký Weather Cronjob sau khi server đã listen thành công
       // → tránh cron chạy trước khi DB connection sẵn sàng
       startWeatherCron()
+      startBackupCron()
     })
   } catch (err) {
-    // Xử lý kỹ lỗi SSL/kết nối Aiven để dễ debug trên cloud.
+    // Xử lý kỹ lỗi SSL/kết nối CockroachDB để dễ debug trên cloud.
     const message = err instanceof Error ? err.message : 'Unknown bootstrap error'
     console.error('[Bootstrap] Không thể khởi động server:', message)
     if (String(message).toLowerCase().includes('ssl')) {
