@@ -2,17 +2,33 @@
 
 const { QueryTypes } = require('sequelize')
 
+// Node đại diện mặc định (8 trạm hotspot có data đầy đủ)
+const DEFAULT_NODES = [200001, 200002, 200003, 200004, 200005, 200006, 200007, 200008]
+
 class DashboardRepository {
   constructor({ sequelize }) {
     this.sequelize = sequelize
   }
 
-  // 8 trạm đại diện — dùng index compound (node_id, time) để tránh full-scan
-  static get SAMPLE_NODES() { return [200001, 200002, 200003, 200004, 200005, 200006, 200007, 200008] }
+  /**
+   * Tìm node_id khớp với từ khoá search (tìm trong location_name).
+   * Trả DEFAULT_NODES nếu không có search hoặc không tìm thấy.
+   */
+  async resolveNodes(search) {
+    if (!search || !search.trim()) return DEFAULT_NODES
+    const rows = await this.sequelize.query(
+      `SELECT node_id FROM grid_nodes
+       WHERE location_name ILIKE :pattern
+         AND node_id >= 200001
+       ORDER BY node_id LIMIT 20`,
+      { type: QueryTypes.SELECT, replacements: { pattern: `%${search.trim()}%` } },
+    )
+    const ids = rows.map((r) => Number(r.node_id))
+    return ids.length > 0 ? ids : DEFAULT_NODES
+  }
 
-  async getCurrentWeather() {
+  async getCurrentWeather(nodes) {
     const tz = 'Asia/Ho_Chi_Minh'
-    const nodes = DashboardRepository.SAMPLE_NODES
     const sql = `
       SELECT
         COALESCE(AVG(temp), 0)::float AS temperature,
@@ -27,17 +43,17 @@ class DashboardRepository {
     return rows[0] || null
   }
 
-  async getRainForecast24h() {
+  async getRainForecast(nodes, hours) {
     const tz = 'Asia/Ho_Chi_Minh'
-    const nodes = DashboardRepository.SAMPLE_NODES
+    const h = Number(hours) || 24
     const sqlWm = `
       SELECT
         to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
         AVG(prcp)::float AS prcp
       FROM weather_measurements
       WHERE node_id IN (${nodes.join(',')})
-        AND time >= now() - interval '24 hours'
-      GROUP BY 1 ORDER BY 1 LIMIT 24;
+        AND time >= now() - interval '${h} hours'
+      GROUP BY 1 ORDER BY 1 LIMIT ${h};
     `
     const sqlFp = `
       SELECT
@@ -45,8 +61,8 @@ class DashboardRepository {
         AVG(flood_depth_cm)::float AS flood_depth_cm
       FROM flood_predictions
       WHERE node_id IN (${nodes.join(',')})
-        AND time >= now() - interval '24 hours'
-      GROUP BY 1 ORDER BY 1 LIMIT 24;
+        AND time >= now() - interval '${h} hours'
+      GROUP BY 1 ORDER BY 1 LIMIT ${h};
     `
     const [wmRows, fpRows] = await Promise.all([
       this.sequelize.query(sqlWm, { type: QueryTypes.SELECT, replacements: { tz } }),
@@ -60,19 +76,20 @@ class DashboardRepository {
     }))
   }
 
-  async getCurrentFloodRiskCounts() {
+  async getCurrentFloodRiskCounts(hours) {
+    const h = Number(hours) || 24
     const sql = `
       SELECT risk_level, COUNT(*)::int AS count
       FROM flood_predictions
-      WHERE time >= now() - interval '2 hours'
+      WHERE time >= now() - interval '${h} hours'
       GROUP BY risk_level;
     `
     return this.sequelize.query(sql, { type: QueryTypes.SELECT })
   }
 
-  async getTempHumidity24h() {
+  async getTempHumidity(nodes, hours) {
     const tz = 'Asia/Ho_Chi_Minh'
-    const nodes = DashboardRepository.SAMPLE_NODES
+    const h = Number(hours) || 24
     const sql = `
       SELECT
         to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
@@ -80,23 +97,26 @@ class DashboardRepository {
         COALESCE(AVG(rhum), 0)::float AS rhum
       FROM weather_measurements
       WHERE node_id IN (${nodes.join(',')})
-        AND time >= now() - interval '24 hours'
-      GROUP BY 1 ORDER BY 1 LIMIT 24;
+        AND time >= now() - interval '${h} hours'
+      GROUP BY 1 ORDER BY 1 LIMIT ${h};
     `
     return this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { tz } })
   }
 
-  async getRiskTrend7d() {
+  async getRiskTrend(nodes, hours) {
     const tz = 'Asia/Ho_Chi_Minh'
-    const nodes = DashboardRepository.SAMPLE_NODES
+    const h = Number(hours) || 168 // default 7 ngày
+    // Khi hours <= 48: bucket theo giờ; khi > 48: bucket theo ngày
+    const bucket = h <= 48 ? 'hour' : 'day'
+    const fmt    = h <= 48 ? 'MM-DD HH24:00' : 'MM-DD'
     const sql = `
       SELECT
-        to_char(date_trunc('day', (time AT TIME ZONE :tz)), 'MM-DD') AS date,
+        to_char(date_trunc('${bucket}', (time AT TIME ZONE :tz)), '${fmt}') AS date,
         risk_level,
         COUNT(*)::int AS count
       FROM flood_predictions
       WHERE node_id IN (${nodes.join(',')})
-        AND time >= now() - interval '7 days'
+        AND time >= now() - interval '${h} hours'
       GROUP BY 1, 2
       ORDER BY 1, 2;
     `

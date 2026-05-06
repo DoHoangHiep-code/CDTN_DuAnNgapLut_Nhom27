@@ -92,5 +92,6 @@ export type DashboardResponse = {
   forecast24h: DashboardForecastPoint[]
   tempHumidity24h: DashboardTempHumPoint[]
   riskTrend7d: DashboardRiskTrendDay[]
+  meta?: { hours: number; search: string; resolvedNodes: { id: number; name: string }[] }
 }
 

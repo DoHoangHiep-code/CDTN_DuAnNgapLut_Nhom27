@@ -7,9 +7,11 @@ class DashboardController {
     this.getDashboard = this.getDashboard.bind(this)
   }
 
-  async getDashboard(_req, res) {
+  async getDashboard(req, res) {
     try {
-      const data = await this.dashboardService.getDashboard()
+      const hours  = Number(req.query.hours)  || 24
+      const search = String(req.query.search  || '').trim()
+      const data   = await this.dashboardService.getDashboard({ hours, search })
       return res.status(200).json({ success: true, data })
     } catch (err) {
       // In lỗi ra terminal để debug nhanh nguyên nhân 400/500 khi tích hợp frontend
