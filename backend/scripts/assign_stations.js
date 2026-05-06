@@ -62,7 +62,7 @@ async function assignStations() {
   // Kết nối DB
   try {
     await sequelize.authenticate()
-    console.log('[DB] ✅ Kết nối Aiven thành công.')
+    console.log('[DB] ✅ Kết nối CockroachDB thành công.')
   } catch (err) {
     console.error('[DB] ❌ Kết nối thất bại:', err.message)
     process.exit(1)
@@ -136,7 +136,7 @@ async function assignStations() {
   console.log(`    Tổng nodes cập nhật : ${totalUpdated.toLocaleString('vi-VN')}`)
   console.log(`    Thời gian           : ${elapsed}s`)
   console.log('──────────────────────────────────────────────────────────────')
-  console.log('\n📋 Kiểm tra trên Aiven SQL Editor:')
+  console.log('\n📋 Kiểm tra trên CockroachDB SQL Editor:')
   console.log('    SELECT weather_station_id, COUNT(*) AS node_count')
   console.log('    FROM grid_nodes')
   console.log('    GROUP BY weather_station_id')

@@ -31,10 +31,21 @@ module.exports = (sequelize) => {
       // ── grid_id gốc từ file CSV (Grid_0, Grid_1...) để tracing ──
       grid_id: { type: DataTypes.STRING(64), allowNull: true },
 
-      // ── Trạm thời tiết đại diện (Spatial Clustering) ──────────────────────
-      // Mỗi node được gán về 1 trong 8 trạm đại diện dựa trên khoảng cách Euclidean.
-      // Cronjob chỉ cần gọi API cho 8 trạm → giảm từ 53K xuống còn 8 API calls.
+      // ── Trạm thời tiết đại diện (Legacy – 8 trạm cứng) ────────────────────
       weather_station_id: { type: DataTypes.INTEGER, allowNull: true },
+
+      // ── IDW Storage (Virtual Station Grid 3x3km) ─────────────────────────
+      // Lưu trữ tĩnh 3 trạm ảo gần nhất + trọng số IDW (w = 1/d²) được tính
+      // 1 lần bởi scripts/calculate_idw_weights.js, chuẩn hóa tổng = 1.
+      st1_id:     { type: DataTypes.FLOAT, allowNull: true },
+      st1_weight: { type: DataTypes.FLOAT, allowNull: true },
+      st2_id:     { type: DataTypes.FLOAT, allowNull: true },
+      st2_weight: { type: DataTypes.FLOAT, allowNull: true },
+      st3_id:     { type: DataTypes.FLOAT, allowNull: true },
+      st3_weight: { type: DataTypes.FLOAT, allowNull: true },
+
+      // true nếu trạm gần nhất > 15km → fallback OWM Live khi dự báo
+      is_out_of_bounds: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     },
     {
       tableName:  'grid_nodes',

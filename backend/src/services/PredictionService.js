@@ -100,15 +100,17 @@ class PredictionService {
   // Lưu kết quả dự đoán vào bảng flood_predictions
   // -------------------------------------------------------------------------
   async _savePrediction(nodeId, predictionTime, floodDepthCm, riskLevel) {
+    const target = floodDepthCm > 10 ? 1 : 0
     await this.sequelize.query(
-      `INSERT INTO flood_predictions (node_id, time, flood_depth_cm, risk_level)
-       VALUES (:nodeId, :time, :depth, :risk)
+      `INSERT INTO flood_predictions (node_id, time, flood_depth_cm, target, risk_level)
+       VALUES (:nodeId, :time, :depth, :target, :risk)
        ON CONFLICT DO NOTHING;`,
       {
         replacements: {
           nodeId,
           time: predictionTime,
           depth: floodDepthCm,
+          target,
           risk: riskLevel,
         },
       },

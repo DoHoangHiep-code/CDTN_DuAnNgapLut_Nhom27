@@ -6,6 +6,7 @@ const WeatherMeasurement = require('./WeatherMeasurement')(sequelize)
 const FloodPrediction = require('./FloodPrediction')(sequelize)
 const ActualFloodReport = require('./ActualFloodReport')(sequelize)
 const SystemLog = require('./SystemLog')(sequelize)
+const WeatherStation = require('./WeatherStation')(sequelize)
 
 // Associations (explicit 1-to-N)
 GridNode.hasMany(WeatherMeasurement, { foreignKey: 'node_id', sourceKey: 'node_id' })
@@ -28,5 +29,6 @@ module.exports = {
   FloodPrediction,
   ActualFloodReport,
   SystemLog,
+  WeatherStation,
 }
 

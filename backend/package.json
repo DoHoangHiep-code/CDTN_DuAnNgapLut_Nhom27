@@ -8,7 +8,7 @@
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
     "db:migrate:undo:all": "sequelize-cli db:migrate:undo:all",
     "seed": "node src/cli/seed.js",
-    "start": "node src/server.js",
+    "start": "node --max-old-space-size=6144 src/server.js",
     "predict": "node src/cli/runPrediction.js"
   },
   "dependencies": {

@@ -164,13 +164,13 @@ async function main() {
 
   try {
     await sequelize.authenticate()
-    console.log('[DB] ✅ Kết nối Aiven thành công.\n')
+    console.log('[DB] ✅ Kết nối CockroachDB thành công.\n')
   } catch (err) {
-    console.error('[DB] ❌ Không kết nối được Aiven:', err.message)
+    console.error('[DB] ❌ Không kết nối được CockroachDB:', err.message)
     process.exit(1)
   }
 
-  // Sync schema (alter:true) để cột location_name được tạo trên Aiven
+  // Sync schema (alter:true) để cột location_name được tạo trên CockroachDB
   try {
     // await sequelize.sync({ alter: true })
     console.log('[DB] ✅ Schema đã sync (alter:true) (skipped).\n')
@@ -249,10 +249,10 @@ async function main() {
       ],
     })
 
-    console.log(`\n✅ THÀNH CÔNG! Đã upsert ${results.length} GridNode vào Aiven.`)
+    console.log(`\n✅ THÀNH CÔNG! Đã upsert ${results.length} GridNode vào CockroachDB.`)
     console.log('   Bảng grid_nodes đã được điền đầy đủ 39 điểm ngập thực tế Hà Nội.')
     console.log('\n📌 Bước tiếp theo:')
-    console.log('   1. Mở Aiven Dashboard → Table Editor → grid_nodes để kiểm tra.')
+    console.log('   1. Mở CockroachDB Dashboard → Table Editor → grid_nodes để kiểm tra.')
     console.log('   2. Chạy cronjob để lấy dữ liệu thời tiết cho các node mới:')
     console.log('      curl http://localhost:3002/api/v1/cron/trigger')
   } catch (err) {

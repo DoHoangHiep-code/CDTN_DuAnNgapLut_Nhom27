@@ -22,7 +22,7 @@ class WeatherRepository {
     const sql = `
       SELECT gn.node_id
       FROM grid_nodes gn
-      ORDER BY gn.geom <-> ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)
+      ORDER BY ST_Distance(gn.geom::geography, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography) ASC
       LIMIT 1;
     `
     return this._withStatementTimeout(4000, (t) =>

@@ -8,6 +8,7 @@ module.exports = (sequelize) => {
       node_id:        { type: DataTypes.BIGINT, allowNull: false },
       time:           { type: DataTypes.DATE,   allowNull: false },
       flood_depth_cm: { type: DataTypes.DECIMAL(6, 2), allowNull: false },
+      target:         { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
       risk_level:     { type: DataTypes.ENUM('safe', 'medium', 'high', 'severe'), allowNull: false },
 
       // Cột mô tả sơ bộ do Cronjob sinh ra dựa trên risk_level + thời tiết

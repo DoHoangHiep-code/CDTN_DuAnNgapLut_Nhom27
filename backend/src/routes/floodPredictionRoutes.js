@@ -139,17 +139,14 @@ router.get('/flood-prediction/by-location', async (req, res, next) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Route: GET /api/v1/forecasts/latest?lat=&lon=
-// Mục đích: Lấy dự báo từ DB (flood_predictions) cho node gần nhất với tọa độ.
-//   1. Tìm GridNode gần nhất bằng PostGIS ST_Distance
-//   2. Lấy bản ghi flood_predictions sát NOW() nhất (trong khoảng ±3h)
-//   3. Kết hợp thời tiết OpenWeatherMap (optional)
-//   Trả về JSON theo schema: { location, time, weather, prediction }
-//
-// Ưu điểm so với /by-location:
-//   - Dùng dữ liệu đã được Cronjob tính sẵn → không gọi AI real-time
-//   - Có explanation từ DB → hiển thị được trên FloodWarningCard
-//   - Nhanh hơn vì không đợi AI FastAPI
+// V2: Dùng IDW inference thay vì gọi OWM trực tiếp mỗi request.
+//   1. Tìm GridNode gần nhất (PostGIS)
+//   2. Lấy flood_predictions sát NOW() nhất từ DB
+//   3. inferWeatherForNode() → IDW từ virtual stations (hoặc fallback OWM Live)
+//   4. Sliding window prcp_3h/6h/12h từ SQL history
 // ─────────────────────────────────────────────────────────────────────────────
+const { inferWeatherForNode } = require('../services/idwInferenceService')
+
 router.get('/forecasts/latest', async (req, res, next) => {
   try {
     const lat = Number(req.query.lat)
@@ -162,24 +159,29 @@ router.get('/forecasts/latest', async (req, res, next) => {
       })
     }
 
-    // ── Bước 1: Tìm GridNode gần nhất bằng PostGIS ──────────────────────────
-    // Dùng toán tử <-> (KNN index scan) để tra cứu nhanh nhất
+    // ── Bước 1: Tìm GridNode gần nhất (bao gồm cả IDW fields) ────────────────
     const [nearestRows] = await sequelize.query(
       `SELECT
          gn.node_id,
          gn.latitude,
          gn.longitude,
+         gn.elevation,
+         gn.slope,
+         gn.impervious_ratio,
+         gn.is_out_of_bounds,
+         gn.st1_id, gn.st1_weight,
+         gn.st2_id, gn.st2_weight,
+         gn.st3_id, gn.st3_weight,
          ST_Distance(
            gn.geom::geography,
            ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
          ) AS dist_m
        FROM grid_nodes gn
-       ORDER BY gn.geom <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)
+       ORDER BY ST_Distance(gn.geom::geography, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography) ASC
        LIMIT 1`,
       { replacements: { lat, lon } }
     )
 
-    // Nếu DB chưa có node nào → trả 404 gợi ý chạy cron
     if (!nearestRows || nearestRows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -190,9 +192,7 @@ router.get('/forecasts/latest', async (req, res, next) => {
     const nearestNode = nearestRows[0]
     const nodeId = nearestNode.node_id
 
-    // ── Bước 2: Lấy bản ghi dự báo sát NOW() nhất ──────────────────────────
-    // Tìm trong khoảng ±4h so với thời điểm hiện tại (bao gồm cả quá khứ gần)
-    // ORDER BY khoảng cách thời gian tuyệt đối → lấy gần nhất
+    // ── Bước 2: Lấy bản ghi dự báo sát NOW() nhất từ DB ─────────────────────
     const [predRows] = await sequelize.query(
       `SELECT
          fp.prediction_id,
@@ -209,14 +209,13 @@ router.get('/forecasts/latest', async (req, res, next) => {
       { replacements: { nodeId } }
     )
 
-    // ── Bước 3: Lấy thời tiết thực tế OWM (không blocking nếu lỗi) ─────────
-    const weatherData = await getWeatherByCoords(lat, lon).catch(() => null)
+    // ── Bước 3: IDW Inference (sliding window + virtual stations) ─────────────
+    const weather = await inferWeatherForNode(nearestNode).catch(() => null)
 
-    // ── Bước 4: Nếu không có dữ liệu DB → fallback gọi AI real-time ─────────
+    // ── Bước 4: Fallback real-time AI nếu không có dự báo trong DB ───────────
     if (!predRows || predRows.length === 0) {
-      console.info(`[forecasts/latest] Node ${nodeId} chưa có dự báo trong DB. Fallback real-time AI...`)
+      console.info(`[forecasts/latest] Node ${nodeId} chưa có dự báo DB. Fallback real-time AI (IDW)...`)
 
-      // Build features nhanh từ thời tiết OWM
       const now = new Date()
       const hour = now.getHours()
       const month = now.getMonth() + 1
@@ -224,25 +223,29 @@ router.get('/forecasts/latest', async (req, res, next) => {
       const start = new Date(now.getFullYear(), 0, 0)
       const dayofyear = Math.floor((now - start) / 86400000)
       const rainyMonths = [5, 6, 7, 8, 9, 10]
-      const prcp = weatherData?.rain1h ?? 0
+
+      const prcp   = weather?.rain_1h  ?? 0
+      const prcp3  = weather?.prcp_3h  ?? prcp * 2.5
+      const prcp6  = weather?.prcp_6h  ?? prcp * 4
+      const prcp12 = weather?.prcp_12h ?? prcp * 6
 
       const features = {
-        prcp,
-        prcp_3h: prcp * 2.5, prcp_6h: prcp * 4, prcp_12h: prcp * 6, prcp_24h: prcp * 8,
-        temp: weatherData?.temp ?? 28,
-        rhum: weatherData?.humidity ?? 70,
-        wspd: weatherData?.windSpeed ?? 0,
-        pres: weatherData?.pressure ?? 1010,
+        prcp, prcp_3h: prcp3, prcp_6h: prcp6, prcp_12h: prcp12, prcp_24h: prcp * 8,
+        temp: weather?.temp ?? 28,
+        rhum: weather?.rhum ?? 70,
+        wspd: 0,
+        pres: 1010,
         pressure_change_24h: 0,
-        max_prcp_3h: prcp, max_prcp_6h: prcp, max_prcp_12h: prcp,
-        elevation: Number(nearestNode.elevation) || 5,
-        slope: Number(nearestNode.slope) || 1,
+        max_prcp_3h: prcp3, max_prcp_6h: prcp6, max_prcp_12h: prcp12,
+        // Đọc đúng từ DB — không hardcode
+        elevation:        Number(nearestNode.elevation)        || 5,
+        slope:            Number(nearestNode.slope)            || 1,
         impervious_ratio: Number(nearestNode.impervious_ratio) || 0.5,
         dist_to_drain_km: 0.4, dist_to_river_km: 1.0,
         dist_to_pump_km: 0.8, dist_to_main_road_km: 0.2, dist_to_park_km: 0.5,
         hour, dayofweek, month, dayofyear,
-        hour_sin: Math.sin((2 * Math.PI * hour) / 24),
-        hour_cos: Math.cos((2 * Math.PI * hour) / 24),
+        hour_sin:  Math.sin((2 * Math.PI * hour)  / 24),
+        hour_cos:  Math.cos((2 * Math.PI * hour)  / 24),
         month_sin: Math.sin((2 * Math.PI * month) / 12),
         month_cos: Math.cos((2 * Math.PI * month) / 12),
         rainy_season_flag: rainyMonths.includes(month) ? 1 : 0,
@@ -251,71 +254,80 @@ router.get('/forecasts/latest', async (req, res, next) => {
       const aiResult = await predictionService._callAI(features)
       const floodDepthCm = aiResult?.flood_depth_cm ?? 0
       const { label, warningText } = depthCmToWarning(floodDepthCm)
-
-      // Tính risk_level từ depth (đồng bộ với calcRiskLevel trong weatherCron)
       const riskLevel = floodDepthCm < 15 ? 'safe'
         : floodDepthCm < 30 ? 'medium'
         : floodDepthCm < 60 ? 'high' : 'severe'
 
       return res.status(200).json({
         success: true,
-        source: 'realtime',  // Cho frontend biết đây là data real-time, không phải từ DB
+        source: 'realtime',
+        weatherSource: weather?.source ?? 'unknown',
         data: {
           location: `Node ${nodeId} (~${Math.round(nearestNode.dist_m)}m)`,
           time: new Date().toISOString(),
           weather: {
-            temp:        weatherData?.temp ?? 0,
-            prcp:        weatherData?.rain1h ?? 0,
-            rhum:        weatherData?.humidity ?? 0,
-            clouds:      weatherData?.clouds ?? 0,
-            description: weatherData?.description ?? 'N/A',
+            temp:        weather?.temp   ?? 0,
+            prcp:        prcp,
+            prcp_3h:     prcp3,
+            prcp_6h:     prcp6,
+            prcp_12h:    prcp12,
+            rhum:        weather?.rhum   ?? 0,
+            clouds:      weather?.clouds ?? 0,
+            description: 'N/A',
           },
           prediction: {
             flood_depth_cm: Math.round(floodDepthCm * 10) / 10,
             risk_level:     riskLevel,
-            explanation:    null, // Realtime không có explanation từ DB
+            explanation:    null,
             label,
             warningText,
           },
-          usingLiveWeather: weatherData !== null,
+          usingLiveWeather: true,
         },
       })
     }
 
-    // ── Bước 5: Có data từ DB → trả kết quả chuẩn ───────────────────────────
+    // ── Bước 5: Có data từ DB → kết hợp IDW weather + DB prediction ──────────
     const pred = predRows[0]
     const floodDepthCm = Number(pred.flood_depth_cm)
     const { label, warningText } = depthCmToWarning(floodDepthCm)
 
-    // No-rain override: nếu OWM xác nhận không mưa + độ ẩm thấp → force safe
-    const humidity = weatherData?.humidity ?? 100
-    const prcp = weatherData?.rain1h ?? 0
-    const noRainOverride = weatherData !== null && prcp === 0 && humidity < 90 && label === 1
+    const prcp   = weather?.rain_1h  ?? 0
+    const prcp3  = weather?.prcp_3h  ?? 0
+    const prcp6  = weather?.prcp_6h  ?? 0
+    const prcp12 = weather?.prcp_12h ?? 0
+    const rhum   = weather?.rhum     ?? 70
 
-    const finalDepth    = noRainOverride ? 0 : floodDepthCm
-    const finalLabel    = noRainOverride ? 0 : label
-    const finalWarning  = noRainOverride ? 'An toàn' : warningText
-    const finalRisk     = noRainOverride ? 'safe' : pred.risk_level
-    const finalExpl     = noRainOverride
+    // No-rain override (IDW xác nhận không mưa + độ ẩm thấp)
+    const noRainOverride = prcp === 0 && rhum < 90 && label === 1
+    const finalDepth   = noRainOverride ? 0 : floodDepthCm
+    const finalLabel   = noRainOverride ? 0 : label
+    const finalWarning = noRainOverride ? 'An toàn' : warningText
+    const finalRisk    = noRainOverride ? 'safe' : pred.risk_level
+    const finalExpl    = noRainOverride
       ? 'Không có mưa, khu vực hiện đang an toàn.'
       : (pred.explanation ?? null)
 
     if (noRainOverride) {
-      console.info(`[forecasts/latest] No-rain override: rain=0mm, humidity=${humidity}% → An toàn`)
+      console.info(`[forecasts/latest] No-rain override: rain=0mm, rhum=${rhum}% → An toàn`)
     }
 
     return res.status(200).json({
       success: true,
-      source: 'database',  // Dữ liệu từ Cronjob đã tính sẵn
+      source: 'database',
+      weatherSource: weather?.source ?? 'unknown',
       data: {
         location: `Node ${nodeId} (~${Math.round(nearestNode.dist_m)}m)`,
-        time: pred.time,  // Thời điểm dự báo từ DB
+        time: pred.time,
         weather: {
-          temp:        weatherData?.temp ?? 0,
+          temp:        weather?.temp   ?? 0,
           prcp,
-          rhum:        humidity,
-          clouds:      weatherData?.clouds ?? 0,
-          description: weatherData?.description ?? 'N/A',
+          prcp_3h:     prcp3,
+          prcp_6h:     prcp6,
+          prcp_12h:    prcp12,
+          rhum,
+          clouds:      weather?.clouds ?? 0,
+          description: 'N/A',
         },
         prediction: {
           flood_depth_cm: Math.round(finalDepth * 10) / 10,
@@ -324,7 +336,7 @@ router.get('/forecasts/latest', async (req, res, next) => {
           label:          finalLabel,
           warningText:    finalWarning,
         },
-        usingLiveWeather: weatherData !== null,
+        usingLiveWeather: true,
       },
     })
   } catch (err) {
