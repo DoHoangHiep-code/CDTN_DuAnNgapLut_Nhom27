@@ -7,6 +7,8 @@ export type WeatherCurrent = {
   humidityPct: number
   windKph: number
   rainfallMm: number
+  cloudsPct: number
+  rainIntensityMm: number
   observedAtIso: string
   locationName: string
 }
@@ -54,15 +56,37 @@ export type ReportRow = {
   predictedRainfallMm: number
 }
 
+export type ReportsRow = {
+  id: string
+  createdAtIso: string
+  latitude: number
+  longitude: number
+  reportedLevel: string
+  userFullName: string | null
+  locationName: string | null
+  districtName: string | null
+}
+
 export type ReportsResponse = {
-  rows: {
-    id: string
-    createdAtIso: string
-    latitude: number
-    longitude: number
-    reportedLevel: string
-    userFullName: string | null
-  }[]
+  rows: ReportsRow[]
+  pagination?: {
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+  }
+}
+
+export type AlertsBannerItem = {
+  district: string
+  floodDepthCm: number
+  riskLevel: 'safe' | 'medium' | 'high' | 'severe'
+  rain1h: number
+  cloudsPct: number
+  temp: number
+  humidity: number
+  predTime: string | null
+  hasData: boolean
 }
 
 export type DashboardForecastPoint = {

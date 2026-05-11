@@ -1,11 +1,24 @@
 import type { DashboardResponse, FloodPredictionResponse, ReportsResponse, WeatherResponse } from '../utils/types'
 import { apiV1 } from '../utils/axiosConfig'
 
-export async function getWeather(params?: { district?: string }) {
+export async function getWeather(params?: { district?: string; lat?: number; lng?: number }) {
   // Backend thật thường trả wrapper { success, data }, còn mocks trả thẳng object.
   // Lý do unwrap tại đây: tránh sửa rải rác ở nhiều page, giảm rủi ro lỗi tích hợp.
   const res = await apiV1.get<any>('/weather', { params })
   return (res.data?.data ?? res.data) as WeatherResponse
+}
+
+// ── Dự báo mưa + nhiệt độ theo từng giờ trong 24h tới (DB hoặc OWM fallback) ──
+// Endpoint: GET /api/v1/weather/forecast24h?lat=&lng=
+export async function getWeatherForecast24h(lat?: number, lng?: number) {
+  const res = await apiV1.get<any>('/weather/forecast24h', { params: { lat, lng } })
+  return (res.data?.data ?? []) as Array<{
+    timeIso: string
+    rainfallMm: number
+    tempC: number
+    humidity: number
+    cloudsPct: number
+  }>
 }
 
 export async function getFloodPrediction() {
@@ -96,9 +109,29 @@ export async function getForecast7d(lat?: number, lon?: number) {
   }>
 }
 
-export async function getReports(params?: { date?: string; district?: string }) {
+export async function getReports(params?: {
+  date?: string
+  district?: string
+  location?: string
+  dateFrom?: string
+  dateTo?: string
+  page?: number
+  limit?: number
+}) {
   const res = await apiV1.get<any>('/reports', { params })
   return (res.data?.data ?? res.data) as ReportsResponse
+}
+
+// Autocomplete địa điểm từ grid_nodes (Classic Filter – chỉ gọi khi commit, không gọi khi đang gõ)
+export async function getReportsAutocomplete(q: string) {
+  const res = await apiV1.get<any>('/reports/autocomplete', { params: { q } })
+  return (res.data?.data ?? []) as Array<{ name: string; type: 'district' | 'node' }>
+}
+
+// Live Banner: cảnh báo 5 quận trọng điểm
+export async function getAlertsBanner() {
+  const res = await apiV1.get<any>('/alerts/banner')
+  return (res.data?.data ?? []) as import('../utils/types').AlertsBannerItem[]
 }
 
 export async function getDashboard(params?: { hours?: number; search?: string }) {

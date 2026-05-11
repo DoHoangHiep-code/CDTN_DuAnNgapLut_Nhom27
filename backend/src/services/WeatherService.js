@@ -22,11 +22,12 @@ class WeatherService {
     ])
 
     const current = {
-      temperature: Number(currentRow?.temp) || 0,
-      humidity: Number(currentRow?.rhum) || 0,
-      windSpeed: Number(currentRow?.wspd) || 0,
-      prcp: Number(currentRow?.prcp) || 0,
-      time: currentRow?.time ?? null,
+      temperature: Number(currentRow?.temp)   || 0,
+      humidity:    Number(currentRow?.rhum)   || 0,
+      windSpeed:   Number(currentRow?.wspd)   || 0,
+      prcp:        Number(currentRow?.prcp)   || 0,
+      clouds:      Number(currentRow?.clouds) || 0,
+      time:        currentRow?.time ?? null,
     }
 
     const forecast7d = Array.isArray(forecastRows)
