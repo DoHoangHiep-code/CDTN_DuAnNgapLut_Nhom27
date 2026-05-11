@@ -77,6 +77,13 @@ export type DashboardTempHumPoint = {
   rhum: number   // %
 }
 
+export type DashboardAutocompleteItem = {
+  node_id: number
+  location_name: string
+  district_name: string
+  weather_station_id: number
+}
+
 export type DashboardRiskTrendDay = {
   date: string   // "MM-DD"
   safe: number

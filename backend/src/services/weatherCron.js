@@ -98,13 +98,14 @@ async function ingestCurrentWeatherFromOWM() {
 
   if (!stationWeatherMap.size) return 0
 
-  const nodes = await GridNode.findAll({
-    attributes: ['node_id', 'weather_station_id', 'location_name'],
-    raw: true,
-  })
+  const [repNodes] = await sequelize.query(`
+    SELECT DISTINCT ON (weather_station_id) node_id, weather_station_id, location_name
+    FROM grid_nodes
+    WHERE weather_station_id IS NOT NULL;
+  `)
 
   const records = []
-  for (const node of nodes) {
+  for (const node of repNodes) {
     const stationId = node.weather_station_id ?? 1
     const w = stationWeatherMap.get(stationId) ?? stationWeatherMap.values().next().value
     if (!w) continue

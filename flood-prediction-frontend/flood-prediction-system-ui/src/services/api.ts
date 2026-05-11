@@ -106,6 +106,11 @@ export async function getDashboard(params?: { hours?: number; search?: string })
   return (res.data?.data ?? res.data) as DashboardResponse
 }
 
+export async function getDashboardAutocomplete(q: string) {
+  const res = await apiV1.get<any>('/dashboard/autocomplete', { params: { q } })
+  return (res.data?.data ?? res.data) as import('../utils/types').DashboardAutocompleteItem[]
+}
+
 export async function exportData(_format: 'csv' | 'excel' | 'pdf', payload: unknown) {
   const res = await apiV1.post<{ ok: boolean }>('/export', payload)
   return res.data

@@ -396,7 +396,7 @@ export function MapPage() {
           maxLat: b.getNorth(),
           minLng: b.getWest(),
           maxLng: b.getEast(),
-          limit: 200,
+          limit: 2000,  // chỉ nhận điểm ngập (flood_depth_cm > 10) → 2000 điểm vẫn nhẹ
         })
         const pts: FloodPoint[] = (result?.districts ?? []).map((d) => ({
           id:                   d.id,

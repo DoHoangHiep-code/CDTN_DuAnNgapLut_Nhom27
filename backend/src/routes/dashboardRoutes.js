@@ -11,6 +11,6 @@ const dashboardService = new DashboardService({ dashboardRepository })
 const dashboardController = new DashboardController({ dashboardService })
 
 router.get('/dashboard', dashboardController.getDashboard)
-
+router.get('/dashboard/autocomplete', dashboardController.getAutocomplete.bind(dashboardController))
 module.exports = { dashboardRouter: router }
 

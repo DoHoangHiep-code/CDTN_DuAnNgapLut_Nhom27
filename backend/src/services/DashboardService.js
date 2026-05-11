@@ -41,6 +41,10 @@ class DashboardService {
     return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date))
   }
 
+  async getAutocomplete(search) {
+    return this.dashboardRepository.getLocationAutocomplete(search)
+  }
+
   async getDashboard({ hours = 24, search = '' } = {}) {
     const h = Math.min(Math.max(Number(hours) || 24, 1), 168) // clamp 1–168h
     const key = this._cacheKey(h, search)
@@ -48,22 +52,25 @@ class DashboardService {
     if (cached) return cached
 
     // 1. Resolve node_id list từ search term
-    const nodes = await this.dashboardRepository.resolveNodes(search).catch(() => null)
+    const resolved = await this.dashboardRepository.resolveNodes(search).catch(() => ({
+       isGlobal: true, predictionNodeIds: null, weatherNodeIds: null
+    }))
+    const { isGlobal, predictionNodeIds, weatherNodeIds } = resolved
 
     // 2. Parallel fetch tất cả data
     const [weatherRow, rainRows, riskRows, alertRows, tempHumRows, riskTrendRows] = await Promise.all([
-      this.dashboardRepository.getCurrentWeather(nodes).catch(() => null),
-      this.dashboardRepository.getRainForecast(nodes, h).catch(() => []),
-      this.dashboardRepository.getCurrentFloodRiskCounts(h).catch(() => []),
+      this.dashboardRepository.getCurrentWeather(weatherNodeIds, isGlobal).catch(() => null),
+      this.dashboardRepository.getRainForecast(weatherNodeIds, isGlobal, predictionNodeIds, h).catch(() => []),
+      this.dashboardRepository.getCurrentFloodRiskCounts(h, isGlobal, predictionNodeIds).catch(() => []),
       this.dashboardRepository.getRecentAlerts(10).catch(() => []),
-      this.dashboardRepository.getTempHumidity(nodes, h).catch(() => []),
-      this.dashboardRepository.getRiskTrend(nodes, h <= 48 ? h : 168).catch(() => []),
+      this.dashboardRepository.getTempHumidity(weatherNodeIds, isGlobal, h).catch(() => []),
+      this.dashboardRepository.getRiskTrend(predictionNodeIds, isGlobal, h <= 48 ? h : 168).catch(() => []),
     ])
 
     const currentWeather = {
-      temperature: Number(weatherRow?.temperature) || 0,
-      humidity:    Number(weatherRow?.humidity)    || 0,
-      windSpeed:   Number(weatherRow?.wind_speed)  || 0,
+      temperature: Number(weatherRow?.temp)  || 0,
+      humidity:    Number(weatherRow?.rhum)  || 0,
+      windSpeed:   Number(weatherRow?.wspd)  || 0,
     }
 
     const forecast24h = (rainRows || []).map((r) => ({
@@ -94,8 +101,8 @@ class DashboardService {
     const riskTrend7d = this._normalizeRiskTrend(riskTrendRows)
 
     // resolvedNodes: trả về danh sách trạm thực sự đang được hiển thị
-    const resolvedNodes = Array.isArray(nodes)
-      ? await this._getNodeLabels(nodes).catch(() => [])
+    const resolvedNodes = !isGlobal && Array.isArray(predictionNodeIds)
+      ? await this._getNodeLabels(predictionNodeIds).catch(() => [])
       : []
 
     const payload = {
@@ -114,6 +121,7 @@ class DashboardService {
   }
 
   async _getNodeLabels(nodeIds) {
+    if (!nodeIds || nodeIds.length === 0) return []
     const rows = await this.dashboardRepository.sequelize.query(
       `SELECT node_id, location_name FROM grid_nodes WHERE node_id IN (${nodeIds.join(',')}) ORDER BY node_id`,
       { type: 'SELECT' },
