@@ -49,6 +49,11 @@ export async function getForecastLatest(lat: number, lon: number) {
   return res.data ?? null
 }
 
+export async function getNodeCurrentData(nodeId: string) {
+  const res = await apiV1.get<any>(`/flood-prediction/nodes/${nodeId}/current`)
+  return res.data?.data ?? res.data
+}
+
 // ── Flood prediction theo BBox viewport (thay thế getFloodPrediction() cho Map) ──
 // Chỉ trả nodes nằm trong khung hình hiện tại, giới hạn 200 records mỗi lần.
 // Endpoint: GET /api/v1/flood-prediction?min_lat=&max_lat=&min_lng=&max_lng=&limit=

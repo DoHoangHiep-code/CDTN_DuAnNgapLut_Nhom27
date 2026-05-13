@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle, ChevronLeft, ChevronRight, CloudRain, Droplets,
   MapPin, RefreshCcw, Sun, Wind, Thermometer, Eye, Activity,
@@ -45,8 +45,14 @@ function formatDateFull(iso: string) {
 /** Giờ hiện tại theo múi giờ Hà Nội (UTC+7) */
 function getNowHourVN(): number {
   const now = new Date()
-  // UTC offset +7h
   const vnMs = now.getTime() + (7 * 60 - now.getTimezoneOffset()) * 60 * 1000
+  return new Date(vnMs).getHours()
+}
+
+/** Chuyển ISO timestamp sang giờ VN (UTC+7) */
+function toVNHour(iso: string): number {
+  const d = new Date(iso)
+  const vnMs = d.getTime() + (7 * 60 - d.getTimezoneOffset()) * 60 * 1000
   return new Date(vnMs).getHours()
 }
 
@@ -175,6 +181,17 @@ function HourlyForecast({ forecast24h }: {
   forecast24h: Array<{ timeIso: string; rainfallMm: number; tempC: number; humidity: number; cloudsPct: number }>
 }) {
   const nowHour = getNowHourVN()
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll đến giờ hiện tại khi component mount
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    const nowCard = container.querySelector('[data-now="true"]') as HTMLElement | null
+    if (nowCard) {
+      nowCard.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    }
+  }, [forecast24h.length])
 
   if (!forecast24h.length) return null
 
@@ -190,9 +207,9 @@ function HourlyForecast({ forecast24h }: {
         </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto px-4 py-3 scrollbar-hide">
+      <div ref={scrollContainerRef} className="flex gap-2 overflow-x-auto px-4 py-3 scrollbar-hide">
         {forecast24h.map((p) => {
-          const hour = new Date(p.timeIso).getHours()
+          const hour = toVNHour(p.timeIso)
           const isNow = hour === nowHour
           const rainKind = p.rainfallMm >= 10 ? 'flood' : p.rainfallMm > 0 ? 'rain' : 'sun'
           const RainIcon = rainKind === 'sun' ? Sun : rainKind === 'rain' ? CloudRain : AlertTriangle
@@ -200,6 +217,7 @@ function HourlyForecast({ forecast24h }: {
           return (
             <div
               key={p.timeIso}
+              data-now={isNow ? 'true' : undefined}
               className={cn(
                 'flex min-w-[68px] flex-shrink-0 flex-col items-center gap-1.5 rounded-2xl border px-2.5 py-3 transition-all',
                 isNow
@@ -283,7 +301,7 @@ function Rain24hChart({ forecast24h }: {
         <div className="relative flex items-end gap-0.5" style={{ height: 100 }}>
           {forecast24h.map((p) => {
             const pct = (p.rainfallMm / maxVal) * 100
-            const hour = new Date(p.timeIso).getHours()
+            const hour = toVNHour(p.timeIso)
             const isNow = hour === nowHour
             const barColor = pct > 60 ? 'bg-gradient-to-t from-rose-500 to-rose-400' : pct > 30 ? 'bg-gradient-to-t from-amber-500 to-amber-400' : 'bg-gradient-to-t from-sky-500 to-sky-400'
             return (
