@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle, ChevronLeft, ChevronRight, CloudRain, Droplets,
   MapPin, RefreshCcw, Sun, Wind, Thermometer, Eye, Activity,
-  TrendingUp, Gauge, ShieldAlert,
+  TrendingUp, Gauge, Cloud, Zap,
 } from 'lucide-react'
 import type { LatLngExpression } from 'leaflet'
 import { useTranslation } from 'react-i18next'
@@ -10,22 +10,26 @@ import { Spinner } from '../components/Spinner'
 import { ErrorState } from '../components/ErrorState'
 import { MiniFloodMap } from '../components/MiniFloodMap'
 import { LocationSearch } from '../components/LocationSearch'
+import type { NominatimResult } from '../components/LocationSearch'
 import { useAsync } from '../hooks/useAsync'
-import { getWeather, getForecast7d } from '../services/api'
+import { getWeather, getForecast7d, getWeatherForecast24h } from '../services/api'
 import type { WeatherForecastDay } from '../utils/types'
 import { cn } from '../utils/cn'
 
+// ── Types ────────────────────────────────────────────────────────────
 type WeatherKind = 'rain' | 'sun' | 'flood'
 
+type SelectedLocation = {
+  lat: number
+  lng: number
+  name: string
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
 function kindFromRainfall(mm: number): WeatherKind {
   if (mm >= 60) return 'flood'
   if (mm > 0) return 'rain'
   return 'sun'
-}
-
-function centroid(poly: [number, number][]): LatLngExpression {
-  const avg = poly.reduce((acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }), { lat: 0, lng: 0 })
-  return [avg.lat / poly.length, avg.lng / poly.length]
 }
 
 function formatDate(iso: string) {
@@ -38,6 +42,21 @@ function formatDateFull(iso: string) {
   return d.toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'long' })
 }
 
+/** Giờ hiện tại theo múi giờ Hà Nội (UTC+7) */
+function getNowHourVN(): number {
+  const now = new Date()
+  const vnMs = now.getTime() + (7 * 60 - now.getTimezoneOffset()) * 60 * 1000
+  return new Date(vnMs).getHours()
+}
+
+/** Chuyển ISO timestamp sang giờ VN (UTC+7) */
+function toVNHour(iso: string): number {
+  const d = new Date(iso)
+  const vnMs = d.getTime() + (7 * 60 - d.getTimezoneOffset()) * 60 * 1000
+  return new Date(vnMs).getHours()
+}
+
+// ── Configs ───────────────────────────────────────────────────────────
 const KIND_CONFIG: Record<WeatherKind, {
   gradient: string
   glassRing: string
@@ -80,13 +99,13 @@ const RISK_LABEL: Record<string, {
   dot: string
   bar: string
 }> = {
-  safe:   { label: 'An toàn',    bg: 'bg-emerald-50 dark:bg-emerald-950/30',  rowBg: '',                                              text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500',  bar: 'bg-emerald-400' },
-  medium: { label: 'TB',         bg: 'bg-amber-50 dark:bg-amber-950/30',      rowBg: 'bg-amber-50/40 dark:bg-amber-950/10',           text: 'text-amber-700 dark:text-amber-400',     dot: 'bg-amber-500',    bar: 'bg-amber-400' },
-  high:   { label: 'Cao',        bg: 'bg-orange-50 dark:bg-orange-950/30',    rowBg: 'bg-orange-50/40 dark:bg-orange-950/10',         text: 'text-orange-700 dark:text-orange-400',   dot: 'bg-orange-500',   bar: 'bg-orange-400' },
-  severe: { label: 'Nguy hiểm',  bg: 'bg-rose-50 dark:bg-rose-950/30',        rowBg: 'bg-rose-50/60 dark:bg-rose-950/20',             text: 'text-rose-700 dark:text-rose-400',       dot: 'bg-rose-500',     bar: 'bg-rose-500' },
+  safe:   { label: 'An toàn',   bg: 'bg-emerald-50 dark:bg-emerald-950/30',  rowBg: '',                                             text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500', bar: 'bg-emerald-400' },
+  medium: { label: 'TB',        bg: 'bg-amber-50 dark:bg-amber-950/30',      rowBg: 'bg-amber-50/40 dark:bg-amber-950/10',          text: 'text-amber-700 dark:text-amber-400',     dot: 'bg-amber-500',   bar: 'bg-amber-400' },
+  high:   { label: 'Cao',       bg: 'bg-orange-50 dark:bg-orange-950/30',    rowBg: 'bg-orange-50/40 dark:bg-orange-950/10',        text: 'text-orange-700 dark:text-orange-400',   dot: 'bg-orange-500',  bar: 'bg-orange-400' },
+  severe: { label: 'Nguy hiểm', bg: 'bg-rose-50 dark:bg-rose-950/30',        rowBg: 'bg-rose-50/60 dark:bg-rose-950/20',            text: 'text-rose-700 dark:text-rose-400',       dot: 'bg-rose-500',    bar: 'bg-rose-500' },
 }
 
-// ── WeatherForecastCard ──────────────────────────────────────────────
+// ── WeatherForecastCard ───────────────────────────────────────────────
 function WeatherForecastCard({ d, aiDay, isFirst }: {
   d: WeatherForecastDay
   aiDay?: { flood_depth_cm: number; risk_level: string } | null
@@ -157,119 +176,99 @@ function WeatherForecastCard({ d, aiDay, isFirst }: {
   )
 }
 
-// ── DistrictRiskTable ────────────────────────────────────────────────
-function DistrictRiskTable({ districts }: { districts: FloodDistrict[] }) {
-  const [filter, setFilter] = useState('')
-  const filtered = useMemo(() => {
-    const q = filter.toLowerCase()
-    return q ? districts.filter((d) => d.name.toLowerCase().includes(q)) : districts
-  }, [districts, filter])
+// ── HourlyForecast ────────────────────────────────────────────────────
+function HourlyForecast({ forecast24h }: {
+  forecast24h: Array<{ timeIso: string; rainfallMm: number; tempC: number; humidity: number; cloudsPct: number }>
+}) {
+  const nowHour = getNowHourVN()
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
-  const riskOrder = { severe: 0, high: 1, medium: 2, safe: 3 }
-  const sorted = useMemo(
-    () => [...filtered].sort((a, b) => (riskOrder[a.risk] ?? 4) - (riskOrder[b.risk] ?? 4)),
-    [filtered],
-  )
+  // Auto-scroll đến giờ hiện tại khi component mount
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    const nowCard = container.querySelector('[data-now="true"]') as HTMLElement | null
+    if (nowCard) {
+      nowCard.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    }
+  }, [forecast24h.length])
 
-  const maxDepth = useMemo(() => Math.max(...districts.map(d => d.flood_depth_cm), 1), [districts])
+  if (!forecast24h.length) return null
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-800/50">
-        <ShieldAlert className="h-4 w-4 flex-shrink-0 text-slate-400" />
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-extrabold text-slate-800 dark:text-slate-100">Dự báo ngập theo quận</div>
-          <div className="text-[10px] text-slate-400">{districts.length} quận/huyện</div>
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5 dark:border-slate-800">
+        <div className="grid h-8 w-8 place-items-center rounded-xl bg-violet-50 dark:bg-violet-900/30">
+          <Zap className="h-4 w-4 text-violet-500" />
         </div>
-        <input
-          type="text"
-          placeholder="Tìm..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400/30 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-        />
+        <div>
+          <div className="text-sm font-extrabold text-slate-900 dark:text-slate-100">Dự báo theo khung giờ</div>
+          <div className="text-xs text-slate-400">Hôm nay — highlight = thời điểm hiện tại</div>
+        </div>
       </div>
 
-      {/* Column headers */}
-      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-0 border-b border-slate-100 bg-slate-50 px-3 py-1.5 dark:border-slate-800 dark:bg-slate-800/30">
-        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Quận / huyện</div>
-        <div className="w-20 text-center text-[10px] font-bold uppercase tracking-wide text-slate-400">Rủi ro</div>
-        <div className="w-14 text-right text-[10px] font-bold uppercase tracking-wide text-slate-400">Ngập</div>
-        <div className="w-14 text-right text-[10px] font-bold uppercase tracking-wide text-slate-400">Mưa</div>
-      </div>
+      <div ref={scrollContainerRef} className="flex gap-2 overflow-x-auto px-4 py-3 scrollbar-hide">
+        {forecast24h.map((p) => {
+          const hour = toVNHour(p.timeIso)
+          const isNow = hour === nowHour
+          const rainKind = p.rainfallMm >= 10 ? 'flood' : p.rainfallMm > 0 ? 'rain' : 'sun'
+          const RainIcon = rainKind === 'sun' ? Sun : rainKind === 'rain' ? CloudRain : AlertTriangle
 
-      {/* Rows */}
-      <div className="flex-1 overflow-y-auto">
-        {sorted.map((d, idx) => {
-          const r = RISK_LABEL[d.risk] ?? RISK_LABEL.safe
-          const depthPct = Math.min((d.flood_depth_cm / maxDepth) * 100, 100)
           return (
             <div
-              key={d.id}
+              key={p.timeIso}
+              data-now={isNow ? 'true' : undefined}
               className={cn(
-                'grid grid-cols-[1fr_auto_auto_auto] items-center gap-0 border-b border-slate-100/60 px-3 py-2 transition-colors hover:bg-slate-50 dark:border-slate-800/60 dark:hover:bg-slate-800/30',
-                r.rowBg,
+                'flex min-w-[68px] flex-shrink-0 flex-col items-center gap-1.5 rounded-2xl border px-2.5 py-3 transition-all',
+                isNow
+                  ? 'border-sky-400 bg-gradient-to-b from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-200 dark:shadow-sky-900/40 scale-105'
+                  : 'border-slate-100 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-200',
               )}
             >
-              {/* Name + depth bar */}
-              <div className="min-w-0 pr-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-semibold tabular-nums text-slate-400 w-4">{idx + 1}</span>
-                  <span className="truncate text-[11px] font-semibold text-slate-800 dark:text-slate-100">{d.name}</span>
+              {/* Giờ */}
+              <div className={cn('text-[11px] font-extrabold tabular-nums', isNow ? 'text-white' : 'text-slate-500 dark:text-slate-400')}>
+                {String(hour).padStart(2, '0')}:00
+              </div>
+
+              {/* Icon thời tiết */}
+              <RainIcon className={cn('h-5 w-5', isNow ? 'text-white' : rainKind === 'rain' ? 'text-sky-500' : rainKind === 'flood' ? 'text-rose-500' : 'text-amber-400')} />
+
+              {/* Nhiệt độ */}
+              <div className={cn('text-sm font-extrabold tabular-nums', isNow ? 'text-white' : 'text-slate-800 dark:text-slate-100')}>
+                {p.tempC}°
+              </div>
+
+              {/* Mưa */}
+              <div className={cn('text-[10px] font-semibold tabular-nums', isNow ? 'text-sky-100' : 'text-sky-600 dark:text-sky-400')}>
+                {p.rainfallMm > 0 ? `${p.rainfallMm}mm` : '—'}
+              </div>
+
+              {/* Mây */}
+              <div className={cn('flex items-center gap-0.5 text-[9px]', isNow ? 'text-white/70' : 'text-slate-400')}>
+                <Cloud className="h-3 w-3" />
+                {p.cloudsPct}%
+              </div>
+
+              {/* Live badge */}
+              {isNow && (
+                <div className="mt-0.5 rounded-full bg-white/25 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">
+                  Live
                 </div>
-                {d.flood_depth_cm > 0 && (
-                  <div className="mt-1 ml-5 h-1 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                    <div
-                      className={cn('h-full rounded-full transition-all', r.bar)}
-                      style={{ width: `${depthPct}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-              {/* Risk badge */}
-              <div className="w-20 flex justify-center">
-                <span className={cn('inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold', r.text)}>
-                  <span className={cn('h-1.5 w-1.5 flex-shrink-0 rounded-full', r.dot)} />
-                  {r.label}
-                </span>
-              </div>
-              {/* Depth */}
-              <div className={cn('w-14 text-right text-[11px] font-extrabold tabular-nums', r.text)}>
-                {d.flood_depth_cm > 0 ? `${d.flood_depth_cm}cm` : <span className="text-slate-300 dark:text-slate-600">—</span>}
-              </div>
-              {/* Rain */}
-              <div className="w-14 text-right text-[11px] font-semibold tabular-nums text-slate-400 dark:text-slate-500">
-                {d.predictedRainfallMm}mm
-              </div>
+              )}
             </div>
           )
         })}
-      </div>
-
-      {/* Footer */}
-      <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/60 px-3 py-1.5 dark:border-slate-800 dark:bg-slate-800/20">
-        <span className="text-[10px] text-slate-400">{sorted.length}/{districts.length} hiển thị</span>
-        <div className="flex items-center gap-2">
-          {(['severe', 'high', 'medium', 'safe'] as const).map((k) => {
-            const cnt = districts.filter(d => d.risk === k).length
-            if (!cnt) return null
-            return (
-              <span key={k} className={cn('flex items-center gap-0.5 text-[10px] font-semibold', RISK_LABEL[k].text)}>
-                <span className={cn('h-1.5 w-1.5 rounded-full', RISK_LABEL[k].dot)} />
-                {cnt}
-              </span>
-            )
-          })}
-        </div>
       </div>
     </div>
   )
 }
 
-// ── Rain24hChart ─────────────────────────────────────────────────────
-function Rain24hChart({ forecast24h }: { forecast24h: { timeIso: string; rainfallMm: number }[] }) {
+// ── Rain24hChart ──────────────────────────────────────────────────────
+function Rain24hChart({ forecast24h }: {
+  forecast24h: Array<{ timeIso: string; rainfallMm: number; cloudsPct?: number }>
+}) {
   if (!forecast24h.length) return null
+  const nowHour = getNowHourVN()
   const maxVal = Math.max(...forecast24h.map((p) => p.rainfallMm), 1)
   const totalMm = forecast24h.reduce((s, p) => s + p.rainfallMm, 0)
 
@@ -286,7 +285,9 @@ function Rain24hChart({ forecast24h }: { forecast24h: { timeIso: string; rainfal
           <div className="mt-1 ml-10 text-xs text-slate-500 dark:text-slate-400">Dự báo theo từng giờ (mm)</div>
         </div>
         <div className="text-right">
-          <div className="text-lg font-extrabold tabular-nums text-sky-600 dark:text-sky-400">{totalMm.toFixed(1)}<span className="text-xs font-medium text-slate-400"> mm</span></div>
+          <div className="text-lg font-extrabold tabular-nums text-sky-600 dark:text-sky-400">
+            {totalMm.toFixed(1)}<span className="text-xs font-medium text-slate-400"> mm</span>
+          </div>
           <div className="text-[10px] text-slate-400">Tổng dự báo</div>
         </div>
       </div>
@@ -300,18 +301,20 @@ function Rain24hChart({ forecast24h }: { forecast24h: { timeIso: string; rainfal
         <div className="relative flex items-end gap-0.5" style={{ height: 100 }}>
           {forecast24h.map((p) => {
             const pct = (p.rainfallMm / maxVal) * 100
-            const hour = new Date(p.timeIso).getHours()
-            const isNow = hour === new Date().getHours()
+            const hour = toVNHour(p.timeIso)
+            const isNow = hour === nowHour
             const barColor = pct > 60 ? 'bg-gradient-to-t from-rose-500 to-rose-400' : pct > 30 ? 'bg-gradient-to-t from-amber-500 to-amber-400' : 'bg-gradient-to-t from-sky-500 to-sky-400'
             return (
               <div key={p.timeIso} className="group relative flex flex-1 flex-col items-center justify-end" style={{ height: '100%' }}>
                 <div
-                  className={cn('w-full rounded-t transition-all', barColor, isNow && 'ring-1 ring-offset-1 ring-sky-500')}
+                  className={cn('w-full rounded-t transition-all', barColor, isNow && 'ring-2 ring-offset-1 ring-sky-500')}
                   style={{ height: `${Math.max(pct, 3)}%` }}
                 />
-                <div className={cn('mt-1 text-[9px] tabular-nums', isNow ? 'font-bold text-sky-600 dark:text-sky-400' : 'text-slate-400 dark:text-slate-500')}>{hour}h</div>
+                <div className={cn('mt-1 text-[9px] tabular-nums', isNow ? 'font-black text-sky-600 dark:text-sky-400' : 'text-slate-400 dark:text-slate-500')}>
+                  {hour}h
+                </div>
                 <div className="pointer-events-none absolute bottom-full mb-2 hidden rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-bold text-white shadow-lg group-hover:block whitespace-nowrap">
-                  {hour}:00 — {p.rainfallMm}mm
+                  {String(hour).padStart(2, '0')}:00 — {p.rainfallMm}mm
                 </div>
               </div>
             )
@@ -330,12 +333,16 @@ function Rain24hChart({ forecast24h }: { forecast24h: { timeIso: string; rainfal
             {l.label}
           </span>
         ))}
+        <span className="ml-auto flex items-center gap-1 text-[10px] text-sky-600 dark:text-sky-400">
+          <span className="inline-block h-2 w-2 rounded-sm ring-1 ring-sky-500" />
+          Giờ hiện tại
+        </span>
       </div>
     </div>
   )
 }
 
-// ── RiskOverview ─────────────────────────────────────────────────────
+// ── RiskOverview ──────────────────────────────────────────────────────
 function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
   const counts = useMemo(() => {
     const c = { safe: 0, medium: 0, high: 0, severe: 0 }
@@ -374,7 +381,6 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
       </div>
 
       <div className="px-5 pt-4 pb-2">
-        {/* Stacked bar */}
         <div className="flex h-4 w-full overflow-hidden rounded-full gap-0.5">
           {items.map((item) => item.count > 0 && (
             <div
@@ -386,7 +392,6 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
           ))}
         </div>
 
-        {/* Items grid */}
         <div className="mt-4 grid grid-cols-2 gap-2.5">
           {items.map((item) => (
             <div key={item.key} className={cn(
@@ -420,22 +425,81 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
   )
 }
 
-// ── WeatherPage ──────────────────────────────────────────────────────
+// ── FloodDistrict stub (dùng cho props empty) ─────────────────────────
+type FloodDistrict = {
+  id: string
+  name: string
+  risk: 'safe' | 'medium' | 'high' | 'severe'
+  predictedRainfallMm: number
+  flood_depth_cm: number
+  polygon: [number, number][]
+  updatedAtIso: string
+}
+
+// ── WeatherPage ───────────────────────────────────────────────────────
 export function WeatherPage() {
   const { t } = useTranslation()
-  // Không dùng getFloodPrediction() nữa – tránh scan 53K nodes
-  // LocationSearch vẫn hoạt động với Nominatim tìm kiếm địa chỉ tự do (chế độ geo-only)
+
+  // ── Location state ──
   const [districtInput, setDistrictInput] = useState('')
-  const [districtFilter, setDistrictFilter] = useState('')
+  const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null)
   const [mapFlyTo, setMapFlyTo] = useState<LatLngExpression | null>(null)
+  const [searchMarker, setSearchMarker] = useState<LatLngExpression | null>(null)
+
   const forecastScrollRef = useRef<HTMLDivElement>(null)
 
-  // Lấy thời tiết Khu vực Trung tâm Hà Nội làm mặc định
-  const weather = useAsync(() => getWeather({ district: districtFilter || undefined }), [districtFilter])
-  const forecast7d = useAsync(getForecast7d, [])
+  // ── Derive lat/lng for API calls ──
+  const queryLat = selectedLocation?.lat
+  const queryLng = selectedLocation?.lng
 
-  const center: LatLngExpression = [21.0278, 105.8342] // Trung tâm Hà Nội
+  // ── API calls – re-fetch when location changes ──
+  const weatherParams = useMemo(
+    () => ({ lat: queryLat, lng: queryLng }),
+    [queryLat, queryLng],
+  )
+  const weather = useAsync(() => getWeather(weatherParams), [weatherParams])
 
+  const forecast7dParams = useMemo(
+    () => [queryLat, queryLng] as [number | undefined, number | undefined],
+    [queryLat, queryLng],
+  )
+  const forecast7d = useAsync(
+    () => getForecast7d(...forecast7dParams),
+    [forecast7dParams],
+  )
+
+  const forecast24hParams = useMemo(
+    () => [queryLat, queryLng] as [number | undefined, number | undefined],
+    [queryLat, queryLng],
+  )
+  const forecast24h = useAsync(
+    () => getWeatherForecast24h(...forecast24hParams),
+    [forecast24hParams],
+  )
+
+  // ── Handle geo-search result ──
+  const handleGeoResult = useCallback((r: NominatimResult) => {
+    const lat = parseFloat(r.lat)
+    const lng = parseFloat(r.lon)
+    const name = r.display_name.split(',')[0] ?? r.display_name
+    setSelectedLocation({ lat, lng, name })
+    const pos: LatLngExpression = [lat, lng]
+    setMapFlyTo(pos)
+    setSearchMarker(pos)
+  }, [])
+
+  const handleClearLocation = useCallback(() => {
+    setSelectedLocation(null)
+    setMapFlyTo(null)
+    setSearchMarker(null)
+    setDistrictInput('')
+  }, [])
+
+  const center: LatLngExpression = selectedLocation
+    ? [selectedLocation.lat, selectedLocation.lng]
+    : [21.0278, 105.8342]
+
+  // ── Derived forecast data ──
   const forecast7dData = forecast7d.data && forecast7d.data.length > 0
     ? forecast7d.data.map((d) => ({
         dateIso: d.dateIso,
@@ -445,8 +509,23 @@ export function WeatherPage() {
         humidityPct: d.humidityPct,
       }))
     : (weather.data?.forecast7d ?? [])
-  // source badge: lấy từ phần tử đầu tiên
+
   const forecastSource = forecast7d.data?.[0]?.source ?? null
+
+  // Merge forecast24h: prefer dedicated endpoint, fallback to weather.forecast24h
+  const chartForecast24h = useMemo(() => {
+    if (forecast24h.data && forecast24h.data.length > 0) return forecast24h.data
+    if (weather.data?.forecast24h && weather.data.forecast24h.length > 0) {
+      return weather.data.forecast24h.map(p => ({
+        timeIso:    p.timeIso,
+        rainfallMm: p.rainfallMm,
+        tempC:      (p as any).tempC ?? 0,
+        humidity:   (p as any).humidity ?? 0,
+        cloudsPct:  0,
+      }))
+    }
+    return []
+  }, [forecast24h.data, weather.data?.forecast24h])
 
   function scrollForecast(dir: -1 | 1) {
     forecastScrollRef.current?.scrollBy({ left: dir * 280, behavior: 'smooth' })
@@ -460,6 +539,8 @@ export function WeatherPage() {
   const currentKind = kindFromRainfall(current.rainfallMm)
   const currentCfg = KIND_CONFIG[currentKind]
   const CurrentIcon = currentCfg.Icon
+
+  const locationLabel = selectedLocation?.name ?? current.locationName
 
   return (
     <div className="space-y-5">
@@ -477,21 +558,20 @@ export function WeatherPage() {
         </div>
         <button
           type="button"
-          onClick={() => { void weather.reload(); void forecast7d.reload() }}
+          onClick={() => { void weather.reload(); void forecast7d.reload(); void forecast24h.reload() }}
           className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm transition-all hover:bg-slate-50 hover:shadow dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
         >
           <RefreshCcw className="h-3.5 w-3.5" /> Làm mới
         </button>
       </div>
 
-      {/* ── Hàng 1: Weather card + Bản đồ + Bảng quận ── */}
+      {/* ── Hàng 1: Weather card + Bản đồ ── */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
 
         {/* Weather card (4/12) */}
         <div className="lg:col-span-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-900">
           {/* Gradient hero */}
           <div className={cn('relative overflow-hidden bg-gradient-to-br px-6 py-6 text-white', currentCfg.gradient)}>
-            {/* Decorative circles */}
             <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-white/10" />
             <div className="pointer-events-none absolute -bottom-4 -left-4 h-24 w-24 rounded-full bg-white/5" />
 
@@ -500,7 +580,7 @@ export function WeatherPage() {
                 <div className="text-[11px] font-bold uppercase tracking-widest text-white/60">Thời tiết hiện tại</div>
                 <div className="mt-1.5 flex items-center gap-1.5 text-sm font-semibold text-white/90">
                   <MapPin className="h-3.5 w-3.5 flex-shrink-0" />
-                  <span className="truncate max-w-[160px]">{current.locationName}</span>
+                  <span className="truncate max-w-[160px]">{locationLabel}</span>
                 </div>
               </div>
               <div className="rounded-2xl bg-white/20 p-3 backdrop-blur-sm ring-1 ring-white/20">
@@ -532,8 +612,9 @@ export function WeatherPage() {
             </div>
           </div>
 
-          {/* Quick stats */}
+          {/* Extended stats: Clouds + Rain intensity + Feels like + Rain level */}
           <div className="grid grid-cols-2 gap-3 border-t border-slate-100 p-4 dark:border-slate-800">
+            {/* Cảm giác như */}
             <div className="flex items-center gap-3 rounded-xl bg-gradient-to-br from-orange-50 to-amber-50 p-3 dark:from-orange-900/20 dark:to-amber-900/10">
               <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl bg-orange-100 dark:bg-orange-900/30">
                 <Thermometer className="h-5 w-5 text-orange-500" />
@@ -545,14 +626,41 @@ export function WeatherPage() {
                 </div>
               </div>
             </div>
+            {/* Cường độ mưa */}
             <div className="flex items-center gap-3 rounded-xl bg-gradient-to-br from-indigo-50 to-violet-50 p-3 dark:from-indigo-900/20 dark:to-violet-900/10">
               <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl bg-indigo-100 dark:bg-indigo-900/30">
                 <TrendingUp className="h-5 w-5 text-indigo-500" />
               </div>
               <div>
-                <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Mưa</div>
-                <div className="text-base font-extrabold text-indigo-600 dark:text-indigo-400">
-                  {current.rainfallMm >= 60 ? 'Rất lớn' : current.rainfallMm >= 25 ? 'Lớn' : 'Nhỏ'}
+                <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Cường độ mưa</div>
+                <div className="text-sm font-extrabold text-indigo-600 dark:text-indigo-400 tabular-nums">
+                  {(current.rainIntensityMm ?? current.rainfallMm) > 0
+                    ? `${current.rainIntensityMm ?? current.rainfallMm} mm/h`
+                    : 'Không mưa'}
+                </div>
+              </div>
+            </div>
+            {/* Bao phủ mây */}
+            <div className="flex items-center gap-3 rounded-xl bg-gradient-to-br from-slate-50 to-gray-50 p-3 dark:from-slate-800/40 dark:to-gray-800/20">
+              <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl bg-slate-100 dark:bg-slate-800">
+                <Cloud className="h-5 w-5 text-slate-500" />
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Bao phủ mây</div>
+                <div className="text-base font-extrabold text-slate-700 dark:text-slate-200 tabular-nums">
+                  {current.cloudsPct ?? 0}%
+                </div>
+              </div>
+            </div>
+            {/* Mức mưa */}
+            <div className="flex items-center gap-3 rounded-xl bg-gradient-to-br from-sky-50 to-cyan-50 p-3 dark:from-sky-900/20 dark:to-cyan-900/10">
+              <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl bg-sky-100 dark:bg-sky-900/30">
+                <CloudRain className="h-5 w-5 text-sky-500" />
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Mức mưa</div>
+                <div className="text-sm font-extrabold text-sky-600 dark:text-sky-400">
+                  {current.rainfallMm >= 60 ? 'Rất lớn' : current.rainfallMm >= 25 ? 'Lớn' : current.rainfallMm > 0 ? 'Nhỏ' : 'Khô'}
                 </div>
               </div>
             </div>
@@ -563,22 +671,43 @@ export function WeatherPage() {
           </div>
         </div>
 
-        {/* Map (4/12) */}
-        <div className="lg:col-span-4 flex flex-col gap-2" style={{ height: 460 }}>
+        {/* Map (8/12) */}
+        <div className="lg:col-span-8 flex flex-col gap-2" style={{ height: 520 }}>
           <div className="flex items-center gap-2 flex-shrink-0">
             <div className="min-w-0 flex-1">
               <LocationSearch
                 id="weather-location-search"
-                districts={[]}  // Nominatim geo-search mode: không cần list quận nội bộ
+                districts={[]}
                 label={t('weather.searchDistrict')}
                 placeholder={t('floodMap.searchDistrict')}
                 value={districtInput}
-                onChange={setDistrictInput}
-                onFilterChange={setDistrictFilter}
-                onSelectGeoResult={(r) => setMapFlyTo([parseFloat(r.lat), parseFloat(r.lon)])}
+                onChange={(v) => {
+                  setDistrictInput(v)
+                  if (!v) handleClearLocation()
+                }}
+                onFilterChange={() => {}}
+                onSelectGeoResult={handleGeoResult}
               />
             </div>
+            {selectedLocation && (
+              <button
+                type="button"
+                onClick={handleClearLocation}
+                className="flex-shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              >
+                Xóa
+              </button>
+            )}
           </div>
+          {selectedLocation && (
+            <div className="flex-shrink-0 flex items-center gap-2 rounded-xl bg-sky-50 border border-sky-100 px-3 py-2 dark:bg-sky-950/30 dark:border-sky-900">
+              <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-sky-500" />
+              <span className="text-xs font-semibold text-sky-700 dark:text-sky-300 truncate">{selectedLocation.name}</span>
+              <span className="ml-auto text-[10px] text-sky-500 tabular-nums">
+                {selectedLocation.lat.toFixed(4)}, {selectedLocation.lng.toFixed(4)}
+              </span>
+            </div>
+          )}
           <div className="min-h-0 flex-1 overflow-hidden rounded-2xl ring-1 ring-slate-200 shadow-sm dark:ring-slate-700">
             <MiniFloodMap
               districts={[]}
@@ -586,20 +715,19 @@ export function WeatherPage() {
               center={center}
               zoom={12}
               flyTo={mapFlyTo}
+              searchMarker={searchMarker}
               className="!aspect-auto h-full w-full"
             />
           </div>
         </div>
-
-        {/* District table (4/12) */}
-        <div className="lg:col-span-4" style={{ height: 460 }}>
-          <DistrictRiskTable districts={[]} />
-        </div>
       </div>
+
+      {/* ── Hourly forecast (khung giờ hôm nay) ── */}
+      <HourlyForecast forecast24h={chartForecast24h} />
 
       {/* ── Hàng 2: Biểu đồ mưa 24h + Tổng quan rủi ro ── */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <Rain24hChart forecast24h={weather.data.forecast24h} />
+        <Rain24hChart forecast24h={chartForecast24h} />
         <RiskOverview districts={[]} />
       </div>
 

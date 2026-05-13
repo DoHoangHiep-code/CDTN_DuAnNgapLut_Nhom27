@@ -46,7 +46,8 @@ class WeatherRepository {
         wm.temp,
         wm.rhum,
         wm.wspd,
-        wm.prcp
+        wm.prcp,
+        wm.clouds
       FROM weather_measurements wm
       WHERE wm.node_id = :nodeId
       ORDER BY wm.time DESC
@@ -199,6 +200,33 @@ class WeatherRepository {
     `
     return this._withStatementTimeout(8000, (t) =>
       this.sequelize.query(sql, { type: QueryTypes.SELECT, transaction: t }),
+    )
+  }
+
+  /**
+   * Lấy dữ liệu thời tiết theo từng giờ trong 24 giờ tới cho một node (dùng cho biểu đồ 24h).
+   */
+  async getHourlyForecast24h(nodeId) {
+    const sql = `
+      SELECT
+        wm.time,
+        COALESCE(wm.prcp,   0)::float AS prcp,
+        COALESCE(wm.temp,  28)::float AS temp,
+        COALESCE(wm.rhum,  70)::float AS rhum,
+        COALESCE(wm.clouds, 0)::int   AS clouds
+      FROM weather_measurements wm
+      WHERE wm.node_id = :nodeId
+        AND wm.time >= now()
+        AND wm.time <  now() + interval '24 hours'
+      ORDER BY wm.time ASC
+      LIMIT 24;
+    `
+    return this._withStatementTimeout(6000, (t) =>
+      this.sequelize.query(sql, {
+        type: QueryTypes.SELECT,
+        replacements: { nodeId },
+        transaction: t,
+      }),
     )
   }
 

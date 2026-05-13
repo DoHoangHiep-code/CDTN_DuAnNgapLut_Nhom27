@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from 'react-leaflet'
-import type { LatLngExpression } from 'leaflet'
+import { CircleMarker, MapContainer, Marker, TileLayer, Tooltip, useMap } from 'react-leaflet'
+import { divIcon, type LatLngExpression } from 'leaflet'
 import type { FloodDistrict, RiskLevel } from '../utils/types'
 import { cn } from '../utils/cn'
 import { formatDepthCm } from '../utils/floodDepth'
@@ -49,6 +49,13 @@ function FlyToPosition({ position }: { position: LatLngExpression | null | undef
   return null
 }
 
+const RED_MARKER_ICON = divIcon({
+  className: '',
+  html: `<div style="width:16px;height:16px;border-radius:50%;background:#e11d48;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+})
+
 export function MiniFloodMap({
   districts,
   selectedDistrictId,
@@ -56,6 +63,7 @@ export function MiniFloodMap({
   zoom = 12,
   className,
   flyTo,
+  searchMarker,
 }: {
   districts: FloodDistrict[]
   selectedDistrictId?: string
@@ -64,6 +72,8 @@ export function MiniFloodMap({
   className?: string
   /** Khi đổi (tìm địa điểm), bản đồ bay tới tọa độ */
   flyTo?: LatLngExpression | null
+  /** Đặt marker đỏ tại vị trí vừa search */
+  searchMarker?: LatLngExpression | null
 }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -115,6 +125,11 @@ export function MiniFloodMap({
           attribution=""
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+
+        {/* Marker đỏ tại vị trí user vừa search */}
+        {searchMarker && (
+          <Marker position={searchMarker} icon={RED_MARKER_ICON} />
+        )}
 
         {positions.map((p) => {
           const depthCm = p.depthCm

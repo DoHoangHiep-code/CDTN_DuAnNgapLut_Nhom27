@@ -38,6 +38,8 @@ function buildWeather(districtName?: string): WeatherResponse {
     humidityPct: Math.round(72 + (now.getHours() % 5) * 3 + humidityOffset),
     windKph: round(9 + (now.getHours() % 4) * 2 + windOffset, 1),
     rainfallMm: currentRain,
+    cloudsPct: Math.round(30 + (now.getHours() % 6) * 8),
+    rainIntensityMm: currentRain,
     observedAtIso: now.toISOString(),
     locationName: (districtName?.trim() || 'City Center') as string,
   }
@@ -111,6 +113,8 @@ function buildReports(): ReportsResponse {
       longitude: 105.8342 + (i % 5) * 0.004,
       reportedLevel: i % 3 === 0 ? 'Khô ráo' : i % 3 === 1 ? '<20cm' : '>50cm',
       userFullName: i % 2 === 0 ? 'Demo User' : 'Demo Expert',
+      locationName: `Điểm quan trắc ${i + 1}`,
+      districtName: ['Cầu Giấy', 'Hoàn Kiếm', 'Đống Đa', 'Ba Đình', 'Hai Bà Trưng'][i % 5] ?? null,
     }
   })
   return { rows }

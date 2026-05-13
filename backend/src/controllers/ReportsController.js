@@ -3,17 +3,29 @@ class ReportsController {
    * @param {{reportsService: any}} deps
    */
   constructor({ reportsService }) {
-    this.reportsService = reportsService // Inject service
-    this.list = this.list.bind(this)                         // Bind handler
-    this.create = this.create.bind(this)                     // Bind handler
-    this.createActualFloodReport = this.createActualFloodReport.bind(this) // Bind handler cho route /actual-flood
+    this.reportsService = reportsService
+    this.list = this.list.bind(this)
+    this.autocomplete = this.autocomplete.bind(this)
+    this.create = this.create.bind(this)
+    this.createActualFloodReport = this.createActualFloodReport.bind(this)
   }
 
-  // GET /api/v1/reports?page=1&limit=50
+  // GET /api/v1/reports/autocomplete?q=Cầu Giấy
+  async autocomplete(req, res, next) {
+    try {
+      const q = typeof req.query.q === 'string' ? req.query.q : ''
+      const results = await this.reportsService.searchLocations(q)
+      return res.status(200).json({ success: true, data: results })
+    } catch (err) {
+      return next(err)
+    }
+  }
+
+  // GET /api/v1/reports?page=1&limit=50&location=&dateFrom=&dateTo=
   async list(req, res, next) {
     try {
-      const { page = 1, limit = 50 } = req.query
-      const result = await this.reportsService.list({ page, limit })
+      const { page = 1, limit = 50, location, dateFrom, dateTo } = req.query
+      const result = await this.reportsService.list({ page, limit, location, dateFrom, dateTo })
 
       // Chuẩn hoá shape trả về để frontend render/export ổn định
       const mapped = result.rows.map((r) => ({

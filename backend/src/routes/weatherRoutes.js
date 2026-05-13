@@ -20,6 +20,52 @@ const predictionService = new PredictionService({ weatherRepository, sequelize }
 // ─── Route cũ: Thời tiết hiện tại từ OWM (delegate lên WeatherController) ────
 router.get('/weather', weatherController.getWeather)
 
+// ─── Route: Dự báo mưa theo giờ (24h tới) từ DB cho node gần nhất ───────────
+// GET /api/v1/weather/forecast24h?lat=21.02&lng=105.83
+router.get('/weather/forecast24h', async (req, res, next) => {
+  const HANOI_LAT = 21.0285
+  const HANOI_LON = 105.8542
+  try {
+    const lat = Number.isFinite(Number(req.query.lat)) ? Number(req.query.lat) : HANOI_LAT
+    const lng = Number.isFinite(Number(req.query.lng)) ? Number(req.query.lng) : HANOI_LON
+
+    const nodeId = await weatherRepository.findNearestNodeId({ lat, lng }).catch(() => null)
+    if (!nodeId) {
+      return res.status(200).json({ success: true, source: 'empty', data: [] })
+    }
+
+    const rows = await weatherRepository.getHourlyForecast24h(nodeId).catch(() => [])
+
+    // Nếu DB không có dữ liệu tương lai → fallback sang OWM forecast (3h intervals)
+    if (!rows || rows.length === 0) {
+      const owmPoints = await getOWMForecast5d(lat, lng).catch(() => null)
+      if (!owmPoints || !owmPoints.length) {
+        return res.status(200).json({ success: true, source: 'empty', data: [] })
+      }
+      const data = owmPoints.slice(0, 8).map(p => ({
+        timeIso:    new Date(p.timeUtc).toISOString(),
+        rainfallMm: Math.round(p.rain3h * 10) / 10,
+        tempC:      Math.round(p.temp * 10) / 10,
+        humidity:   p.humidity,
+        cloudsPct:  0,
+      }))
+      return res.status(200).json({ success: true, source: 'live-owm', data })
+    }
+
+    const data = rows.map(r => ({
+      timeIso:    new Date(r.time).toISOString(),
+      rainfallMm: Math.round(Number(r.prcp)   * 10) / 10,
+      tempC:      Math.round(Number(r.temp)   * 10) / 10,
+      humidity:   Math.round(Number(r.rhum)),
+      cloudsPct:  Number(r.clouds) || 0,
+    }))
+
+    return res.status(200).json({ success: true, source: 'database', nodeId, data })
+  } catch (err) {
+    return next(err)
+  }
+})
+
 // ─── Route: Thời tiết THỰC TẾ từ OpenWeatherMap theo tọa độ ──────────────────
 // GET /api/v1/weather/live?lat=21.02&lon=105.83
 router.get('/weather/live', async (req, res, next) => {
