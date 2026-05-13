@@ -86,34 +86,47 @@ class FloodPredictionController {
         }
 
         // Query flood_predictions JOIN grid_nodes trong bbox
-        // Chỉ SELECT các cột cần thiết → giảm payload JSON
-        const rows = await this.sequelize.query(
-          `SELECT
-             gn.node_id,
-             gn.latitude,
-             gn.longitude,
-             gn.location_name,
-             fp.risk_level,
-             fp.flood_depth_cm,
-             fp.time        AS prediction_time,
-             fp.explanation
-           FROM grid_nodes gn
-           LEFT JOIN LATERAL (
-             SELECT risk_level, flood_depth_cm, time, explanation
-             FROM   flood_predictions
-             WHERE  node_id = gn.node_id
-             ORDER  BY time DESC
-             LIMIT  1
-           ) fp ON TRUE
-           WHERE gn.latitude  BETWEEN :minLat AND :maxLat
-             AND gn.longitude BETWEEN :minLng AND :maxLng
-           ORDER BY gn.node_id
-           LIMIT :limit`,
-          {
-            replacements: { minLat, maxLat, minLng, maxLng, limit },
-            type: QueryTypes.SELECT,
-          },
-        )
+        // idx_grid_nodes_lat_lng + idx_flood_predictions_node_time đảm bảo query < 1s
+        let rows
+        try {
+          rows = await this.sequelize.query(
+            `SELECT
+               gn.node_id,
+               gn.latitude,
+               gn.longitude,
+               gn.location_name,
+               fp.risk_level,
+               fp.flood_depth_cm,
+               fp.time        AS prediction_time,
+               fp.explanation
+             FROM grid_nodes gn
+             LEFT JOIN LATERAL (
+               SELECT risk_level, flood_depth_cm, time, explanation
+               FROM   flood_predictions
+               WHERE  node_id = gn.node_id
+               ORDER  BY time DESC
+               LIMIT  1
+             ) fp ON TRUE
+             WHERE gn.latitude  BETWEEN :minLat AND :maxLat
+               AND gn.longitude BETWEEN :minLng AND :maxLng
+             ORDER BY gn.node_id
+             LIMIT :limit`,
+            {
+              replacements: { minLat, maxLat, minLng, maxLng, limit },
+              type: QueryTypes.SELECT,
+            },
+          )
+        } catch (dbErr) {
+          // Pool exhausted hoặc DB timeout → trả 503 rõ ràng thay vì crash
+          console.error('[FloodPredictionController] BBox DB error:', dbErr.message)
+          return res.status(503).json({
+            success: false,
+            error: {
+              message: 'Database đang bận, vui lòng thử lại sau vài giây.',
+              code: 'DB_TIMEOUT',
+            },
+          })
+        }
 
         if (!rows || rows.length === 0) {
           // Viewport không có node nào → trả mảng rỗng (không fallback demoData)

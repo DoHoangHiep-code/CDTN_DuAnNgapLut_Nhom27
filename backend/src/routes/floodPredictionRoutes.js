@@ -51,35 +51,35 @@ router.get('/flood-prediction/by-location', async (req, res, next) => {
 
     const features = {
       prcp,
-      prcp_3h:            prcp * 2.5,   // ước tính tích lũy 3h
-      prcp_6h:            prcp * 4,     // ước tính tích lũy 6h
-      prcp_12h:           prcp * 6,     // ước tính tích lũy 12h
-      prcp_24h:           prcp * 8,     // ước tính tích lũy 24h
-      temp:               weatherData?.temp ?? 28,
-      rhum:               weatherData?.humidity ?? 70,
+      prcp_3h: prcp * 2.5,   // ước tính tích lũy 3h
+      prcp_6h: prcp * 4,     // ước tính tích lũy 6h
+      prcp_12h: prcp * 6,     // ước tính tích lũy 12h
+      prcp_24h: prcp * 8,     // ước tính tích lũy 24h
+      temp: weatherData?.temp ?? 28,
+      rhum: weatherData?.humidity ?? 70,
       // FIX: OWM trả windSpeed theo m/s, model CatBoost cũng expect m/s – KHÔNG nhân 3.6
-      wspd:               weatherData?.windSpeed ?? 0,
-      pres:               weatherData?.pressure ?? 1010,
+      wspd: weatherData?.windSpeed ?? 0,
+      pres: weatherData?.pressure ?? 1010,
       pressure_change_24h: 0,
-      max_prcp_3h:        prcp,
-      max_prcp_6h:        prcp,
-      max_prcp_12h:       prcp,
+      max_prcp_3h: prcp,
+      max_prcp_6h: prcp,
+      max_prcp_12h: prcp,
       // Giá trị địa lý trung bình cho vùng Hà Nội (node đại diện)
-      elevation:          5,
-      slope:              1,
-      impervious_ratio:   0.65,
-      dist_to_drain_km:   0.4,
-      dist_to_river_km:   1.0,
-      dist_to_pump_km:    0.8,
+      elevation: 5,
+      slope: 1,
+      impervious_ratio: 0.65,
+      dist_to_drain_km: 0.4,
+      dist_to_river_km: 1.0,
+      dist_to_pump_km: 0.8,
       dist_to_main_road_km: 0.2,
-      dist_to_park_km:    0.5,
+      dist_to_park_km: 0.5,
       // Time features
       hour,
       dayofweek,
       month,
       dayofyear,
-      hour_sin:  Math.sin((2 * Math.PI * hour) / 24),
-      hour_cos:  Math.cos((2 * Math.PI * hour) / 24),
+      hour_sin: Math.sin((2 * Math.PI * hour) / 24),
+      hour_cos: Math.cos((2 * Math.PI * hour) / 24),
       month_sin: Math.sin((2 * Math.PI * month) / 12),
       month_cos: Math.cos((2 * Math.PI * month) / 12),
       rainy_season_flag: rainyMonths.includes(month) ? 1 : 0,
@@ -121,10 +121,10 @@ router.get('/flood-prediction/by-location', async (req, res, next) => {
         warningText,    // Chuỗi tiếng Việt cho UI
         floodDepthCm: Math.round(floodDepthCm * 10) / 10,
         weather: {
-          rain1h:      weatherData?.rain1h ?? 0,
-          humidity:    weatherData?.humidity ?? 0,
-          clouds:      weatherData?.clouds ?? 0,
-          temp:        weatherData?.temp ?? 0,
+          rain1h: weatherData?.rain1h ?? 0,
+          humidity: weatherData?.humidity ?? 0,
+          clouds: weatherData?.clouds ?? 0,
+          temp: weatherData?.temp ?? 0,
           description: weatherData?.description ?? 'N/A',
         },
         usingLiveWeather: weatherData !== null,
@@ -224,9 +224,9 @@ router.get('/forecasts/latest', async (req, res, next) => {
       const dayofyear = Math.floor((now - start) / 86400000)
       const rainyMonths = [5, 6, 7, 8, 9, 10]
 
-      const prcp   = weather?.rain_1h  ?? 0
-      const prcp3  = weather?.prcp_3h  ?? prcp * 2.5
-      const prcp6  = weather?.prcp_6h  ?? prcp * 4
+      const prcp = weather?.rain_1h ?? 0
+      const prcp3 = weather?.prcp_3h ?? prcp * 2.5
+      const prcp6 = weather?.prcp_6h ?? prcp * 4
       const prcp12 = weather?.prcp_12h ?? prcp * 6
 
       const features = {
@@ -238,14 +238,14 @@ router.get('/forecasts/latest', async (req, res, next) => {
         pressure_change_24h: 0,
         max_prcp_3h: prcp3, max_prcp_6h: prcp6, max_prcp_12h: prcp12,
         // Đọc đúng từ DB — không hardcode
-        elevation:        Number(nearestNode.elevation)        || 5,
-        slope:            Number(nearestNode.slope)            || 1,
+        elevation: Number(nearestNode.elevation) || 5,
+        slope: Number(nearestNode.slope) || 1,
         impervious_ratio: Number(nearestNode.impervious_ratio) || 0.5,
         dist_to_drain_km: 0.4, dist_to_river_km: 1.0,
         dist_to_pump_km: 0.8, dist_to_main_road_km: 0.2, dist_to_park_km: 0.5,
         hour, dayofweek, month, dayofyear,
-        hour_sin:  Math.sin((2 * Math.PI * hour)  / 24),
-        hour_cos:  Math.cos((2 * Math.PI * hour)  / 24),
+        hour_sin: Math.sin((2 * Math.PI * hour) / 24),
+        hour_cos: Math.cos((2 * Math.PI * hour) / 24),
         month_sin: Math.sin((2 * Math.PI * month) / 12),
         month_cos: Math.cos((2 * Math.PI * month) / 12),
         rainy_season_flag: rainyMonths.includes(month) ? 1 : 0,
@@ -256,7 +256,7 @@ router.get('/forecasts/latest', async (req, res, next) => {
       const { label, warningText } = depthCmToWarning(floodDepthCm)
       const riskLevel = floodDepthCm < 15 ? 'safe'
         : floodDepthCm < 30 ? 'medium'
-        : floodDepthCm < 60 ? 'high' : 'severe'
+          : floodDepthCm < 60 ? 'high' : 'severe'
 
       return res.status(200).json({
         success: true,
@@ -266,19 +266,19 @@ router.get('/forecasts/latest', async (req, res, next) => {
           location: `Node ${nodeId} (~${Math.round(nearestNode.dist_m)}m)`,
           time: new Date().toISOString(),
           weather: {
-            temp:        weather?.temp   ?? 0,
-            prcp:        prcp,
-            prcp_3h:     prcp3,
-            prcp_6h:     prcp6,
-            prcp_12h:    prcp12,
-            rhum:        weather?.rhum   ?? 0,
-            clouds:      weather?.clouds ?? 0,
+            temp: weather?.temp ?? 0,
+            prcp: prcp,
+            prcp_3h: prcp3,
+            prcp_6h: prcp6,
+            prcp_12h: prcp12,
+            rhum: weather?.rhum ?? 0,
+            clouds: weather?.clouds ?? 0,
             description: 'N/A',
           },
           prediction: {
             flood_depth_cm: Math.round(floodDepthCm * 10) / 10,
-            risk_level:     riskLevel,
-            explanation:    null,
+            risk_level: riskLevel,
+            explanation: null,
             label,
             warningText,
           },
@@ -292,19 +292,19 @@ router.get('/forecasts/latest', async (req, res, next) => {
     const floodDepthCm = Number(pred.flood_depth_cm)
     const { label, warningText } = depthCmToWarning(floodDepthCm)
 
-    const prcp   = weather?.rain_1h  ?? 0
-    const prcp3  = weather?.prcp_3h  ?? 0
-    const prcp6  = weather?.prcp_6h  ?? 0
+    const prcp = weather?.rain_1h ?? 0
+    const prcp3 = weather?.prcp_3h ?? 0
+    const prcp6 = weather?.prcp_6h ?? 0
     const prcp12 = weather?.prcp_12h ?? 0
-    const rhum   = weather?.rhum     ?? 70
+    const rhum = weather?.rhum ?? 70
 
     // No-rain override (IDW xác nhận không mưa + độ ẩm thấp)
     const noRainOverride = prcp === 0 && rhum < 90 && label === 1
-    const finalDepth   = noRainOverride ? 0 : floodDepthCm
-    const finalLabel   = noRainOverride ? 0 : label
+    const finalDepth = noRainOverride ? 0 : floodDepthCm
+    const finalLabel = noRainOverride ? 0 : label
     const finalWarning = noRainOverride ? 'An toàn' : warningText
-    const finalRisk    = noRainOverride ? 'safe' : pred.risk_level
-    const finalExpl    = noRainOverride
+    const finalRisk = noRainOverride ? 'safe' : pred.risk_level
+    const finalExpl = noRainOverride
       ? 'Không có mưa, khu vực hiện đang an toàn.'
       : (pred.explanation ?? null)
 
@@ -320,21 +320,21 @@ router.get('/forecasts/latest', async (req, res, next) => {
         location: `Node ${nodeId} (~${Math.round(nearestNode.dist_m)}m)`,
         time: pred.time,
         weather: {
-          temp:        weather?.temp   ?? 0,
+          temp: weather?.temp ?? 0,
           prcp,
-          prcp_3h:     prcp3,
-          prcp_6h:     prcp6,
-          prcp_12h:    prcp12,
+          prcp_3h: prcp3,
+          prcp_6h: prcp6,
+          prcp_12h: prcp12,
           rhum,
-          clouds:      weather?.clouds ?? 0,
+          clouds: weather?.clouds ?? 0,
           description: 'N/A',
         },
         prediction: {
           flood_depth_cm: Math.round(finalDepth * 10) / 10,
-          risk_level:     finalRisk,
-          explanation:    finalExpl,
-          label:          finalLabel,
-          warningText:    finalWarning,
+          risk_level: finalRisk,
+          explanation: finalExpl,
+          label: finalLabel,
+          warningText: finalWarning,
         },
         usingLiveWeather: true,
       },

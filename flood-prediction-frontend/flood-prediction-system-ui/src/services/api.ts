@@ -1,6 +1,6 @@
 import type { DashboardResponse, FloodPredictionResponse, ReportsResponse, WeatherResponse } from '../utils/types'
 import { apiV1 } from '../utils/axiosConfig'
-
+// ── Chatbot APIs ──
 export async function getWeather(params?: { district?: string }) {
   // Backend thật thường trả wrapper { success, data }, còn mocks trả thẳng object.
   // Lý do unwrap tại đây: tránh sửa rải rác ở nhiều page, giảm rủi ro lỗi tích hợp.
@@ -206,6 +206,19 @@ export type UserSettingsPayload = {
  * Khi backend chưa triển khai endpoint này, hàm sẽ ném lỗi 404 –
  * UI sẽ bắt lỗi đó và hiện toast thông báo cho người dùng.
  */
+
+// ── Chatbot APIs ──
+export async function askChatbot(message: string) {
+  // Re-export từ expertChatApi để tập trung imports
+  const { askChatbot: ask } = await import('./expertChatApi')
+  return ask(message)
+}
+
+export async function callExpertDetail(nodeId: string, question?: string) {
+  // Re-export từ expertChatApi
+  const { callExpertDetail: detail } = await import('./expertChatApi')
+  return detail(nodeId, question)
+}
 export async function updateUserSettings(payload: UserSettingsPayload) {
   const res = await apiV1.put<{ success: boolean; message?: string }>('/users/settings', payload)
   return res.data

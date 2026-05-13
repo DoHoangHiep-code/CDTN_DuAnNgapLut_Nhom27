@@ -62,13 +62,22 @@ const sslDialectOptions = {
   },
 }
 
+// ── Pool config chung: tránh exhaustion khi BBox requests + weatherCron chạy đồng thời ──
+const poolConfig = {
+  max: 20,              // Tối đa 20 connections (mặc định Sequelize chỉ có 5 → dễ bị kẹt)
+  min: 2,              // Giữ sẵn 2 connections ấm để giảm latency khi burst
+  acquire: 30000,      // Tối đa 30s chờ lấy connection trước khi throw TimeoutError
+  idle: 10000,         // Đóng connection nhàn rỗi sau 10s để tiết kiệm tài nguyên cloud DB
+}
+
 const sequelize = normalizedDatabaseUrl
   ? new Sequelize(normalizedDatabaseUrl, {
       dialect: 'postgres',
       logging: false,
       dialectOptions: sslDialectOptions,
+      pool: poolConfig,
     })
-  : new Sequelize(cfg.database, cfg.username, cfg.password, cfg)
+  : new Sequelize(cfg.database, cfg.username, cfg.password, { ...cfg, pool: poolConfig })
 
 if (rawDatabaseUrl && !normalizedDatabaseUrl) {
   // eslint-disable-next-line no-console

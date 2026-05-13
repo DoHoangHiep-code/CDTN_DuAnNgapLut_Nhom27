@@ -19,6 +19,7 @@ import { LocationSearch, type NominatimResult } from '../components/LocationSear
 import { FloodReportModal } from '../components/FloodReportModal'
 import { FloodWarningCard } from '../components/FloodWarningCard'
 import { useSettings } from '../context/SettingsContext'
+import { ExpertChatbot } from '../components/ExpertChatbot'
 
 // Tile URLs cho từng kiểu bản đồ
 const TILE_URLS: Record<string, string> = {
@@ -337,7 +338,12 @@ export function MapPage() {
   const [reportModalOpen, setReportModalOpen] = useState(false)
 
   // Tọa độ tâm bản đồ – dùng để cấp cho FloodWarningCard
+  // Dùng useRef thay vì useState để tránh gây re-render mỗi khi map di chuyển
+  // (setState trong moveend → re-render → moveend lặp lại → vòng lặp vô tận)
+  const mapCenterRef = useRef({ lat: 21.0278, lon: 105.8342 })
   const [mapCenter, setMapCenter] = useState({ lat: 21.0278, lon: 105.8342 })
+  // Track bounds đã fetch lần cuối để tránh spam API khi re-render
+  const lastFetchedBoundsRef = useRef<{ minLat: number; maxLat: number; minLng: number; maxLng: number } | null>(null)
 
   const [map, setMap] = useState<L.Map | null>(null)
   const [searchParams] = useSearchParams()
@@ -382,40 +388,105 @@ export function MapPage() {
     map.flyTo(pos, 15, { animate: true, duration: 0.6 })
   }, [map, districtFromUrl])
 
-  // ── Fetch BBox khi map thay đổi bounds ────────────────────────────────────
-  // Delay 400ms sau khi map dừng để tránh quá nhiều request liên tiếp
-  useEffect(() => {
-    if (!map) return
-    const b = map.getBounds()
+  // ── Hàm fetch BBox – được gọi bởi handler moveend/zoomend của Leaflet ────────
+  // Không nằm trong useEffect có dependency array là state → không gây re-render loop
+  const fetchBbox = useCallback((b: L.LatLngBounds) => {
+    const newBounds = {
+      minLat: b.getSouth(),
+      maxLat: b.getNorth(),
+      minLng: b.getWest(),
+      maxLng: b.getEast(),
+    }
 
-    const timer = setTimeout(async () => {
-      setIsFetchingBbox(true)
-      try {
-        const result = await getFloodPredictionBbox({
-          minLat: b.getSouth(),
-          maxLat: b.getNorth(),
-          minLng: b.getWest(),
-          maxLng: b.getEast(),
-          limit: 200,
-        })
+    // Guard: Chỉ fetch khi bounds thực sự thay đổi đáng kể (>0.001°)
+    // Ngăn spam API khi map re-render nhưng vị trí không đổi
+    const last = lastFetchedBoundsRef.current
+    if (last) {
+      const delta = Math.max(
+        Math.abs(newBounds.minLat - last.minLat),
+        Math.abs(newBounds.maxLat - last.maxLat),
+        Math.abs(newBounds.minLng - last.minLng),
+        Math.abs(newBounds.maxLng - last.maxLng),
+      )
+      if (delta < 0.001) return // Bounds chưa thay đổi đủ → bỏ qua
+    }
+    lastFetchedBoundsRef.current = newBounds
+
+    setIsFetchingBbox(true)
+    getFloodPredictionBbox({ ...newBounds, limit: 200 })
+      .then((result) => {
         const pts: FloodPoint[] = (result?.districts ?? []).map((d) => ({
-          id:                   d.id,
-          name:                 d.name,
-          risk:                 (d.risk as RiskLevel) || 'safe',
-          predictedRainfallMm:  d.predictedRainfallMm ?? 0,
-          depthCm:              d.flood_depth_cm ?? 0,
-          position:             centroid(d.polygon),
+          id:                  d.id,
+          name:                d.name,
+          risk:                (d.risk as RiskLevel) || 'safe',
+          predictedRainfallMm: d.predictedRainfallMm ?? 0,
+          depthCm:             d.flood_depth_cm ?? 0,
+          position:            centroid(d.polygon),
         }))
         setBboxData({ districts: pts })
-      } catch (err) {
-        console.warn('[MapPage] BBox fetch lỗi:', err)
-      } finally {
-        setIsFetchingBbox(false)
-      }
-    }, 400)
+      })
+      .catch((err: unknown) => {
+        // Phân loại lỗi: timeout hoặc 503 → thông báo thân thiện qua toast
+        // Lý do: tránh văng lỗi đỏ console, UX mượt mà hơn
+        const axiosErr = err as any
+        const isTimeout =
+          axiosErr?.code === 'ECONNABORTED' ||
+          axiosErr?.message?.includes('timeout') ||
+          Boolean(axiosErr?.friendlyMessage?.includes('thời gian'))
+        const status = axiosErr?.response?.status
+        const is503 = status === 503
 
-    return () => clearTimeout(timer)
-  }, [map, mapCenter])  // re-run khi mapCenter thay đổi (MapBridge cập nhật sau moveend)
+        if (isTimeout || is503) {
+          toast.error(
+            axiosErr?.friendlyMessage ??
+              'Hệ thống đang quá tải hoặc model đang cần nhiều thời gian xử lý, vui lòng thử lại sau.',
+            { id: 'bbox-error', duration: 5000 },
+          )
+        } else {
+          // Lỗi mạng hoặc lỗi không mong muốn → chỉ log
+          console.warn('[MapPage] BBox fetch lỗi:', err)
+        }
+      })
+      .finally(() => setIsFetchingBbox(false))
+  }, []) // Không dependency vào bất kỳ state nào → hàm ổn định, không gây re-render
+
+  // ── Gắn listener moveend/zoomend vào Leaflet map instance ────────────────────
+  // useEffect chỉ chạy 1 lần khi map instance sẵn sàng (dependency: [map, fetchBbox])
+  // fetchBbox ổn định (useCallback []) → effect chỉ chạy đúng 1 lần
+  useEffect(() => {
+    if (!map) return
+
+    // Fetch ngay lập tức khi map vừa mount
+    fetchBbox(map.getBounds())
+
+    // Debounce 400ms: đợi map dừng hẳn mới gọi API
+    let timer: ReturnType<typeof setTimeout>
+    const handleMoveEnd = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => fetchBbox(map.getBounds()), 400)
+    }
+
+    map.on('moveend', handleMoveEnd)
+    map.on('zoomend', handleMoveEnd)
+
+    return () => {
+      clearTimeout(timer)
+      map.off('moveend', handleMoveEnd)
+      map.off('zoomend', handleMoveEnd)
+    }
+  }, [map, fetchBbox]) // fetchBbox ổn định → effect chỉ mount/unmount 1 lần
+
+  // ── onCenter callback ổn định – chỉ ghi vào Ref, setState với throttle ────────
+  // Dùng useCallback để MapBridge không nhận prop mới mỗi render → tránh re-mount
+  const handleMapCenter = useCallback((lat: number, lon: number) => {
+    // Luôn cập nhật ref (không gây re-render) – dùng cho fetchBbox
+    mapCenterRef.current = { lat, lon }
+    // Chỉ setMapCenter khi tọa độ thay đổi đáng kể để FloodWarningCard cập nhật
+    setMapCenter((prev) => {
+      if (Math.abs(prev.lat - lat) < 0.005 && Math.abs(prev.lon - lon) < 0.005) return prev
+      return { lat, lon }
+    })
+  }, [])
 
   // Xử lý chọn kết quả từ Nominatim geocoding
   const handleGeoResult = useCallback((result: NominatimResult) => {
@@ -523,7 +594,7 @@ export function MapPage() {
               {/* Cầu nối để lấy Leaflet map instance và theo dõi center map */}
               <MapBridge
                 onMap={setMap}
-                onCenter={(lat, lon) => setMapCenter({ lat, lon })}
+                onCenter={handleMapCenter}
               />
 
               {/* Fly đến vị trí đã chọn (cả quận nội bộ lẫn Nominatim) */}
@@ -581,6 +652,15 @@ export function MapPage() {
             Geocoding: OpenStreetMap Nominatim API
           </div>
         </Card>
+
+        {/* ── Expert Chatbot: chèn ngoài MapContainer, dùng memo nên không trigger re-render bản đồ ── */}
+        <div className="col-span-12 lg:col-span-4">
+          <ExpertChatbot
+            lat={mapCenter.lat}
+            lng={mapCenter.lon}
+            className="h-full"
+          />
+        </div>
       </div>
 
       {/* ── Modal Báo cáo ngập lụt ── */}
