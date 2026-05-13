@@ -7,6 +7,8 @@ export type WeatherCurrent = {
   humidityPct: number
   windKph: number
   rainfallMm: number
+  cloudsPct: number
+  rainIntensityMm: number
   observedAtIso: string
   locationName: string
 }
@@ -54,15 +56,37 @@ export type ReportRow = {
   predictedRainfallMm: number
 }
 
+export type ReportsRow = {
+  id: string
+  createdAtIso: string
+  latitude: number
+  longitude: number
+  reportedLevel: string
+  userFullName: string | null
+  locationName: string | null
+  districtName: string | null
+}
+
 export type ReportsResponse = {
-  rows: {
-    id: string
-    createdAtIso: string
-    latitude: number
-    longitude: number
-    reportedLevel: string
-    userFullName: string | null
-  }[]
+  rows: ReportsRow[]
+  pagination?: {
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+  }
+}
+
+export type AlertsBannerItem = {
+  district: string
+  floodDepthCm: number
+  riskLevel: 'safe' | 'medium' | 'high' | 'severe'
+  rain1h: number
+  cloudsPct: number
+  temp: number
+  humidity: number
+  predTime: string | null
+  hasData: boolean
 }
 
 export type DashboardForecastPoint = {
@@ -71,10 +95,34 @@ export type DashboardForecastPoint = {
   flood_depth_cm: number // cm
 }
 
+export type DashboardTempHumPoint = {
+  time: string   // "HH:mm"
+  temp: number   // °C
+  rhum: number   // %
+}
+
+export type DashboardAutocompleteItem = {
+  node_id: number
+  location_name: string
+  district_name: string
+  weather_station_id: number
+}
+
+export type DashboardRiskTrendDay = {
+  date: string   // "MM-DD"
+  safe: number
+  medium: number
+  high: number
+  severe: number
+}
+
 export type DashboardResponse = {
   currentWeather: { temperature: number; humidity: number; windSpeed: number }
   riskSummary: { safe: number; medium: number; high: number; severe: number; overall: RiskLevel }
   alerts: any[]
   forecast24h: DashboardForecastPoint[]
+  tempHumidity24h: DashboardTempHumPoint[]
+  riskTrend7d: DashboardRiskTrendDay[]
+  meta?: { hours: number; search: string; resolvedNodes: { id: number; name: string }[] }
 }
 

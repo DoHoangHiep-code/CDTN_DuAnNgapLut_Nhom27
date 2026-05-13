@@ -1,149 +1,296 @@
+'use strict'
+
 const { QueryTypes } = require('sequelize')
 
 class DashboardRepository {
-  /**
-   * @param {{sequelize: import('sequelize').Sequelize}} deps
-   */
   constructor({ sequelize }) {
     this.sequelize = sequelize
   }
 
-  async _withStatementTimeout(ms, fn) {
-    return this.sequelize.transaction(async (t) => {
-      await this.sequelize.query(`SET LOCAL statement_timeout = ${Number(ms) | 0};`, { transaction: t })
-      return fn(t)
-    })
+  /**
+   * Autocomplete tìm kiếm địa điểm
+   */
+  async getLocationAutocomplete(search) {
+    if (!search || !search.trim()) return []
+    const rows = await this.sequelize.query(
+      `SELECT node_id, location_name, weather_station_id, district_name
+       FROM grid_nodes
+       WHERE location_name ILIKE :pattern OR district_name ILIKE :pattern
+       ORDER BY node_id LIMIT 10`,
+      { type: QueryTypes.SELECT, replacements: { pattern: `%${search.trim()}%` } },
+    )
+    return rows.map(r => ({
+      node_id: Number(r.node_id),
+      location_name: r.location_name,
+      district_name: r.district_name,
+      weather_station_id: Number(r.weather_station_id)
+    }))
   }
 
   /**
-   * Current weather for current local hour (Asia/Ho_Chi_Minh).
-   * Returns averaged values over all nodes for the hour window.
+   * Trả về danh sách nodes dựa trên search.
+   * Nếu search rỗng -> { isGlobal: true }
+   * Nếu có search -> tìm node khớp
    */
-  async getCurrentWeather() {
+  async resolveNodes(search) {
+    if (!search || !search.trim()) {
+      return { isGlobal: true, predictionNodeIds: null, weatherNodeIds: null }
+    }
+    const rows = await this.sequelize.query(
+      `SELECT node_id, weather_station_id FROM grid_nodes
+       WHERE location_name ILIKE :pattern
+       ORDER BY node_id LIMIT 20`,
+      { type: QueryTypes.SELECT, replacements: { pattern: `%${search.trim()}%` } },
+    )
+    if (rows.length === 0) {
+       return { isGlobal: true, predictionNodeIds: null, weatherNodeIds: null }
+    }
+    const predictionNodeIds = rows.map((r) => Number(r.node_id))
+    const weatherNodeIds = [...new Set(rows.map((r) => Number(r.weather_station_id)).filter(id => id))]
+    return { isGlobal: false, predictionNodeIds, weatherNodeIds }
+  }
+
+  async getCurrentWeather(weatherNodeIds, isGlobal) {
     const tz = 'Asia/Ho_Chi_Minh'
+    const nodesStr = isGlobal ? await this.getRepresentativeNodeIds() : weatherNodeIds.join(',')
+    let whereWm = `AND node_id IN (${nodesStr})`
+
+    // Lấy thời điểm mới nhất trong bảng weather_measurements
     const sql = `
-      WITH bounds AS (
-        SELECT
-          (date_trunc('hour', now() AT TIME ZONE :tz) AT TIME ZONE :tz) AS start_ts,
-          ((date_trunc('hour', now() AT TIME ZONE :tz) + interval '1 hour') AT TIME ZONE :tz) AS end_ts
+      WITH latest_time AS (
+        SELECT MAX(time) AS max_time 
+        FROM weather_measurements
+        WHERE 1=1 ${whereWm}
       )
       SELECT
-        COALESCE(AVG(temp), 0)::float AS temperature,
-        COALESCE(AVG(rhum), 0)::float AS humidity,
-        COALESCE(AVG(wspd), 0)::float AS wind_speed
-      FROM weather_measurements wm
-      CROSS JOIN bounds b
-      WHERE wm.time >= b.start_ts AND wm.time < b.end_ts;
+        AVG(temp)::float AS temp,
+        AVG(rhum)::float AS rhum,
+        AVG(prcp)::float AS prcp,
+        AVG(wspd)::float AS wspd,
+        MAX(time) AT TIME ZONE :tz AS last_update
+      FROM weather_measurements, latest_time
+      WHERE time = latest_time.max_time
+        ${whereWm};
     `
-
-    return this._withStatementTimeout(5000, (t) =>
-      this.sequelize.query(sql, {
-        type: QueryTypes.SELECT,
-        replacements: { tz },
-        transaction: t,
-      }).then((rows) => rows[0] || null),
-    )
+    const rows = await this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { tz } })
+    return rows[0] || null
   }
 
-  /**
-   * 24h hourly forecast: mưa (prcp) + độ ngập dự đoán (flood_depth_cm), bucket theo local hour.
-   *
-   * CRITICAL:
-   * - Dùng date_trunc() thay time_bucket() vì CockroachDB chạy PostgreSQL vanilla (không có TimescaleDB).
-   * - Trả đúng field: time, prcp, flood_depth_cm (để tooltip dashboard hiển thị).
-   */
-  async getRainForecast24h() {
+  async getRainForecast(weatherNodeIds, isGlobal, predictionNodeIds, hours) {
     const tz = 'Asia/Ho_Chi_Minh'
+    const h = Number(hours) || 24
+    const nodesStr = isGlobal ? await this.getRepresentativeNodeIds() : weatherNodeIds.join(',')
+    let whereWm = `AND node_id IN (${nodesStr})`
+    let whereFp = isGlobal ? '' : `AND node_id IN (${predictionNodeIds.join(',')})`
+
+    const sqlWm = `
+      SELECT
+        to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
+        AVG(prcp)::float AS prcp
+      FROM weather_measurements
+      WHERE time >= now() - interval '${h} hours'
+        ${whereWm}
+      GROUP BY 1 ORDER BY 1 LIMIT ${h};
+    `
+    let sqlFp
+    if (isGlobal) {
+      sqlFp = `
+        SELECT
+          to_char(bucket_time AT TIME ZONE :tz, 'HH24:MI') AS time,
+          avg_depth AS flood_depth_cm
+        FROM mv_global_flood_avg
+        WHERE bucket_time >= now() - interval '${h} hours'
+        ORDER BY bucket_time ASC LIMIT ${h};
+      `
+    } else {
+      sqlFp = `
+        SELECT
+          to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
+          AVG(flood_depth_cm)::float AS flood_depth_cm
+        FROM flood_predictions
+        WHERE time >= now() - interval '${h} hours'
+          ${whereFp}
+        GROUP BY 1 ORDER BY 1 LIMIT ${h};
+      `
+    }
+    const [wmRows, fpRows] = await Promise.all([
+      this.sequelize.query(sqlWm, { type: QueryTypes.SELECT, replacements: { tz } }),
+      this.sequelize.query(sqlFp, { type: QueryTypes.SELECT, replacements: { tz } }),
+    ])
+    const fpMap = new Map(fpRows.map((r) => [r.time, r.flood_depth_cm]))
+    return wmRows.map((r) => ({
+      time: r.time,
+      prcp: Number(r.prcp) || 0,
+      flood_depth_cm: Number(fpMap.get(r.time) ?? 0),
+    }))
+  }
+
+  async getCurrentFloodRiskCounts(hours, isGlobal, predictionNodeIds) {
+    const h = Number(hours) || 24
+
+    if (isGlobal) {
+      const sql = `
+        SELECT
+          CASE
+            WHEN flood_depth_cm <= 10 THEN 'safe'
+            WHEN flood_depth_cm <= 20 THEN 'medium'
+            WHEN flood_depth_cm <= 40 THEN 'high'
+            ELSE 'severe'
+          END AS risk_level,
+          COUNT(*)::int AS count
+        FROM mv_latest_flood_predictions
+        GROUP BY 1;
+      `
+      return this.sequelize.query(sql, { type: QueryTypes.SELECT })
+    }
+
+    // Filtered mode
+    let whereFp = `AND node_id IN (${predictionNodeIds.join(',')})`
     const sql = `
-      WITH wm_bucket AS (
-        SELECT
-          date_trunc('hour', (wm.time AT TIME ZONE :tz)) AS bucket_local,
-          wm.prcp
-        FROM weather_measurements wm
-        WHERE wm.time >= now() - interval '24 hours'
-      ),
-      fp_bucket AS (
-        SELECT
-          date_trunc('hour', (fp.time AT TIME ZONE :tz)) AS bucket_local,
-          fp.flood_depth_cm
-        FROM flood_predictions fp
-        WHERE fp.time >= now() - interval '24 hours'
+      WITH latest AS (
+        SELECT DISTINCT ON (node_id) node_id, flood_depth_cm
+        FROM flood_predictions
+        WHERE time >= now() - interval '${h} hours'
+        ${whereFp}
+        ORDER BY node_id, time DESC
       )
       SELECT
-        to_char(b.bucket_local, 'HH24:MI') AS time,
-        COALESCE(AVG(wm.prcp), 0)::float AS prcp,
-        COALESCE(AVG(fp.flood_depth_cm), 0)::float AS flood_depth_cm
-      FROM (
-        SELECT bucket_local FROM wm_bucket
-        UNION
-        SELECT bucket_local FROM fp_bucket
-      ) b
-      LEFT JOIN wm_bucket wm ON wm.bucket_local = b.bucket_local
-      LEFT JOIN fp_bucket fp ON fp.bucket_local = b.bucket_local
-      GROUP BY b.bucket_local
-      ORDER BY b.bucket_local ASC
-      LIMIT 24;
+        CASE
+          WHEN flood_depth_cm <= 10 THEN 'safe'
+          WHEN flood_depth_cm <= 20 THEN 'medium'
+          WHEN flood_depth_cm <= 40 THEN 'high'
+          ELSE 'severe'
+        END AS risk_level,
+        COUNT(*)::int AS count
+      FROM latest
+      GROUP BY 1;
     `
-
-    return this._withStatementTimeout(7000, (t) =>
-      this.sequelize.query(sql, {
-        type: QueryTypes.SELECT,
-        replacements: { tz },
-        transaction: t,
-      }),
-    )
+    return this.sequelize.query(sql, { type: QueryTypes.SELECT })
   }
 
-  /**
-   * Flood risk counts for CURRENT local hour only.
-   * Groups by risk_level.
-   */
-  async getCurrentFloodRiskCounts() {
+  async getRepresentativeNodeIds() {
+    if (!this.representativeNodes) {
+      const rows = await this.sequelize.query(`
+        SELECT DISTINCT ON (weather_station_id) node_id
+        FROM grid_nodes
+        WHERE weather_station_id IS NOT NULL;
+      `, { type: QueryTypes.SELECT })
+      this.representativeNodes = rows.map((r) => r.node_id).join(',')
+    }
+    return this.representativeNodes
+  }
+
+  async getTempHumidity(weatherNodeIds, isGlobal, hours) {
     const tz = 'Asia/Ho_Chi_Minh'
-    const sql = `
-      WITH bounds AS (
-        SELECT
-          (date_trunc('hour', now() AT TIME ZONE :tz) AT TIME ZONE :tz) AS start_ts,
-          ((date_trunc('hour', now() AT TIME ZONE :tz) + interval '1 hour') AT TIME ZONE :tz) AS end_ts
-      )
-      SELECT fp.risk_level, COUNT(*)::int AS count
-      FROM flood_predictions fp
-      CROSS JOIN bounds b
-      WHERE fp.time >= b.start_ts AND fp.time < b.end_ts
-      GROUP BY fp.risk_level;
-    `
+    const h = Number(hours) || 24
+    const nodesStr = isGlobal ? await this.getRepresentativeNodeIds() : weatherNodeIds.join(',')
+    let whereWm = `AND node_id IN (${nodesStr})`
 
-    return this._withStatementTimeout(7000, (t) =>
-      this.sequelize.query(sql, {
-        type: QueryTypes.SELECT,
-        replacements: { tz },
-        transaction: t,
-      }),
-    )
+    const sql = `
+      SELECT
+        to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
+        COALESCE(AVG(temp), 0)::float AS temp,
+        COALESCE(AVG(rhum), 0)::float AS rhum
+      FROM weather_measurements
+      WHERE time >= now() - interval '${h} hours'
+        ${whereWm}
+      GROUP BY 1 ORDER BY 1 LIMIT ${h};
+    `
+    return this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { tz } })
   }
 
-  /**
-   * Recent actual flood reports -> alerts.
-   */
+  async getRiskTrend(predictionNodeIds, isGlobal, hours) {
+    const tz = 'Asia/Ho_Chi_Minh'
+    const h = Number(hours) || 168 // default 7 ngày
+    const bucket = h <= 48 ? 'hour' : 'day'
+    const fmt    = h <= 48 ? 'MM-DD HH24:00' : 'MM-DD'
+
+    if (isGlobal) {
+      // Global: Query cực nhanh từ Materialized View đã pre-aggregate
+      // Nếu h <= 48 (hour): lấy mọi record
+      // Nếu h > 48 (day): để biểu đồ bớt rậm rạp, có thể chỉ lấy các mốc 12h trưa làm đại diện,
+      // hoặc lấy toàn bộ. Ở đây ta lấy toàn bộ (Chart.js tự scale), nhưng format ngày theo fmt.
+      // Tuy nhiên nếu format MM-DD thì group by sẽ gộp các giờ lại?
+      // Bản chất MV là đếm theo từng giờ. Nếu ta đổi label thành ngày, Chart sẽ hiện n điểm có cùng nhãn ngày.
+      // Tốt nhất: nếu h > 48, lấy mốc 12h trưa.
+      let hourFilter = ''
+      if (h > 48) {
+        hourFilter = `AND extract(hour from bucket_time AT TIME ZONE :tz) = 12`
+      }
+      
+      const sql = `
+        SELECT
+          to_char(bucket_time AT TIME ZONE :tz, :fmt) AS date,
+          risk_level,
+          count
+        FROM mv_global_risk_trend
+        WHERE bucket_time >= now() - interval '${h} hours'
+        ${hourFilter}
+        ORDER BY bucket_time ASC;
+      `
+      return this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { tz, fmt } })
+    }
+
+    // Filtered: Query on-the-fly (dữ liệu nhỏ nên vẫn nhanh)
+    let whereFp = `AND node_id IN (${predictionNodeIds.join(',')})`
+
+    // Tối ưu: Nếu bucket là hour, vì mỗi node chỉ có 1 record 1 giờ, ta có thể bỏ subquery
+    if (bucket === 'hour') {
+      const sql = `
+        SELECT
+          to_char(date_trunc('hour', (time AT TIME ZONE :tz)), :fmt) AS date,
+          CASE
+            WHEN flood_depth_cm <= 10 THEN 'safe'
+            WHEN flood_depth_cm <= 20 THEN 'medium'
+            WHEN flood_depth_cm <= 40 THEN 'high'
+            ELSE 'severe'
+          END AS risk_level,
+          COUNT(*)::int AS count
+        FROM flood_predictions
+        WHERE time >= now() - interval '${h} hours'
+          ${whereFp}
+        GROUP BY 1, 2
+        ORDER BY 1, 2;
+      `
+      return this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { tz, fmt } })
+    }
+
+    // Nếu bucket là day, bắt buộc phải dùng max_per_bucket để tìm max(depth) trong ngày của từng node
+    const sql = `
+      WITH max_per_bucket AS (
+        SELECT
+          to_char(date_trunc('${bucket}', (time AT TIME ZONE :tz)), :fmt) AS date,
+          node_id,
+          MAX(flood_depth_cm) as max_depth
+        FROM flood_predictions
+        WHERE time >= now() - interval '${h} hours'
+          ${whereFp}
+        GROUP BY 1, 2
+      )
+      SELECT
+        date,
+        CASE
+          WHEN max_depth <= 10 THEN 'safe'
+          WHEN max_depth <= 20 THEN 'medium'
+          WHEN max_depth <= 40 THEN 'high'
+          ELSE 'severe'
+        END AS risk_level,
+        COUNT(*)::int AS count
+      FROM max_per_bucket
+      GROUP BY 1, 2
+      ORDER BY 1, 2;
+    `
+    return this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { tz, fmt } })
+  }
+
   async getRecentAlerts(limit = 10) {
     const sql = `
-      SELECT
-        afr.report_id,
-        afr.created_at,
-        afr.latitude,
-        afr.longitude,
-        afr.reported_level
-      FROM actual_flood_reports afr
-      ORDER BY afr.created_at DESC
+      SELECT report_id, created_at, latitude, longitude, reported_level
+      FROM actual_flood_reports
+      ORDER BY created_at DESC
       LIMIT :limit;
     `
-    return this._withStatementTimeout(5000, (t) =>
-      this.sequelize.query(sql, {
-        type: QueryTypes.SELECT,
-        replacements: { limit: Number(limit) | 0 },
-        transaction: t,
-      }),
-    )
+    return this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { limit: Number(limit) | 0 } })
   }
 }
 

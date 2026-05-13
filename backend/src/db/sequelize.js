@@ -60,15 +60,26 @@ const sslDialectOptions = {
     require: true,
     rejectUnauthorized: false,
   },
+  useUTC: false,
+  options: '-c timezone=Asia/Ho_Chi_Minh'
 }
 
 const sequelize = normalizedDatabaseUrl
   ? new Sequelize(normalizedDatabaseUrl, {
       dialect: 'postgres',
       logging: false,
+      timezone: '+07:00',
       dialectOptions: sslDialectOptions,
     })
-  : new Sequelize(cfg.database, cfg.username, cfg.password, cfg)
+  : new Sequelize(cfg.database, cfg.username, cfg.password, {
+      ...cfg,
+      timezone: '+07:00',
+      dialectOptions: {
+        ...cfg.dialectOptions,
+        useUTC: false,
+        options: '-c timezone=Asia/Ho_Chi_Minh'
+      }
+    })
 
 if (rawDatabaseUrl && !normalizedDatabaseUrl) {
   // eslint-disable-next-line no-console

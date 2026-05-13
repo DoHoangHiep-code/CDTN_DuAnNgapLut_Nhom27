@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LogOut, ShieldCheck, UserCircle2 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
@@ -7,6 +8,51 @@ import { BRAND_ICON, NAV_ITEMS } from '../utils/nav'
 import { NewsTicker, type NewsTickerItem } from '../components/NewsTicker'
 import { useTranslation } from 'react-i18next'
 import { FloatingChatBotIcon } from '../components/FloatingChatBotIcon'
+import { getAlertsBanner } from '../services/api'
+import type { AlertsBannerItem } from '../utils/types'
+
+const RISK_EMOJI: Record<string, string> = {
+  severe: '🚨',
+  high:   '⚠️',
+  medium: '🟡',
+  safe:   '✅',
+}
+
+function buildTickerItems(bannerData: AlertsBannerItem[]): NewsTickerItem[] {
+  if (!bannerData.length) return []
+
+  const items: NewsTickerItem[] = []
+  bannerData.forEach((item) => {
+    const emoji = RISK_EMOJI[item.riskLevel] ?? '💧'
+    const sev: NewsTickerItem['severity'] =
+      item.riskLevel === 'severe' ? 'danger' :
+      item.riskLevel === 'high'   ? 'warning' : 'info'
+
+    if (item.floodDepthCm > 0 && item.predTime) {
+      const timeStr = new Date(item.predTime).toLocaleTimeString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit',
+      })
+      items.push({
+        id:       `fp_${item.district}`,
+        severity: sev,
+        text:     `${emoji} ${item.district}: Dự báo ngập ${item.floodDepthCm}cm lúc ${timeStr}`,
+      })
+    } else if (item.rain1h > 0) {
+      items.push({
+        id:       `wx_${item.district}`,
+        severity: item.rain1h > 5 ? 'warning' : 'info',
+        text:     `🌧 ${item.district}: Mưa ${item.rain1h}mm/h — ${item.temp}°C`,
+      })
+    } else {
+      items.push({
+        id:       `ok_${item.district}`,
+        severity: 'info',
+        text:     `${emoji} ${item.district}: An toàn — ${item.temp}°C, độ ẩm ${item.humidity}%`,
+      })
+    }
+  })
+  return items
+}
 
 export function MainLayout() {
   const { user, logout } = useAuth()
@@ -15,11 +61,27 @@ export function MainLayout() {
   const BrandIcon = BRAND_ICON
   const { t, i18n } = useTranslation()
 
-  const newsItems: NewsTickerItem[] = [
-    { id: 'n1', severity: 'danger', text: t('newsTicker.danger1') },
-    { id: 'n2', severity: 'warning', text: t('newsTicker.warning1') },
-    { id: 'n3', severity: 'info', text: t('newsTicker.info1') },
-  ]
+  // Live banner data — fetch một lần khi layout mount, refresh mỗi 5 phút
+  const [bannerData, setBannerData] = useState<AlertsBannerItem[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const data = await getAlertsBanner()
+        if (!cancelled) setBannerData(data)
+      } catch {
+        // Không crash layout nếu API lỗi
+      }
+    }
+    load()
+    const id = window.setInterval(load, 5 * 60 * 1000)
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [])
+
+  const newsItems: NewsTickerItem[] = bannerData.length
+    ? buildTickerItems(bannerData)
+    : [{ id: 'loading', severity: 'info', text: '💧 Đang tải dữ liệu cảnh báo…' }]
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 dark:bg-slate-950">

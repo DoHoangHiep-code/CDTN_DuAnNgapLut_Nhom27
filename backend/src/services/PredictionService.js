@@ -170,6 +170,17 @@ class PredictionService {
     }
 
     console.log(`[PredictionService] Batch: ${saved.length}/${nodeIds.length} nodes predicted.`)
+
+    // Refresh Materialized View sau batch để BBox query và Dashboard dùng dữ liệu mới nhất
+    try {
+      await this.sequelize.query('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_latest_flood_predictions;')
+      await this.sequelize.query('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_global_risk_trend;')
+      await this.sequelize.query('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_global_flood_avg;')
+      console.log('[PredictionService] ✅ Đã refresh MVs: mv_latest, mv_global_trend, mv_global_avg.')
+    } catch (err) {
+      console.warn('[PredictionService] ⚠️ Refresh MV bị lỗi/bỏ qua:', err.message)
+    }
+
     return saved
   }
 
@@ -214,6 +225,17 @@ class PredictionService {
     }
 
     console.log(`[PredictionService] WithNodes: ${out.length}/${nodeRows.length} nodes predicted.`)
+
+    // Refresh Materialized View để BBox query và Dashboard dùng dữ liệu mới nhất
+    try {
+      await this.sequelize.query('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_latest_flood_predictions;')
+      await this.sequelize.query('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_global_risk_trend;')
+      await this.sequelize.query('REFRESH MATERIALIZED VIEW CONCURRENTLY mv_global_flood_avg;')
+      console.log('[PredictionService] ✅ Đã refresh MVs: mv_latest, mv_global_trend, mv_global_avg.')
+    } catch (err) {
+      console.warn('[PredictionService] ⚠️ Refresh MV bị lỗi/bỏ qua:', err.message)
+    }
+
     return out
   }
 }

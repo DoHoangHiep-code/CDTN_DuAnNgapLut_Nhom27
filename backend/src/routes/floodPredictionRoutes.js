@@ -19,6 +19,66 @@ const controller = new FloodPredictionController({ predictionService, sequelize 
 router.get('/flood-prediction', controller.getFloodPrediction)
 router.post('/flood-prediction/run', controller.triggerBatch)
 
+// Route mới: Chi tiết 1 Node (Gộp ngập + thời tiết thực)
+// GET /api/v1/flood-prediction/nodes/:id/current
+router.get('/nodes/:id/current', async (req, res, next) => {
+  try {
+    const nodeIdStr = req.params.id
+    const nodeId = nodeIdStr.replace('node_', '')
+
+    // 1. Lấy độ ngập mới nhất của node
+    const [predRows] = await sequelize.query(`
+      SELECT flood_depth_cm, risk_level, explanation, time
+      FROM flood_predictions
+      WHERE node_id = :nodeId
+      ORDER BY time DESC
+      LIMIT 1
+    `, { replacements: { nodeId } })
+
+    // 2. Lấy station_id của node
+    const [nodeRows] = await sequelize.query(`
+      SELECT weather_station_id, location_name
+      FROM grid_nodes
+      WHERE node_id = :nodeId
+    `, { replacements: { nodeId } })
+
+    if (!nodeRows || nodeRows.length === 0) {
+      return res.status(404).json({ success: false, error: { message: 'Node not found' } })
+    }
+
+    const stationId = nodeRows[0].weather_station_id
+    const locationName = nodeRows[0].location_name
+    let weatherData = null
+
+    // 3. Lấy thời tiết thật từ trạm (weather_station_id -> node_id trong weather_measurements)
+    if (stationId) {
+      const [wxRows] = await sequelize.query(`
+        SELECT temp, clouds, prcp, rhum, time
+        FROM weather_measurements
+        WHERE node_id = :stationId
+        ORDER BY time DESC
+        LIMIT 1
+      `, { replacements: { stationId } })
+      
+      if (wxRows && wxRows.length > 0) {
+        weatherData = wxRows[0]
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        node_id: nodeIdStr,
+        location_name: locationName,
+        flood: predRows && predRows.length > 0 ? predRows[0] : null,
+        weather: weatherData
+      }
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 // Route mới: dự đoán theo tọa độ cụ thể (dùng cho FloodWarningCard)
 // GET /api/v1/flood-prediction/by-location?lat=21.02&lon=105.83
 router.get('/flood-prediction/by-location', async (req, res, next) => {
