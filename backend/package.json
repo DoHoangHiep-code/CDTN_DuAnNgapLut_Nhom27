@@ -7,6 +7,10 @@
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
     "db:migrate:undo:all": "sequelize-cli db:migrate:undo:all",
+    "db:check": "node check-cockroachdb-connection.js",
+    "db:migrate:cockroachdb": "node migrate-cockroachdb.js",
+    "db:fix-enums": "node fix-enum-types.js",
+    "cache:populate": "node populate-cache.js",
     "seed": "node src/cli/seed.js",
     "start": "node --max-old-space-size=6144 src/server.js",
     "predict": "node src/cli/runPrediction.js"

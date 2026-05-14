@@ -22,6 +22,22 @@ try {
 // ── Markdown Formatter (2-Tier Templates) ─────────────────────────────────────
 const { formatCurrentStatus, formatExplainRisk } = require('../utils/chatbotFormatter')
 
+// ── NLP Service (v2 – LLM + Regex fallback) ───────────────────────────────────
+let nlpService = null
+try {
+    nlpService = require('../services/nlpService')
+} catch (err) {
+    console.warn('[UnifiedChatbot] nlpService không load được:', err.message, '– dùng detectIntent cũ.')
+}
+
+// ── Routing Service (Safe Route) ──────────────────────────────────────────────
+let routingService = null
+try {
+    routingService = require('../services/routingService')
+} catch (err) {
+    console.warn('[UnifiedChatbot] routingService không load được:', err.message, '– find_safe_route bị tắt.')
+}
+
 // ── Fail-safe require ─────────────────────────────────────────────────────────
 // Nếu redis hoặc floodFeature.service lỗi khi load (env thiếu, pool fail...),
 // module này VẪN export được router → server KHÔNG crash.
@@ -123,6 +139,27 @@ function extractArea(msg) {
     return AREA_KEYWORDS.find(kw => m.includes(kw)) ?? null
 }
 
+// ─── Metric Dictionary ────────────────────────────────────────────────────────
+const METRIC_DICTIONARY = {
+    'lượng mưa': ['rain_current', 'rain_3h', 'rain_6h', 'rain_24h'],
+    'tỷ lệ bê tông hóa': ['concrete_ratio'],
+    'áp suất': ['pressure'],
+    'độ dốc': ['slope'],
+    'cao độ': ['elevation'],
+    'mực nước': ['water_level']
+}
+
+function identifyMetrics(userQuery) {
+    const matchedMetrics = []
+    const lowerQuery = userQuery.toLowerCase()
+    for (const [key, value] of Object.entries(METRIC_DICTIONARY)) {
+        if (lowerQuery.includes(key)) {
+            matchedMetrics.push(...value)
+        }
+    }
+    return matchedMetrics
+}
+
 // ─── Intent Detection ─────────────────────────────────────────────────────────
 function detectIntent(msg) {
     const m = msg.toLowerCase()
@@ -137,6 +174,13 @@ function detectIntent(msg) {
         return { intent: 'SAFE_ADVICE', area: extractArea(m), timeOffset: 0 }
     if (/(hiện tại|bây giờ|đang ngập|lúc này|ngay bây giờ|hiện giờ)/.test(m))
         return { intent: 'CURRENT_STATUS', area: extractArea(m), timeOffset: 0 }
+
+    if (/(lượng mưa|bê tông hóa|áp suất|độ dốc|cao độ|mực nước)/.test(m)) {
+        let offset = 0
+        if (/(ngày mai|tomorrow)/.test(m)) offset = 24
+        else if (/(thứ 2|thứ 3|thứ 4|thứ 5|thứ 6|thứ 7|chủ nhật)/.test(m)) offset = 24
+        return { intent: 'WEATHER_GEO_INFO', area: extractArea(m), timeOffset: offset }
+    }
 
     if (/(\d{1,2}h|\d{1,2}:\d{2}|sáng|chiều|tối|trưa|ngày mai|hôm nay|ngày kia)/.test(m) &&
         /(ngập|mưa|lũ|dự báo|nguy cơ)/.test(m)) {
@@ -368,6 +412,48 @@ async function queryAreaExplainRisk(areaName) {
     })
 }
 
+async function queryWeatherGeoInfo(areaName, targetTime) {
+    const cacheKey = `ucbot:weather_geo:${areaName}:${targetTime ? targetTime.toISOString().split('T')[0] : 'now'}`
+    return cached(cacheKey, 120, async () => {
+        let sql = `
+            SELECT DISTINCT ON (gn.node_id)
+                gn.location_name,
+                gn.elevation AS elevation,
+                gn.slope AS slope,
+                gn.impervious_ratio AS concrete_ratio,
+                wm.prcp AS rain_current,
+                wm.prcp_3h AS rain_3h,
+                wm.prcp_6h AS rain_6h,
+                wm.prcp_24h AS rain_24h,
+                wm.pres AS pressure,
+                fp.flood_depth_cm AS water_level,
+                fp.time
+            FROM flood_predictions fp
+            JOIN grid_nodes gn ON gn.node_id = fp.node_id
+            LEFT JOIN (
+                SELECT DISTINCT ON (node_id) *
+                FROM weather_measurements
+                WHERE time >= NOW() - INTERVAL '24 hours'
+                ORDER BY node_id, time DESC
+            ) wm ON wm.node_id = fp.node_id
+            WHERE gn.location_name ILIKE $1
+        `
+        const params = [`%${areaName}%`]
+
+        if (targetTime) {
+            sql += ` AND fp.time::date = $2::date`
+            params.push(targetTime)
+        } else {
+            sql += ` AND fp.time >= NOW() - INTERVAL '2 hours'`
+        }
+
+        sql += ` ORDER BY gn.node_id, fp.time DESC LIMIT 1`
+
+        const { rows } = await withTimeout(pool.query(sql, params), DB_TIMEOUT_MS)
+        return rows
+    })
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TẦNG 1 – Reply generators
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -558,6 +644,34 @@ function replyUnknownWithAreaPrompt() {
     }
 }
 
+function replyWeatherGeoInfo(rows, requestedMetrics, areaName) {
+    if (!rows || rows.length === 0) {
+        return {
+            text: `📍 Hiện không có dữ liệu địa lý/thời tiết cho khu vực **${areaName}**.`,
+            suggestAreas: true, expertNodes: []
+        }
+    }
+
+    const row = rows[0]
+    let text = `📍 **Thông tin chi tiết khu vực ${areaName.charAt(0).toUpperCase() + areaName.slice(1)}**\nDựa trên dữ liệu hệ thống ghi nhận/dự báo:\n`
+
+    if (requestedMetrics.length === 0) {
+        requestedMetrics = ['rain_24h', 'concrete_ratio', 'elevation', 'pressure', 'water_level']
+    }
+
+    if (requestedMetrics.includes('rain_current')) text += `- Lượng mưa hiện tại: **${row.rain_current ?? 0}** mm\n`
+    if (requestedMetrics.includes('rain_3h')) text += `- Lượng mưa 3h: **${row.rain_3h ?? 0}** mm\n`
+    if (requestedMetrics.includes('rain_6h')) text += `- Lượng mưa 6h: **${row.rain_6h ?? 0}** mm\n`
+    if (requestedMetrics.includes('rain_24h')) text += `- Lượng mưa 24h: **${row.rain_24h ?? 0}** mm\n`
+    if (requestedMetrics.includes('concrete_ratio')) text += `- Tỷ lệ bê tông hóa: **${((row.concrete_ratio ?? 0) * 100).toFixed(1)}**%\n`
+    if (requestedMetrics.includes('elevation')) text += `- Cao độ: **${(row.elevation ?? 0).toFixed(2)}** m\n`
+    if (requestedMetrics.includes('slope')) text += `- Độ dốc: **${(row.slope ?? 0).toFixed(2)}**°\n`
+    if (requestedMetrics.includes('pressure')) text += `- Áp suất: **${row.pressure ?? 1010}** hPa\n`
+    if (requestedMetrics.includes('water_level')) text += `- Mực nước ngập: **${(row.water_level ?? 0).toFixed(1)}** cm\n`
+
+    return { text, suggestAreas: false, expertNodes: [] }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TẦNG 2 – Expert Analysis (AI CatBoost + Rule-based)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -696,37 +810,89 @@ router.post('/chatbot/ask', async (req, res) => {
             })
         }
 
-        const { intent, area, timeOffset } = detectIntent(message)
+        // ── NLP Parsing (v2) ─────────────────────────────────────────────────
+        // Primary: nlpService (Gemini LLM 4s → regex fallback)
+        // Emergency fallback: legacy detectIntent() if nlpService is unavailable
+        let intent, entities, legacyIntent, nlpSource, area, timeOffset
+
+        if (nlpService) {
+            const parsed = await nlpService.parseUserQuery(message)
+            intent = parsed.intent
+            entities = parsed.entities
+            legacyIntent = parsed.legacyIntent
+            nlpSource = parsed.source
+            area = entities.location?.[0] || null
+            timeOffset = entities.time?.offset_hours || 0
+        } else {
+            // Fallback to legacy regex if nlpService failed to load
+            const legacy = detectIntent(message)
+            legacyIntent = legacy.intent
+            area = legacy.area
+            timeOffset = legacy.timeOffset
+            entities = { location: area ? [area] : [], time: null, vehicle: null, weather_condition: null }
+            nlpSource = 'legacy'
+            // Map legacy → new intent
+            const legacyMap = {
+                WEATHER_GEO_INFO: 'ask_weather',
+                CURRENT_STATUS: 'check_flood_status', SPECIFIC_AREA: 'check_flood_status',
+                FORECAST_4DAYS: 'predict_flood_condition', SPECIFIC_TIME: 'predict_flood_condition',
+                GREETING: 'edge_cases', UNKNOWN: 'edge_cases',
+                WORST_AREA: 'edge_cases', EXPLAIN_RISK: 'edge_cases', SAFE_ADVICE: 'edge_cases',
+            }
+            intent = legacyMap[legacy.intent] || 'edge_cases'
+        }
+
         let data = null
         let replyObj = null
 
-        // ── Kiểm tra In-Memory Cache trước khi query DB ────────────────────────
-        // floodCache được CronJob cập nhật mỗi 10 phút, isStale() = true nếu > 20 phút
+        // ── In-Memory Cache check ────────────────────────────────────────────
         const cacheAvailable = floodCache && !floodCache.isStale()
 
         try {
             switch (intent) {
-                case 'GREETING':
-                    replyObj = replyGreeting()
-                    break
 
-                case 'FORECAST_4DAYS':
-                    // Ưu tiên đọc từ in-memory cache nếu còn tươi
-                    if (cacheAvailable && floodCache.forecastSummary.length > 0) {
-                        data = { data: floodCache.forecastSummary, fromCache: true }
+                // ═══════════════════════════════════════════════════════════════
+                // INTENT 1: ask_weather – Weather/geo metric queries
+                // ═══════════════════════════════════════════════════════════════
+                case 'ask_weather': {
+                    if (!area) {
+                        replyObj = {
+                            text: '📍 Bạn vui lòng cung cấp tên khu vực cụ thể để tôi tra cứu thông tin địa lý & thời tiết (ví dụ: "Lượng mưa ở Triều Khúc").',
+                            suggestAreas: true, expertNodes: []
+                        }
                     } else {
-                        data = await queryForecastSummary()
+                        const requestedMetrics = identifyMetrics(message)
+                        let targetDate = null
+                        if (timeOffset > 0) {
+                            targetDate = new Date(Date.now() + timeOffset * 3600000)
+                        }
+                        data = await queryWeatherGeoInfo(area, targetDate)
+                        replyObj = replyWeatherGeoInfo(data.data, requestedMetrics, area)
                     }
-                    replyObj = replyForecast(data.data)
                     break
+                }
 
-                case 'CURRENT_STATUS':
+                // ═══════════════════════════════════════════════════════════════
+                // INTENT 2: check_flood_status – Real-time flood status
+                // ═══════════════════════════════════════════════════════════════
+                case 'check_flood_status': {
                     if (area) {
-                        // User hỏi khu vực cụ thể → query area-specific
                         data = await queryCurrentStatusByArea(area)
                         replyObj = replyCurrentStatus(data.data, area)
+
+                        // ── Vehicle-aware depth warning ──
+                        if (entities.vehicle && data.data?.length > 0) {
+                            const maxFlood = Math.max(...data.data.map(r => Number(r.flood_depth_cm || 0)))
+                            const threshold = entities.vehicle.max_safe_depth_cm
+                            if (maxFlood > threshold) {
+                                replyObj.text += `\n\n🚗 **Cảnh báo phương tiện:** Với **${entities.vehicle.type}** (ngưỡng an toàn: ${threshold}cm), `
+                                    + `mực nước ngập cao nhất **${maxFlood.toFixed(1)}cm** ⛔ **KHÔNG AN TOÀN** để di chuyển qua khu vực này.`
+                            } else if (maxFlood > 0) {
+                                replyObj.text += `\n\n🚗 **Phương tiện:** Với **${entities.vehicle.type}** (ngưỡng: ${threshold}cm), `
+                                    + `mực nước hiện tại **${maxFlood.toFixed(1)}cm** ✅ vẫn trong ngưỡng an toàn. Tuy nhiên hãy di chuyển cẩn thận.`
+                            }
+                        }
                     } else {
-                        // Tổng quan toàn thành phố
                         if (cacheAvailable && floodCache.currentStatus.length > 0) {
                             data = { data: floodCache.currentStatus, fromCache: true }
                         } else {
@@ -735,93 +901,166 @@ router.post('/chatbot/ask', async (req, res) => {
                         replyObj = replyCurrentStatus(data.data, null)
                     }
                     break
+                }
 
-                case 'WORST_AREA':
-                    if (cacheAvailable && floodCache.worstAreas.length > 0) {
-                        data = { data: floodCache.worstAreas, fromCache: true }
+                // ═══════════════════════════════════════════════════════════════
+                // INTENT 3: find_safe_route – Route A→B avoiding floods
+                // ═══════════════════════════════════════════════════════════════
+                case 'find_safe_route': {
+                    const locations = entities.location || []
+                    if (locations.length < 2) {
+                        replyObj = {
+                            text: `🗺️ Để tìm đường tránh ngập, vui lòng cung cấp **điểm đi** và **điểm đến**.\n\n`
+                                + `Ví dụ: _"Tìm đường từ **Hà Đông** đến **Hoàn Kiếm** tránh ngập"_\n\n`
+                                + (locations.length === 1 ? `📍 Tôi nhận được: **${locations[0]}**. Bạn muốn đi đến đâu?` : ''),
+                            suggestAreas: true, expertNodes: []
+                        }
+                    } else if (!routingService) {
+                        replyObj = {
+                            text: `⚠️ Tính năng tìm đường tránh ngập đang được phát triển. Vui lòng thử lại sau.\n\n`
+                                + `Trong khi chờ, bạn có thể hỏi: _"Tình trạng ngập ở ${locations[0]}"_ hoặc _"${locations[1]} có ngập không?"_`,
+                            suggestAreas: false, expertNodes: []
+                        }
                     } else {
-                        data = await queryWorstArea()
+                        const vehicleType = entities.vehicle?.type || 'xe máy'
+                        const routeResult = await routingService.getSafeRoute(locations[0], locations[1], vehicleType)
+                        replyObj = {
+                            text: routeResult.message,
+                            suggestAreas: !routeResult.success,
+                            expertNodes: []
+                        }
+                        data = { data: routeResult, fromCache: false }
                     }
-                    replyObj = replyWorstArea(data.data)
                     break
+                }
 
-                case 'EXPLAIN_RISK':
-                    // Nếu user chỉ định khu vực → query chi tiết area-specific (có weather features)
-                    // Nếu không → query top high/severe chung
-                    if (area) {
+                // ═══════════════════════════════════════════════════════════════
+                // INTENT 4: predict_flood_condition – Future/hypothetical
+                // ═══════════════════════════════════════════════════════════════
+                case 'predict_flood_condition': {
+                    if (area && timeOffset > 0) {
+                        // Specific area + specific time → queryByTime + area filter
+                        data = await queryAreaOverview(area)
+                        replyObj = replySpecificArea(area, data.data)
+                    } else if (timeOffset > 0) {
+                        // Time-only query
+                        data = await queryByTime(timeOffset)
+                        replyObj = replySpecificTime(data.data, timeOffset)
+                    } else if (area) {
+                        // Area + future context (e.g. "nếu mưa 50mm thì Triều Khúc...")
                         data = await queryAreaExplainRisk(area)
+                        replyObj = replyExplainRisk(data.data, area)
                     } else {
-                        // Ưu tiên cache trước
-                        if (cacheAvailable && floodCache.worstAreas.length > 0) {
-                            data = { data: floodCache.worstAreas, fromCache: true }
+                        // General forecast
+                        if (cacheAvailable && floodCache.forecastSummary.length > 0) {
+                            data = { data: floodCache.forecastSummary, fromCache: true }
                         } else {
-                            data = await queryExplainRisk()
+                            data = await queryForecastSummary()
+                        }
+                        replyObj = replyForecast(data.data)
+                    }
+                    break
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // INTENT 5: edge_cases – Greetings, panic, slang, misc
+                // ═══════════════════════════════════════════════════════════════
+                case 'edge_cases':
+                default: {
+                    // Route edge_cases to appropriate sub-handlers via legacyIntent
+                    switch (legacyIntent) {
+                        case 'GREETING':
+                            replyObj = replyGreeting()
+                            break
+
+                        case 'WORST_AREA':
+                            if (cacheAvailable && floodCache.worstAreas.length > 0) {
+                                data = { data: floodCache.worstAreas, fromCache: true }
+                            } else {
+                                data = await queryWorstArea()
+                            }
+                            replyObj = replyWorstArea(data.data)
+                            break
+
+                        case 'EXPLAIN_RISK':
+                            if (area) {
+                                data = await queryAreaExplainRisk(area)
+                            } else {
+                                if (cacheAvailable && floodCache.worstAreas.length > 0) {
+                                    data = { data: floodCache.worstAreas, fromCache: true }
+                                } else {
+                                    data = await queryExplainRisk()
+                                }
+                            }
+                            replyObj = replyExplainRisk(data.data, area)
+                            break
+
+                        case 'SAFE_ADVICE':
+                            if (cacheAvailable && floodCache.forecastSummary.length > 0) {
+                                data = { data: floodCache.forecastSummary, fromCache: true }
+                            } else {
+                                data = await queryForecastSummary()
+                            }
+                            replyObj = replySafeAdvice(data.data)
+                            break
+
+                        default: {
+                            // Detect panic/emergency in raw text
+                            const lower = message.toLowerCase()
+                            const isPanic = /(cứu|chết máy|ngập quá|mắc kẹt|sos|help|giúp tôi|xe ngập)/.test(lower)
+
+                            if (isPanic) {
+                                replyObj = {
+                                    text: `🆘 **Phát hiện tình huống khẩn cấp!**\n\n`
+                                        + `📞 **Gọi ngay:** 114 (Cứu hỏa/Cứu nạn) hoặc 113 (Công an)\n\n`
+                                        + `⚠️ **Hướng dẫn xử lý nhanh:**\n`
+                                        + `  • Nếu xe chết máy: **KHÔNG cố khởi động lại** – nước có thể vào động cơ\n`
+                                        + `  • Di chuyển đến nơi cao, an toàn gần nhất\n`
+                                        + `  • Tránh xa cột điện, hố ga, miệng cống\n`
+                                        + `  • Bật đèn cảnh báo nếu có thể\n\n`
+                                        + `📍 Cho tôi biết **bạn đang ở đâu** để kiểm tra tình trạng ngập khu vực.`,
+                                    suggestAreas: true, expertNodes: []
+                                }
+                            } else {
+                                replyObj = replyUnknownWithAreaPrompt()
+                            }
+                            break
                         }
                     }
-                    replyObj = replyExplainRisk(data.data, area)
                     break
-
-                case 'SAFE_ADVICE':
-                    if (cacheAvailable && floodCache.forecastSummary.length > 0) {
-                        data = { data: floodCache.forecastSummary, fromCache: true }
-                    } else {
-                        data = await queryForecastSummary()
-                    }
-                    replyObj = replySafeAdvice(data.data)
-                    break
-
-                case 'SPECIFIC_TIME':
-                    data = await queryByTime(timeOffset)
-                    replyObj = replySpecificTime(data.data, timeOffset)
-                    break
-
-                case 'SPECIFIC_AREA':
-                    data = await queryAreaOverview(area)
-                    replyObj = replySpecificArea(area, data.data)
-                    break
-
-                case 'UNKNOWN':
-                default:
-                    replyObj = replyUnknownWithAreaPrompt()
-                    break
+                }
             }
         } catch (queryErr) {
             // ── Timeout hoặc DB lỗi → Fallback graceful (200 OK) ──────────────
-            // Log đầy đủ để developer debug, nhưng KHÔNG trả 500 về UI
-            console.error('[CHATBOT ERROR] Intent:', intent, '| Query lỗi:', queryErr.message)
+            console.error('[CHATBOT ERROR] Intent:', intent, '(legacy:', legacyIntent, ') | Query lỗi:', queryErr.message)
             console.error('[CHATBOT ERROR] Stack:', queryErr.stack)
 
             const isTimeout = queryErr.code === 'TIMEOUT' || queryErr.code === 'QUERY_TIMEOUT'
 
-            // Thử lấy dữ liệu từ in-memory cache kể cả khi đã stale (emergency fallback)
+            // Thử lấy dữ liệu từ in-memory cache (emergency fallback, kể cả stale)
             if (floodCache) {
-                if ((intent === 'WORST_AREA' || intent === 'SAFE_ADVICE') && floodCache.worstAreas.length > 0) {
-                    replyObj = intent === 'WORST_AREA'
-                        ? replyWorstArea(floodCache.worstAreas)
-                        : replySafeAdvice(floodCache.forecastSummary.length > 0 ? floodCache.forecastSummary : floodCache.worstAreas)
-                    data = { fromCache: true }
-                    console.warn('[CHATBOT FALLBACK] Dùng stale cache cho intent:', intent)
-                } else if (intent === 'CURRENT_STATUS' && floodCache.currentStatus.length > 0) {
+                if (intent === 'check_flood_status' && floodCache.currentStatus.length > 0) {
                     replyObj = replyCurrentStatus(floodCache.currentStatus, area)
                     data = { fromCache: true }
-                    console.warn('[CHATBOT FALLBACK] Dùng stale cache cho CURRENT_STATUS')
-                } else if (intent === 'EXPLAIN_RISK' && floodCache.worstAreas.length > 0) {
-                    replyObj = replyExplainRisk(floodCache.worstAreas, area)
-                    data = { fromCache: true }
-                    console.warn('[CHATBOT FALLBACK] Dùng stale cache cho EXPLAIN_RISK')
-                } else if ((intent === 'FORECAST_4DAYS') && floodCache.forecastSummary.length > 0) {
+                    console.warn('[CHATBOT FALLBACK] Stale cache for check_flood_status')
+                } else if (intent === 'predict_flood_condition' && floodCache.forecastSummary.length > 0) {
                     replyObj = replyForecast(floodCache.forecastSummary)
                     data = { fromCache: true }
-                    console.warn('[CHATBOT FALLBACK] Dùng stale cache cho FORECAST_4DAYS')
+                    console.warn('[CHATBOT FALLBACK] Stale cache for predict_flood_condition')
+                } else if (legacyIntent === 'WORST_AREA' && floodCache.worstAreas.length > 0) {
+                    replyObj = replyWorstArea(floodCache.worstAreas)
+                    data = { fromCache: true }
+                    console.warn('[CHATBOT FALLBACK] Stale cache for WORST_AREA')
+                } else if (legacyIntent === 'EXPLAIN_RISK' && floodCache.worstAreas.length > 0) {
+                    replyObj = replyExplainRisk(floodCache.worstAreas, area)
+                    data = { fromCache: true }
+                    console.warn('[CHATBOT FALLBACK] Stale cache for EXPLAIN_RISK')
                 }
             }
 
-            // Nếu vẫn không có data → trả fallback message thân thiện
             if (!replyObj) {
                 const fallbackMsg = isTimeout
-                    ? `⏳ Hệ thống đang tải dữ liệu từ ${floodCache?.worstAreas?.length > 0 ? 'cache dự phòng' : 'trạm đo'}. ` +
-                    `Dữ liệu gần nhất cho thấy có các khu vực cần lưu ý. ` +
-                    `Bạn muốn hỏi về khu vực cụ thể nào? _(Ví dụ: "Triều Khúc", "Hà Đông")_`
+                    ? `⏳ Hệ thống đang tải dữ liệu. Bạn muốn hỏi về khu vực cụ thể nào? _(Ví dụ: "Triều Khúc", "Hà Đông")_`
                     : `⚠️ Hệ thống đang cập nhật dữ liệu. Vui lòng thử lại sau 30 giây hoặc hỏi về khu vực cụ thể.`
                 replyObj = { text: fallbackMsg, suggestAreas: true, expertNodes: [] }
             }
@@ -831,18 +1070,24 @@ router.post('/chatbot/ask', async (req, res) => {
             success: true,
             reply: replyObj.text,
             intent,
+            legacyIntent,
             area,
+            entities: {
+                location: entities.location || [],
+                time: entities.time || null,
+                vehicle: entities.vehicle || null,
+                weather_condition: entities.weather_condition || null,
+            },
             suggestAreas: replyObj.suggestAreas ?? false,
             expertNodes: replyObj.expertNodes ?? [],
             fromCache: data?.fromCache || false,
+            nlpSource: nlpSource || 'unknown',
             elapsed_ms: Date.now() - startedAt
         })
 
     } catch (err) {
-        // Lỗi ngoài dự kiến (parse, logic...) – vẫn log đầy đủ
         console.error('[CHATBOT ERROR] Lỗi ngoài dự kiến:', err.message)
         console.error('[CHATBOT ERROR] Stack:', err.stack)
-        // Trả 200 với fallback thay vì 500 để UI không hiện lỗi đỏ
         return res.status(200).json({
             success: false,
             reply: '⚠️ Đã xảy ra sự cố không mong muốn. Vui lòng thử lại hoặc hỏi câu khác.',
