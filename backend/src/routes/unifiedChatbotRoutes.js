@@ -203,10 +203,10 @@ async function queryCurrentStatus() {
           node_id, risk_level, flood_depth_cm, explanation, time
         FROM flood_predictions
         WHERE time >= NOW() - INTERVAL '2 hours'
+          AND risk_level IN ('high', 'severe')
         ORDER BY node_id, time DESC
       ) sub
       JOIN grid_nodes gn ON gn.node_id = sub.node_id
-      WHERE sub.risk_level IN ('high', 'severe')
       ORDER BY sub.flood_depth_cm DESC
       LIMIT 10
     `
@@ -224,12 +224,17 @@ async function queryCurrentStatusByArea(areaName) {
     const cacheKey = `ucbot:current_status_area:${areaName.toLowerCase().replace(/\s+/g, '_')}`
     return cached(cacheKey, 120, async () => {
         const sql = `
-      SELECT DISTINCT ON (node_id) *
-      FROM flood_predictions fp
-      JOIN grid_nodes gn USING (node_id)
+      SELECT DISTINCT ON (fp.node_id) 
+        fp.node_id, fp.risk_level, fp.flood_depth_cm, fp.explanation, fp.time,
+        gn.latitude, gn.longitude, gn.location_name
+      FROM (
+        SELECT node_id, latitude, longitude, location_name 
+        FROM grid_nodes 
+        WHERE location_name ILIKE $1
+      ) gn
+      JOIN flood_predictions fp ON fp.node_id = gn.node_id
       WHERE fp.time >= NOW() - INTERVAL '2 hours'
-        AND gn.location_name ILIKE $1
-      ORDER BY node_id, fp.time DESC
+      ORDER BY fp.node_id, fp.time DESC
       LIMIT 10
     `
         const { rows } = await withTimeout(pool.query(sql, ['%' + areaName + '%']), DB_TIMEOUT_MS)
@@ -289,10 +294,13 @@ async function queryAreaOverview(areaName) {
       SELECT fp.node_id, fp.risk_level, fp.flood_depth_cm, fp.explanation, fp.time,
              gn.location_name, gn.latitude, gn.longitude,
              gn.elevation, gn.slope, gn.impervious_ratio
-      FROM flood_predictions fp
-      JOIN grid_nodes gn ON gn.node_id = fp.node_id
-      WHERE gn.location_name ILIKE $1
-        AND fp.time BETWEEN NOW() AND NOW() + INTERVAL '48 hours'
+      FROM (
+        SELECT node_id, location_name, latitude, longitude, elevation, slope, impervious_ratio
+        FROM grid_nodes 
+        WHERE location_name ILIKE $1
+      ) gn
+      JOIN flood_predictions fp ON gn.node_id = fp.node_id
+      WHERE fp.time BETWEEN NOW() AND NOW() + INTERVAL '48 hours'
       ORDER BY fp.flood_depth_cm DESC
       LIMIT 5
     `
@@ -334,37 +342,42 @@ async function queryExplainRisk() {
 async function queryAreaExplainRisk(areaName) {
     const cacheKey = `ucbot:area_explain:${areaName}`
     return cached(cacheKey, CACHE_TTL, async () => {
-        const sql = `
+        const sql1 = `
       SELECT
         gn.node_id, gn.location_name, gn.latitude, gn.longitude,
         gn.elevation, gn.slope, gn.impervious_ratio,
         gn.dist_to_drain_km, gn.dist_to_river_km, gn.dist_to_pump_km,
         gn.dist_to_main_road_km, gn.dist_to_park_km,
-        wm.prcp, wm.prcp_3h, wm.prcp_6h, wm.prcp_12h, wm.prcp_24h,
-        wm.temp, wm.rhum, wm.wspd, wm.pres, wm.pressure_change_24h,
-        wm.max_prcp_3h, wm.max_prcp_6h, wm.max_prcp_12h,
-        wm.rainy_season_flag,
         fp.flood_depth_cm, fp.risk_level::text AS risk_level,
         fp.explanation, fp.time
-      FROM grid_nodes gn
-      LEFT JOIN (
-        SELECT DISTINCT ON (node_id) *
-        FROM weather_measurements
-        WHERE time >= NOW() - INTERVAL '24 hours'
-        ORDER BY node_id, time DESC
-      ) wm ON gn.node_id = wm.node_id
-      LEFT JOIN (
-        SELECT DISTINCT ON (node_id) *
-        FROM flood_predictions
-        WHERE time >= NOW() - INTERVAL '24 hours'
-        ORDER BY node_id, time DESC
-      ) fp ON gn.node_id = fp.node_id
-      WHERE gn.location_name ILIKE $1
+      FROM (
+        SELECT * FROM grid_nodes WHERE location_name ILIKE $1
+      ) gn
+      JOIN flood_predictions fp ON fp.node_id = gn.node_id
+      WHERE fp.time >= NOW() - INTERVAL '24 hours'
       ORDER BY fp.flood_depth_cm DESC NULLS LAST
       LIMIT 1
     `
-        const { rows } = await withTimeout(pool.query(sql, [`%${areaName}%`]), DB_TIMEOUT_MS)
-        return rows
+        const { rows: fpRows } = await withTimeout(pool.query(sql1, [`%${areaName}%`]), DB_TIMEOUT_MS)
+        if (fpRows.length === 0) return []
+
+        const target = fpRows[0]
+        const sql2 = `
+      SELECT
+        wm.prcp, wm.prcp_3h, wm.prcp_6h, wm.prcp_12h, wm.prcp_24h,
+        wm.temp, wm.rhum, wm.wspd, wm.pres, wm.pressure_change_24h,
+        wm.max_prcp_3h, wm.max_prcp_6h, wm.max_prcp_12h,
+        wm.rainy_season_flag
+      FROM weather_measurements wm
+      WHERE wm.node_id = $1
+      ORDER BY wm.time DESC
+      LIMIT 1
+    `
+        const { rows: wmRows } = await withTimeout(pool.query(sql2, [target.node_id]), DB_TIMEOUT_MS)
+        
+        const result = { ...target }
+        if (wmRows.length > 0) Object.assign(result, wmRows[0])
+        return [result]
     })
 }
 

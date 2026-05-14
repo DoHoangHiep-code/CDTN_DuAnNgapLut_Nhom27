@@ -62,58 +62,58 @@ class FloodPredictionController {
    * BBox mode  → query DB trong viewport → trả districts paginated
    * Legacy mode → demoData (không AI real-time)
    */
-  async getFloodPrediction(req, res, next) {
-    try {
-      const minLat = parseFloat(req.query.min_lat)
-      const maxLat = parseFloat(req.query.max_lat)
-      const minLng = parseFloat(req.query.min_lng)
-      const maxLng = parseFloat(req.query.max_lng)
-      const hasBbox = [minLat, maxLat, minLng, maxLng].every(Number.isFinite)
+  async getFloodPrediction(req, res, _next) {
+    const minLat = parseFloat(req.query.min_lat)
+    const maxLat = parseFloat(req.query.max_lat)
+    const minLng = parseFloat(req.query.min_lng)
+    const maxLng = parseFloat(req.query.max_lng)
+    const hasBbox = [minLat, maxLat, minLng, maxLng].every(Number.isFinite)
 
-      // ── Chế độ BBox (Map dynamic fetch) ─────────────────────────────────────
-      if (hasBbox) {
-        const limit = Math.min(
-          parseInt(req.query.limit) || DEFAULT_LIMIT,
-          MAX_LIMIT,
-        )
+    // ── Chế độ BBox (Map dynamic fetch) ─────────────────────────────────────
+    if (hasBbox) {
+      const limit = Math.min(
+        parseInt(req.query.limit) || DEFAULT_LIMIT,
+        MAX_LIMIT,
+      )
 
-        // Validate bbox hợp lý
-        if (minLat >= maxLat || minLng >= maxLng) {
-          return res.status(400).json({
-            success: false,
-            error: { message: 'bbox không hợp lệ: min phải nhỏ hơn max.' },
-          })
-        }
+      // Validate bbox hợp lý
+      if (minLat >= maxLat || minLng >= maxLng) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'bbox không hợp lệ: min phải nhỏ hơn max.' },
+        })
+      }
 
-        // ── Ultra-fast BBox Query (Materialized View) ─────────────────────
-        // mv_latest_flood_predictions = DISTINCT ON (node_id) ORDER BY time DESC
-        // Chỉ có 53K rows, được index trên node_id → JOIN nhanh với grid_nodes.
-        // Migration 015 tạo MV này; Cronjob refresh sau mỗi lần chạy.
+      // ── Optimized BBox Query: DISTINCT ON from flood_predictions ────────
+      // Uses parameterized $bind with ::numeric cast (pg-pool safe).
+      // Only returns fresh data (last 2 hours) to avoid stale predictions.
+      // No LEFT JOIN LATERAL – simple JOIN + DISTINCT ON for performance.
+      try {
         const rows = await this.sequelize.query(
-          `SELECT
-             gn.node_id,
+          `SELECT DISTINCT ON (fp.node_id)
+             fp.node_id,
              gn.latitude,
              gn.longitude,
              gn.location_name,
-             mv.risk_level,
-             mv.flood_depth_cm,
-             mv.time        AS prediction_time,
-             mv.explanation
-           FROM mv_latest_flood_predictions mv
-           JOIN grid_nodes gn ON gn.node_id = mv.node_id
-           WHERE mv.flood_depth_cm > 10
-             AND gn.latitude  BETWEEN :minLat AND :maxLat
-             AND gn.longitude BETWEEN :minLng AND :maxLng
-           ORDER BY mv.flood_depth_cm DESC
-           LIMIT :limit`,
+             fp.risk_level,
+             fp.flood_depth_cm,
+             fp.time        AS prediction_time,
+             fp.explanation
+           FROM flood_predictions fp
+           JOIN grid_nodes gn ON gn.node_id = fp.node_id
+           WHERE gn.latitude  BETWEEN $1::numeric AND $2::numeric
+             AND gn.longitude BETWEEN $3::numeric AND $4::numeric
+             AND fp.time >= NOW() - INTERVAL '2 hours'
+             AND fp.flood_depth_cm > 10
+           ORDER BY fp.node_id, fp.time DESC
+           LIMIT $5`,
           {
-            replacements: { minLat, maxLat, minLng, maxLng, limit },
+            bind: [minLat, maxLat, minLng, maxLng, limit],
             type: QueryTypes.SELECT,
           },
         )
 
         if (!rows || rows.length === 0) {
-          // Viewport không có node nào → trả mảng rỗng (không fallback demoData)
           return res.status(200).json({
             success: true,
             data: { updatedAtIso: new Date().toISOString(), total: 0, districts: [] },
@@ -139,15 +139,26 @@ class FloodPredictionController {
             districts,
           },
         })
+      } catch (err) {
+        // BBox errors must NOT crash the frontend Map – return 200 with empty data
+        console.error('[FloodPredictionController] BBox query error:', err.message)
+        return res.status(200).json({
+          success: false,
+          data: { updatedAtIso: new Date().toISOString(), total: 0, districts: [] },
+          message: 'Database busy, returning empty bounds',
+        })
       }
+    }
 
-      // ── Chế độ Legacy (WeatherPage / ReportsPage filter) ─────────────────────
-      // Trả demoData nhẹ (không gọi AI + không scan 53K nodes)
-      // Frontend sẽ dùng data này chỉ để populate LocationSearch districts list
+    // ── Chế độ Legacy (WeatherPage / ReportsPage filter) ─────────────────────
+    // Trả demoData nhẹ (không gọi AI + không scan 53K nodes)
+    // Frontend sẽ dùng data này chỉ để populate LocationSearch districts list
+    try {
       const demo = buildFloodPrediction()
       return res.status(200).json({ success: true, data: demo })
     } catch (err) {
-      return next(err)
+      console.error('[FloodPredictionController] Legacy fallback error:', err.message)
+      return res.status(200).json({ success: false, data: { districts: [] }, message: 'Fallback error' })
     }
   }
 
