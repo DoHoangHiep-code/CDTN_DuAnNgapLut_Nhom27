@@ -13,17 +13,17 @@ class DashboardRepository {
   async getLocationAutocomplete(search) {
     if (!search || !search.trim()) return []
     const rows = await this.sequelize.query(
-      `SELECT node_id, location_name, weather_station_id, district_name
+      `SELECT DISTINCT location_name
        FROM grid_nodes
-       WHERE location_name ILIKE :pattern OR district_name ILIKE :pattern
-       ORDER BY node_id LIMIT 10`,
+       WHERE location_name ILIKE :pattern AND location_name IS NOT NULL
+       ORDER BY location_name LIMIT 10`,
       { type: QueryTypes.SELECT, replacements: { pattern: `%${search.trim()}%` } },
     )
-    return rows.map(r => ({
-      node_id: Number(r.node_id),
+    return rows.map((r, i) => ({
+      node_id: i,
       location_name: r.location_name,
-      district_name: r.district_name,
-      weather_station_id: Number(r.weather_station_id)
+      district_name: '',
+      weather_station_id: 0
     }))
   }
 
@@ -38,9 +38,8 @@ class DashboardRepository {
     }
     const rows = await this.sequelize.query(
       `SELECT node_id, weather_station_id FROM grid_nodes
-       WHERE location_name ILIKE :pattern
-       ORDER BY node_id LIMIT 20`,
-      { type: QueryTypes.SELECT, replacements: { pattern: `%${search.trim()}%` } },
+       WHERE location_name = :pattern`,
+      { type: QueryTypes.SELECT, replacements: { pattern: search.trim() } },
     )
     if (rows.length === 0) {
        return { isGlobal: true, predictionNodeIds: null, weatherNodeIds: null }
@@ -65,7 +64,7 @@ class DashboardRepository {
       SELECT
         AVG(temp)::float AS temp,
         AVG(rhum)::float AS rhum,
-        AVG(prcp)::float AS prcp,
+        MAX(prcp)::float AS prcp,
         AVG(wspd)::float AS wspd,
         MAX(time) AT TIME ZONE :tz AS last_update
       FROM weather_measurements, latest_time
@@ -85,32 +84,35 @@ class DashboardRepository {
 
     const sqlWm = `
       SELECT
+        date_trunc('hour', (time AT TIME ZONE :tz)) AS real_time,
         to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
-        AVG(prcp)::float AS prcp
+        MAX(prcp)::float AS prcp
       FROM weather_measurements
-      WHERE time >= now() - interval '${h} hours'
+      WHERE time >= now() AND time < now() + interval '${h} hours'
         ${whereWm}
-      GROUP BY 1 ORDER BY 1 LIMIT ${h};
+      GROUP BY 1, 2 ORDER BY 1 ASC LIMIT ${h};
     `
     let sqlFp
     if (isGlobal) {
       sqlFp = `
         SELECT
+          bucket_time AS real_time,
           to_char(bucket_time AT TIME ZONE :tz, 'HH24:MI') AS time,
           avg_depth AS flood_depth_cm
         FROM mv_global_flood_avg
-        WHERE bucket_time >= now() - interval '${h} hours'
-        ORDER BY bucket_time ASC LIMIT ${h};
+        WHERE bucket_time >= now() AND bucket_time < now() + interval '${h} hours'
+        ORDER BY 1 ASC LIMIT ${h};
       `
     } else {
       sqlFp = `
         SELECT
+          date_trunc('hour', (time AT TIME ZONE :tz)) AS real_time,
           to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
-          AVG(flood_depth_cm)::float AS flood_depth_cm
+          MAX(flood_depth_cm)::float AS flood_depth_cm
         FROM flood_predictions
-        WHERE time >= now() - interval '${h} hours'
+        WHERE time >= now() AND time < now() + interval '${h} hours'
           ${whereFp}
-        GROUP BY 1 ORDER BY 1 LIMIT ${h};
+        GROUP BY 1, 2 ORDER BY 1 ASC LIMIT ${h};
       `
     }
     const [wmRows, fpRows] = await Promise.all([
@@ -188,13 +190,14 @@ class DashboardRepository {
 
     const sql = `
       SELECT
+        date_trunc('hour', (time AT TIME ZONE :tz)) AS real_time,
         to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
         COALESCE(AVG(temp), 0)::float AS temp,
         COALESCE(AVG(rhum), 0)::float AS rhum
       FROM weather_measurements
-      WHERE time >= now() - interval '${h} hours'
+      WHERE time >= now() AND time < now() + interval '${h} hours'
         ${whereWm}
-      GROUP BY 1 ORDER BY 1 LIMIT ${h};
+      GROUP BY 1, 2 ORDER BY 1 ASC LIMIT ${h};
     `
     return this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { tz } })
   }

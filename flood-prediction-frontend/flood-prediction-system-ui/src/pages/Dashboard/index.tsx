@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Droplets, Thermometer, Wind, CloudRain, RefreshCcw, ExternalLink, Search, Clock, X } from 'lucide-react'
-import { Card, CardHeader, CardMeta, CardTitle } from '../components/Card'
-import { Spinner } from '../components/Spinner'
-import { ErrorState } from '../components/ErrorState'
-import { RiskBadge } from '../components/Badge'
-import { Button } from '../components/Button'
-import { RainForecastChart } from '../components/RainForecastChart'
-import { TempHumidityChart } from '../components/TempHumidityChart'
-import { RiskTrendChart } from '../components/RiskTrendChart'
-import { getDashboard } from '../services/api'
-import type { DashboardResponse } from '../utils/types'
+import { RefreshCcw, ExternalLink, Search, Clock, X } from 'lucide-react'
+import { Spinner } from '../../components/Spinner'
+import { ErrorState } from '../../components/ErrorState'
+import { Button } from '../../components/Button'
+import { DashboardCards } from './components/DashboardCards'
+import { DashboardCharts } from './components/DashboardCharts'
+import { getDashboard } from '../../services/api'
+import type { DashboardResponse } from '../../utils/types'
 import { useTranslation } from 'react-i18next'
 
 const HOUR_OPTIONS = [
@@ -17,18 +14,19 @@ const HOUR_OPTIONS = [
   { label: '12h', value: 12 },
   { label: '24h', value: 24 },
   { label: '48h', value: 48 },
+  { label: '72h', value: 72 },
 ]
 
 export function DashboardPage() {
   const { t } = useTranslation()
 
   // ── Filter state ──────────────────────────────────────────────
-  const [hours, setHours]   = useState(24)
+  const [hours, setHours]   = useState(72)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
 
   // ── Autocomplete state ────────────────────────────────────────
-  const [suggestions, setSuggestions] = useState<import('../utils/types').DashboardAutocompleteItem[]>([])
+  const [suggestions, setSuggestions] = useState<import('../../utils/types').DashboardAutocompleteItem[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -43,7 +41,7 @@ export function DashboardPage() {
     const t = setTimeout(() => {
       if (search.trim()) {
         setLoadingSuggestions(true)
-        import('../services/api').then(({ getDashboardAutocomplete }) => {
+        import('../../services/api').then(({ getDashboardAutocomplete }) => {
           getDashboardAutocomplete(search).then(setSuggestions).catch(() => setSuggestions([])).finally(() => setLoadingSuggestions(false))
         })
       } else {
@@ -70,14 +68,14 @@ export function DashboardPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await getDashboard({ hours, search: debouncedSearch })
+      const res = await getDashboard({ hours: 72, search: debouncedSearch })
       if (id === fetchRef.current) setData(res)
     } catch (e) {
       if (id === fetchRef.current) setError(e)
     } finally {
       if (id === fetchRef.current) setLoading(false)
     }
-  }, [hours, debouncedSearch])
+  }, [debouncedSearch])
 
   useEffect(() => { void fetchDashboard() }, [fetchDashboard])
 
@@ -88,12 +86,12 @@ export function DashboardPage() {
 
   const cw          = data.currentWeather
   const riskSummary = data.riskSummary
-  const forecast24h = data.forecast24h      ?? []
-  const tempHum     = data.tempHumidity24h  ?? []
-  const riskTrend   = data.riskTrend7d      ?? []
+  const forecast24h = (data.forecast24h      ?? []).slice(0, hours)
+  const tempHum     = (data.tempHumidity24h  ?? []).slice(0, hours)
+  const riskTrend   = (data.riskTrend7d      ?? []).slice(0, hours)
   const meta        = data.meta
 
-  const riskLabel = hours <= 48 ? `${hours}h qua` : '7 ngày qua'
+  const riskLabel = hours <= 48 ? `${hours}h tới` : '7 ngày tới'
 
   return (
     <div className="space-y-5">
@@ -241,130 +239,16 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* ── Thời tiết hiện tại (3 cards) ── */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>{t('dashboard.temperature')}</CardTitle>
-              <CardMeta>CockroachDB · giờ hiện tại</CardMeta>
-            </div>
-            <Thermometer className="fps-3d-icon h-9 w-9 text-orange-500 drop-shadow-sm dark:text-orange-400" />
-          </CardHeader>
-          <div className="text-3xl font-extrabold text-orange-600 dark:text-orange-400">
-            {cw.temperature.toFixed(1)}°C
-          </div>
-          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            Trung bình các trạm đang chọn
-          </div>
-        </Card>
+      <DashboardCards cw={cw} />
 
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>{t('dashboard.humidity')}</CardTitle>
-              <CardMeta>CockroachDB · giờ hiện tại</CardMeta>
-            </div>
-            <Droplets className="fps-3d-icon h-9 w-9 text-sky-600 drop-shadow-sm dark:text-sky-400" />
-          </CardHeader>
-          <div className="text-3xl font-extrabold text-sky-600 dark:text-sky-400">
-            {cw.humidity.toFixed(0)}%
-          </div>
-          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">{t('dashboard.comfortHint')}</div>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>{t('dashboard.wind')}</CardTitle>
-              <CardMeta>CockroachDB · giờ hiện tại</CardMeta>
-            </div>
-            <Wind className="fps-3d-icon h-9 w-9 text-cyan-600 drop-shadow-sm dark:text-cyan-400" />
-          </CardHeader>
-          <div className="text-3xl font-extrabold text-cyan-700 dark:text-cyan-300">
-            {cw.windSpeed.toFixed(1)} m/s
-          </div>
-          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">{t('dashboard.windHint')}</div>
-        </Card>
-      </div>
-
-      {/* ── Hàng 2: Mưa + Ngập | Nguy cơ ── */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <div>
-              <CardTitle>{t('dashboard.rainForecast')}</CardTitle>
-              <CardMeta>Lượng mưa & độ ngập · {riskLabel} (CockroachDB)</CardMeta>
-            </div>
-          </CardHeader>
-          <div className="h-56 min-h-[14rem]">
-            <RainForecastChart points={forecast24h} />
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>{t('dashboard.floodRiskSummary')}</CardTitle>
-              <CardMeta>flood_predictions · {riskLabel}</CardMeta>
-            </div>
-            <CloudRain className="fps-3d-icon h-9 w-9 text-indigo-600 drop-shadow-sm dark:text-indigo-400" />
-          </CardHeader>
-          <div className="flex items-center gap-3">
-            <RiskBadge level={riskSummary.overall} />
-            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-              {t('dashboard.overall')}: {t(`risk.${riskSummary.overall}`)}
-            </div>
-          </div>
-          <div className="mt-4 space-y-2">
-            {(['safe', 'medium', 'high', 'severe'] as const).map((level) => {
-              const count = riskSummary[level] ?? 0
-              const total = (riskSummary.safe ?? 0) + (riskSummary.medium ?? 0) + (riskSummary.high ?? 0) + (riskSummary.severe ?? 0)
-              const pct = total > 0 ? Math.round((count / total) * 100) : 0
-              const barColor = { safe: 'bg-green-500', medium: 'bg-amber-400', high: 'bg-orange-500', severe: 'bg-rose-600' }[level]
-              const label = { safe: 'An toàn', medium: 'Trung bình', high: 'Cao', severe: 'Nghiêm trọng' }[level]
-              return (
-                <div key={level} className="space-y-0.5">
-                  <div className="flex justify-between text-xs text-slate-600 dark:text-slate-300">
-                    <span>{label}</span>
-                    <span className="font-mono">{count.toLocaleString()} ({pct}%)</span>
-                  </div>
-                  <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800">
-                    <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </Card>
-      </div>
-
-      {/* ── Hàng 3: Nhiệt độ/Độ ẩm | Xu hướng nguy cơ ── */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Nhiệt độ & Độ ẩm</CardTitle>
-              <CardMeta>{riskLabel} · weather_measurements (CockroachDB)</CardMeta>
-            </div>
-          </CardHeader>
-          <div className="h-52 min-h-[13rem]">
-            <TempHumidityChart points={tempHum} />
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>Xu hướng nguy cơ ngập</CardTitle>
-              <CardMeta>{hours <= 48 ? riskLabel : '7 ngày qua'} · flood_predictions (CockroachDB)</CardMeta>
-            </div>
-          </CardHeader>
-          <div className="h-52 min-h-[13rem]">
-            <RiskTrendChart days={riskTrend} />
-          </div>
-        </Card>
-      </div>
+      <DashboardCharts
+        forecast24h={forecast24h}
+        tempHum={tempHum}
+        riskTrend={riskTrend}
+        riskSummary={riskSummary}
+        riskLabel={riskLabel}
+        hours={hours}
+      />
     </div>
   )
 }

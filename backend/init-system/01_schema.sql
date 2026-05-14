@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS grid_nodes (
 CREATE INDEX IF NOT EXISTS idx_grid_nodes_geom_gist ON grid_nodes USING GIST (geom);
 CREATE INDEX IF NOT EXISTS idx_grid_nodes_lat_lng   ON grid_nodes (latitude, longitude);
 CREATE INDEX IF NOT EXISTS idx_grid_station         ON grid_nodes (weather_station_id);
+CREATE INDEX IF NOT EXISTS idx_grid_st1             ON grid_nodes (st1_id);
 
 -- =============================================================================
 -- TABLE: weather_measurements (88 rows/cron × 72h)
