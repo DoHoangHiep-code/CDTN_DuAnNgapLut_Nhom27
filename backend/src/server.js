@@ -1,29 +1,28 @@
 require('dotenv').config() // Load .env trước tất cả (phải đứng đầu file)
 
 const express = require('express') // Import Express để tạo HTTP server
-const cors = require('cors')    // Import CORS để cho phép frontend gọi API khác port
-const path = require('path')    // Import path để build đường dẫn static an toàn
+const cors = require('cors')       // Import CORS để cho phép frontend gọi API khác port
+const path = require('path')       // Import path để build đường dẫn static an toàn
 
-const { dashboardRouter } = require('./routes/dashboardRoutes')      // Router dashboard
-const { mapRouter } = require('./routes/mapRoutes')             // Router flood map
-const { weatherRouter } = require('./routes/weatherRoutes')         // Router weather
-const { authRouter } = require('./routes/authRoutes')            // Router auth
-const { profileRouter } = require('./routes/profileRoutes')         // Router profile
-const { adminUserRouter } = require('./routes/adminUserRoutes')       // Router admin CRUD users
-const { reportsRouter } = require('./routes/reportsRoutes')         // Router reports
-const { floodPredictionRouter } = require('./routes/floodPredictionRoutes') // Router compat /flood-prediction
-const { unifiedChatbotRouter } = require('./routes/unifiedChatbotRoutes')
-const { healthCheckRouter } = require('./routes/healthCheckRoutes')
-// const { chatbotRouter }        = require('./routes/chatbotRoutes')         // Router chatbot AI
-// const expertChatRouter         = require('./routes/expertChatRoutes')      // Router expert chat AI
-const { statisticsRouter } = require('./routes/statisticsRoutes')      // Router statistics
-const { sequelize } = require('./db/sequelize')                 // Sequelize instance để sync/auth
+const { dashboardRouter }      = require('./routes/dashboardRoutes')      // Router dashboard
+const { mapRouter }            = require('./routes/mapRoutes')             // Router flood map
+const { weatherRouter }        = require('./routes/weatherRoutes')         // Router weather
+const { authRouter }           = require('./routes/authRoutes')            // Router auth
+const { profileRouter }        = require('./routes/profileRoutes')         // Router profile
+const { adminUserRouter }      = require('./routes/adminUserRoutes')       // Router admin CRUD users
+const { reportsRouter }        = require('./routes/reportsRoutes')         // Router reports
+const { floodPredictionRouter} = require('./routes/floodPredictionRoutes') // Router compat /flood-prediction
+const { unifiedChatbotRouter } = require('./routes/unifiedChatbotRoutes') // Router chatbot AI (unified)
+const { healthCheckRouter }    = require('./routes/healthCheckRoutes')     // Router health-check cloud
+const { statisticsRouter }     = require('./routes/statisticsRoutes')      // Router statistics
+const { alertsRouter }         = require('./routes/alertsRoutes')           // Router alerts/banner
+const { sequelize }            = require('./db/sequelize')                 // Sequelize instance để sync/auth
 require('./models') // Nạp toàn bộ model trước sync để Sequelize biết cần tạo/alter bảng nào
 
-// ── Weather & Backup & Flood Prediction Cronjobs ──────────────────────────────────────────
+// ── Weather & Backup & Flood Prediction Cronjobs ─────────────────────────────
 const { startWeatherCron, manualTrigger } = require('./services/weatherCron')
-const { startBackupCron } = require('./services/backupCron')
-const { startFloodPredictionCron } = require('./services/floodPredictionCron')
+const { startBackupCron }                 = require('./services/backupCron')
+const { startFloodPredictionCron }        = require('./services/floodPredictionCron')
 
 const app = express() // Khởi tạo app Express
 
@@ -39,34 +38,17 @@ app.use(express.json()) // Parse JSON body
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
-console.log('dashboardRouter:', typeof dashboardRouter)
-console.log('mapRouter:', typeof mapRouter)
-console.log('weatherRouter:', typeof weatherRouter)
-console.log('floodPredictionRouter:', typeof floodPredictionRouter)
-console.log('unifiedChatbotRouter:', typeof unifiedChatbotRouter)
-console.log('healthCheckRouter:', typeof healthCheckRouter)
-console.log('authRouter:', typeof authRouter)
-console.log('profileRouter:', typeof profileRouter)
-console.log('adminUserRouter:', typeof adminUserRouter)
-console.log('statisticsRouter:', typeof statisticsRouter)
-console.log('reportsRouter:', typeof reportsRouter)
-
 // ── API Routes ───────────────────────────────────────────────────────────────
 app.use('/api/v1', dashboardRouter)
 app.use('/api/v1', mapRouter)
 app.use('/api/v1', weatherRouter)
 app.use('/api/v1', floodPredictionRouter)
-// app.use('/api/v1', chatbotRouter)
-// app.use('/api/v1', expertChatRouter)
-if (unifiedChatbotRouter) {
-  app.use('/api/v1', unifiedChatbotRouter)
-}
-if (healthCheckRouter) {
-  app.use('/api/v1', healthCheckRouter)
-}
+app.use('/api/v1', unifiedChatbotRouter)
+app.use('/api/v1', healthCheckRouter)
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1', profileRouter)
 app.use('/api/v1', adminUserRouter)
+app.use('/api/v1', alertsRouter)
 
 // ── Route kích hoạt Cronjob thủ công (CHỈ dùng khi dev/test) ────────────────
 // QUAN TRỌNG: Phải đặt TRƯỚC reportsRouter vì router.use(verifyToken) bên trong
@@ -144,4 +126,3 @@ async function bootstrapAndStart() {
 }
 
 bootstrapAndStart()
-

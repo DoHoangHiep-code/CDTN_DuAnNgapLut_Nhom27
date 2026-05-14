@@ -32,14 +32,13 @@ export function clearToken() {
 
 export const apiV1 = axios.create({
   // Backend baseURL:
-  // - Ưu tiên lấy từ env VITE_API_BASE_URL (khai báo trong .env.local).
-  // - Fallback về localhost:3002 (port mặc định của backend).
-  baseURL: (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3002/api/v1',
-  // Tăng timeout lên 60s vì:
-  //  - CockroachDB cloud có độ trễ kết nối cao hơn localhost
-  //  - AI CatBoost model cần thời gian khởi động lại nếu cold-start
-  //  - Spatial query + LATERAL JOIN trên 53K nodes cần vài giây ngay cả khi đã index
-  timeout: 60000,
+  // - Ưu tiên lấy từ env để bạn dễ đổi port (3000/3001) mà không phải sửa code.
+  // - Fallback về localhost:3001 vì backend hiện tại đang chạy mặc định trên 3001.
+  baseURL: (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3001/api/v1',
+  // Nới lỏng timeout: BBox query sau tối ưu index vẫn cần đủ thời gian đáp ứng
+  // trên mạng yếu. 30s đủ an toàn mà không ảnh hưởng UX (sẽ giảm lại sau khi
+  // xác nhận query < 1s).
+  timeout: 30000,
 })
 
 // Request interceptor: tự động gắn JWT vào header Authorization
@@ -53,34 +52,21 @@ apiV1.interceptors.request.use((config) => {
   return config
 })
 
-// Response interceptor: bắt 401 toàn cục + gán friendly message cho timeout/503
+// Response interceptor: bắt 401 toàn cục
 apiV1.interceptors.response.use(
   (res) => res,
   (error) => {
+    // Lý do bắt 401 toàn cục:
+    // - Token hết hạn / bị thu hồi -> app phải tự logout để tránh loop lỗi.
     const status = error?.response?.status
-    const isTimeout = error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')
-
-    // ── 401: Token hết hạn → tự logout ──────────────────────────────────────────
     if (status === 401) {
+      // Xóa token để tránh gửi lại token lỗi ở các request sau
       clearToken()
+      // Điều hướng về /login (dùng window.location để không phụ thuộc hook router)
       if (window.location.pathname !== '/login') {
         window.location.href = '/login'
       }
     }
-
-    // ── Gắn friendly message để UI có thể hiển thị trực tiếp ─────────────────
-    // Lý do: tránh phải viết logic phân loại lỗi rải rác ở mỗi component/page.
-    if (isTimeout) {
-      error.friendlyMessage =
-        'Hệ thống đang xử lý lượng dữ liệu lớn hoặc model AI cần thêm thời gian khởi động. Vui lòng thử lại sau.'
-    } else if (status === 503) {
-      error.friendlyMessage =
-        'Máy chủ đang quá tải (503). Vui lòng đợi vài giây rồi thử lại.'
-    } else if (status === 502 || status === 504) {
-      error.friendlyMessage =
-        'Cổng kết nối tới dịch vụ AI bị gián đoạn. Vui lòng thử lại sau ít phút.'
-    }
-
     return Promise.reject(error)
   },
 )

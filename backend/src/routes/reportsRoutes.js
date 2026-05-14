@@ -19,10 +19,12 @@ const reportsController = new ReportsController({ reportsService }) // Inject se
 router.post('/reports/actual-flood', optionalAuth, reportsController.createActualFloodReport)
 
 // ── Route yêu cầu đăng nhập ──
-// Bảo vệ các route còn lại: phải đăng nhập mới xem/gửi report
-router.use(verifyToken) // Nếu token lỗi → 401 ngay, tránh leak data
+router.use(verifyToken)
 
-// GET danh sách reports (dành cho admin/dashboard)
+// GET autocomplete địa điểm (phải đứng TRƯỚC /reports để Express match đúng)
+router.get('/reports/autocomplete', reportsController.autocomplete)
+
+// GET danh sách reports – hỗ trợ ?location=&dateFrom=&dateTo=&page=&limit=
 router.get('/reports', reportsController.list)
 
 // POST tạo report theo schema cũ (latitude/longitude/reported_level)

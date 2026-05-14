@@ -36,12 +36,14 @@ class WeatherController {
       if (owm) {
         // ── Có dữ liệu OWM thật ──────────────────────────────────────────────
         const current = {
-          temperatureC:  Math.round(owm.temp * 10) / 10,
-          humidityPct:   owm.humidity,
-          windKph:       Math.round(owm.windSpeed * 3.6 * 10) / 10, // m/s → km/h
-          rainfallMm:    owm.rain1h,
-          observedAtIso: new Date().toISOString(),
-          locationName:  district || 'Hà Nội',
+          temperatureC:    Math.round(owm.temp * 10) / 10,
+          humidityPct:     owm.humidity,
+          windKph:         Math.round(owm.windSpeed * 3.6 * 10) / 10, // m/s → km/h
+          rainfallMm:      owm.rain1h,
+          cloudsPct:       owm.clouds ?? 0,
+          rainIntensityMm: owm.rain1h ?? 0,
+          observedAtIso:   new Date().toISOString(),
+          locationName:    district || 'Hà Nội',
         }
 
         // forecast24h: Lấy 8 data points đầu từ OWM forecast (8 × 3h = 24h)
@@ -112,12 +114,14 @@ class WeatherController {
 
       if (raw?.current) {
         const current = {
-          temperatureC:  raw.current?.temperature  ?? 0,
-          humidityPct:   raw.current?.humidity     ?? 0,
-          windKph:       raw.current?.windSpeed    ?? 0,
-          rainfallMm:    raw.current?.prcp         ?? 0,
-          observedAtIso: raw.current?.time         ?? new Date().toISOString(),
-          locationName:  district || `Node #${raw.nodeId ?? '-'}`,
+          temperatureC:    raw.current?.temperature  ?? 0,
+          humidityPct:     raw.current?.humidity     ?? 0,
+          windKph:         raw.current?.windSpeed    ?? 0,
+          rainfallMm:      raw.current?.prcp         ?? 0,
+          cloudsPct:       raw.current?.clouds       ?? 0,
+          rainIntensityMm: raw.current?.prcp         ?? 0,
+          observedAtIso:   raw.current?.time         ?? new Date().toISOString(),
+          locationName:    district || `Node #${raw.nodeId ?? '-'}`,
         }
         const forecast7d = Array.isArray(raw.forecast7d)
           ? raw.forecast7d.map(d => ({

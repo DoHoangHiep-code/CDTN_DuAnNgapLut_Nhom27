@@ -5,93 +5,86 @@ const { sequelize } = require('../src/db/sequelize')
 const axios = require('axios')
 const axiosRetry = require('axios-retry').default || require('axios-retry')
 
-// Configure axios with retries for rate limit/network issues
+// Nominatim Policy: max 1 request/sec
 axiosRetry(axios, {
   retries: 5,
-  retryDelay: (retryCount) => {
-    return retryCount * 2000 // 2s, 4s, 6s...
-  },
-  retryCondition: (error) => {
-    return error.response?.status === 429 || axiosRetry.isNetworkOrIdempotentRequestError(error)
-  }
+  retryDelay: (retryCount) => retryCount * 2000,
+  retryCondition: (error) => error.response?.status === 429 || axiosRetry.isNetworkOrIdempotentRequestError(error)
 })
 
-const API_KEY = process.env.OPENWEATHER_API_KEY
-if (!API_KEY) {
-  console.error('❌ Missing OPENWEATHER_API_KEY in .env')
-  process.exit(1)
-}
+const USER_AGENT = process.env.GEOCODE_USER_AGENT || 'AquaAlert_Flood_Prediction_System/1.0 (admin@fpt.local)'
+const DELAY_MS = 1100 // 1.1s to be safe
 
-const BATCH_SIZE = 40 // 40 requests per batch (below 50 req/s limit)
-const DELAY_MS = 1000 // 1 second delay between batches
-
-async function reverseGeocodeNodes() {
+async function reverseGeocodeNominatim() {
   try {
-    console.log('🔍 Bắt đầu quét các nodes thiếu location_name hợp lệ...')
-    // Chúng ta vừa chạy update fix_nulls gán "Grid Lat, Lon" nên ta sẽ query những node có tên bắt đầu bằng "Grid "
+    console.log('🔍 Bắt đầu Reverse Geocoding chi tiết bằng Nominatim...')
+    
+    // Tìm các node cần Geocode: những node có tên chung chung
     const [nodes] = await sequelize.query(`
       SELECT node_id, latitude, longitude 
       FROM grid_nodes 
-      WHERE location_name LIKE 'Grid %'
+      WHERE location_name LIKE 'Grid %' 
+         OR location_name = 'Hà Nội' 
+         OR location_name = 'Thành phố Hà Nội'
+         OR location_name = 'Unknown'
+         OR location_name IS NULL
+      ORDER BY weather_station_id DESC NULLS LAST -- Ưu tiên các node đại diện trước
     `)
 
-    console.log(`Tìm thấy ${nodes.length} điểm cần Reverse Geocoding. Bắt đầu...`)
+    console.log(`Tìm thấy ${nodes.length} điểm cần Reverse Geocoding. Tiến hành quét 1 req/s...`)
 
     let successCount = 0
     let failCount = 0
 
-    for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
-      const batch = nodes.slice(i, i + BATCH_SIZE)
-      const updateQueries = []
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i]
+      try {
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${node.latitude}&lon=${node.longitude}&accept-language=vi`
+        const res = await axios.get(url, { headers: { 'User-Agent': USER_AGENT } })
 
-      await Promise.allSettled(
-        batch.map(async (node) => {
-          try {
-            const url = `http://api.openweathermap.org/geo/1.0/reverse?lat=${node.latitude}&lon=${node.longitude}&limit=1&appid=${API_KEY}`
-            const res = await axios.get(url)
+        if (res.data && res.data.address) {
+          const addr = res.data.address
+          // Xây dựng tên chi tiết: Số nhà/Đường, Phường/Xã, Quận/Huyện
+          const street = addr.road || addr.pedestrian || addr.suburb || addr.neighbourhood || ''
+          const ward = addr.quarter || addr.village || addr.hamlet || ''
+          const district = addr.city_district || addr.county || addr.district || ''
+          
+          const parts = [street, ward, district].filter(p => p.trim() !== '')
+          let detailedName = parts.join(', ')
+          
+          if (!detailedName) detailedName = res.data.display_name.split(',').slice(0, 2).join(', ')
 
-            if (res.data && res.data.length > 0) {
-              const item = res.data[0]
-              // Ưu tiên Tiếng Việt > Tiếng Anh > Tên gốc
-              const name = item.local_names?.vi || item.local_names?.en || item.name || 'Unknown'
-              // Tạo string tên đầy đủ nếu có
-              let fullName = name
-              if (item.state && item.state !== name) fullName += `, ${item.state}`
-
-              updateQueries.push(`
-                UPDATE grid_nodes 
-                SET location_name = '${fullName.replace(/'/g, "''")}' 
-                WHERE node_id = ${node.node_id};
-              `)
-              successCount++
-            } else {
-              failCount++
-            }
-          } catch (err) {
-            failCount++
-          }
-        })
-      )
-
-      if (updateQueries.length > 0) {
-        await sequelize.query(updateQueries.join('\n'))
+          const cleanName = detailedName.replace(/'/g, "''")
+          
+          await sequelize.query(`
+            UPDATE grid_nodes 
+            SET location_name = '${cleanName}' 
+            WHERE node_id = ${node.node_id};
+            
+            UPDATE weather_measurements
+            SET location_name = '${cleanName}'
+            WHERE node_id = ${node.node_id};
+          `)
+          successCount++
+          if (i % 10 === 0) console.log(`[${i+1}/${nodes.length}] Đã cập nhật: Node ${node.node_id} -> ${detailedName}`)
+        } else {
+          failCount++
+        }
+      } catch (err) {
+        failCount++
+        console.error(`[Lỗi Node ${node.node_id}]`, err.message)
       }
 
-      console.log(`Đã geocode thành công ${successCount}/${nodes.length} điểm (Lỗi: ${failCount})...`)
-
-      // Delay to respect rate limit
-      if (i + BATCH_SIZE < nodes.length) {
-        await new Promise(r => setTimeout(r, DELAY_MS))
-      }
+      await new Promise(r => setTimeout(r, DELAY_MS))
     }
 
-    console.log('✅ Hoàn thành Reverse Geocoding!')
+    console.log(`✅ Hoàn thành Reverse Geocoding! Thành công: ${successCount}, Lỗi: ${failCount}`)
 
   } catch (err) {
-    console.error('❌ Lỗi:', err)
+    console.error('❌ Lỗi DB:', err)
   } finally {
     await sequelize.close()
   }
 }
 
-reverseGeocodeNodes()
+reverseGeocodeNominatim()

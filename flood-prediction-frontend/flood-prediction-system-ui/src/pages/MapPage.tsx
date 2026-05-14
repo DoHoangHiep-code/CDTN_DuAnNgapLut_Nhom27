@@ -11,15 +11,15 @@ import { Spinner } from '../components/Spinner'
 import { ErrorState } from '../components/ErrorState'
 import { RiskBadge } from '../components/Badge'
 import { useAsync } from '../hooks/useAsync'
-import { getFloodPrediction, getFloodPredictionBbox } from '../services/api'
+import { getFloodPrediction, getFloodPredictionBbox, getNodeCurrentData } from '../services/api'
 import type { RiskLevel } from '../utils/types'
 import { formatDepthCm } from '../utils/floodDepth'
+import { cn } from '../utils/cn'
 import Supercluster from 'supercluster'
 import { LocationSearch, type NominatimResult } from '../components/LocationSearch'
 import { FloodReportModal } from '../components/FloodReportModal'
 import { FloodWarningCard } from '../components/FloodWarningCard'
 import { useSettings } from '../context/SettingsContext'
-import { ExpertChatbot } from '../components/ExpertChatbot'
 
 // Tile URLs cho từng kiểu bản đồ
 const TILE_URLS: Record<string, string> = {
@@ -327,6 +327,7 @@ export function MapPage() {
 
   const [searchInput, setSearchInput] = useState('')
   const [filterTerm, setFilterTerm] = useState('')
+  void filterTerm // value consumed by setFilterTerm callbacks only
 
   // Vị trí đã chọn để flyTo – có thể từ quận nội bộ hoặc kết quả Nominatim
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null)
@@ -334,16 +335,14 @@ export function MapPage() {
   // Marker pulse tại vị trí tìm kiếm từ Nominatim (khác với quận nội bộ)
   const [pulseMarker, setPulseMarker] = useState<[number, number] | null>(null)
 
+  // State lưu dữ liệu popup điểm ngập khi click vào Marker
+  const [selectedNodeData, setSelectedNodeData] = useState<any>(null)
+
   // State điều khiển mở/đóng modal gửi báo cáo ngập lụt
   const [reportModalOpen, setReportModalOpen] = useState(false)
 
   // Tọa độ tâm bản đồ – dùng để cấp cho FloodWarningCard
-  // Dùng useRef thay vì useState để tránh gây re-render mỗi khi map di chuyển
-  // (setState trong moveend → re-render → moveend lặp lại → vòng lặp vô tận)
-  const mapCenterRef = useRef({ lat: 21.0278, lon: 105.8342 })
   const [mapCenter, setMapCenter] = useState({ lat: 21.0278, lon: 105.8342 })
-  // Track bounds đã fetch lần cuối để tránh spam API khi re-render
-  const lastFetchedBoundsRef = useRef<{ minLat: number; maxLat: number; minLng: number; maxLng: number } | null>(null)
 
   const [map, setMap] = useState<L.Map | null>(null)
   const [searchParams] = useSearchParams()
@@ -370,16 +369,7 @@ export function MapPage() {
     return flood.data?.districts?.find((d) => d.id === districtIdFromUrl)
   }, [flood.data, districtIdFromUrl])
 
-  // filteredDistricts: chỉ dùng cho LocationSearch onFilterChange (không dùng cho markers)
-  const filteredDistricts = useMemo(() => {
-    const list = flood.data?.districts ?? []
-    const q = filterTerm.toLowerCase()
-    if (!q) return list
-    return list.filter((d) => d.name.toLowerCase().includes(q))
-  }, [flood.data, filterTerm])
-
   // floodPoints đã được thay bằng bboxData.districts (dynamic fetch theo viewport)
-  // Giữ filteredDistricts để onFilterChange vẫn hoạt động trên LocationSearch
 
   // Fly đến quận từ URL param khi dữ liệu sẵn sàng
   useEffect(() => {
@@ -388,105 +378,40 @@ export function MapPage() {
     map.flyTo(pos, 15, { animate: true, duration: 0.6 })
   }, [map, districtFromUrl])
 
-  // ── Hàm fetch BBox – được gọi bởi handler moveend/zoomend của Leaflet ────────
-  // Không nằm trong useEffect có dependency array là state → không gây re-render loop
-  const fetchBbox = useCallback((b: L.LatLngBounds) => {
-    const newBounds = {
-      minLat: b.getSouth(),
-      maxLat: b.getNorth(),
-      minLng: b.getWest(),
-      maxLng: b.getEast(),
-    }
-
-    // Guard: Chỉ fetch khi bounds thực sự thay đổi đáng kể (>0.001°)
-    // Ngăn spam API khi map re-render nhưng vị trí không đổi
-    const last = lastFetchedBoundsRef.current
-    if (last) {
-      const delta = Math.max(
-        Math.abs(newBounds.minLat - last.minLat),
-        Math.abs(newBounds.maxLat - last.maxLat),
-        Math.abs(newBounds.minLng - last.minLng),
-        Math.abs(newBounds.maxLng - last.maxLng),
-      )
-      if (delta < 0.001) return // Bounds chưa thay đổi đủ → bỏ qua
-    }
-    lastFetchedBoundsRef.current = newBounds
-
-    setIsFetchingBbox(true)
-    getFloodPredictionBbox({ ...newBounds, limit: 200 })
-      .then((result) => {
-        const pts: FloodPoint[] = (result?.districts ?? []).map((d) => ({
-          id:                  d.id,
-          name:                d.name,
-          risk:                (d.risk as RiskLevel) || 'safe',
-          predictedRainfallMm: d.predictedRainfallMm ?? 0,
-          depthCm:             d.flood_depth_cm ?? 0,
-          position:            centroid(d.polygon),
-        }))
-        setBboxData({ districts: pts })
-      })
-      .catch((err: unknown) => {
-        // Phân loại lỗi: timeout hoặc 503 → thông báo thân thiện qua toast
-        // Lý do: tránh văng lỗi đỏ console, UX mượt mà hơn
-        const axiosErr = err as any
-        const isTimeout =
-          axiosErr?.code === 'ECONNABORTED' ||
-          axiosErr?.message?.includes('timeout') ||
-          Boolean(axiosErr?.friendlyMessage?.includes('thời gian'))
-        const status = axiosErr?.response?.status
-        const is503 = status === 503
-
-        if (isTimeout || is503) {
-          toast.error(
-            axiosErr?.friendlyMessage ??
-              'Hệ thống đang quá tải hoặc model đang cần nhiều thời gian xử lý, vui lòng thử lại sau.',
-            { id: 'bbox-error', duration: 5000 },
-          )
-        } else {
-          // Lỗi mạng hoặc lỗi không mong muốn → chỉ log
-          console.warn('[MapPage] BBox fetch lỗi:', err)
-        }
-      })
-      .finally(() => setIsFetchingBbox(false))
-  }, []) // Không dependency vào bất kỳ state nào → hàm ổn định, không gây re-render
-
-  // ── Gắn listener moveend/zoomend vào Leaflet map instance ────────────────────
-  // useEffect chỉ chạy 1 lần khi map instance sẵn sàng (dependency: [map, fetchBbox])
-  // fetchBbox ổn định (useCallback []) → effect chỉ chạy đúng 1 lần
+  // ── Fetch BBox khi map thay đổi bounds ────────────────────────────────────
+  // Delay 400ms sau khi map dừng để tránh quá nhiều request liên tiếp
   useEffect(() => {
     if (!map) return
+    const b = map.getBounds()
 
-    // Fetch ngay lập tức khi map vừa mount
-    fetchBbox(map.getBounds())
+    const timer = setTimeout(async () => {
+      setIsFetchingBbox(true)
+      try {
+        const result = await getFloodPredictionBbox({
+          minLat: b.getSouth(),
+          maxLat: b.getNorth(),
+          minLng: b.getWest(),
+          maxLng: b.getEast(),
+          limit: 2000,  // chỉ nhận điểm ngập (flood_depth_cm > 10) → 2000 điểm vẫn nhẹ
+        })
+        const pts: FloodPoint[] = (result?.districts ?? []).map((d) => ({
+          id:                   d.id,
+          name:                 d.name,
+          risk:                 (d.risk as RiskLevel) || 'safe',
+          predictedRainfallMm:  d.predictedRainfallMm ?? 0,
+          depthCm:              d.flood_depth_cm ?? 0,
+          position:             centroid(d.polygon),
+        }))
+        setBboxData({ districts: pts })
+      } catch (err) {
+        console.warn('[MapPage] BBox fetch lỗi:', err)
+      } finally {
+        setIsFetchingBbox(false)
+      }
+    }, 400)
 
-    // Debounce 400ms: đợi map dừng hẳn mới gọi API
-    let timer: ReturnType<typeof setTimeout>
-    const handleMoveEnd = () => {
-      clearTimeout(timer)
-      timer = setTimeout(() => fetchBbox(map.getBounds()), 400)
-    }
-
-    map.on('moveend', handleMoveEnd)
-    map.on('zoomend', handleMoveEnd)
-
-    return () => {
-      clearTimeout(timer)
-      map.off('moveend', handleMoveEnd)
-      map.off('zoomend', handleMoveEnd)
-    }
-  }, [map, fetchBbox]) // fetchBbox ổn định → effect chỉ mount/unmount 1 lần
-
-  // ── onCenter callback ổn định – chỉ ghi vào Ref, setState với throttle ────────
-  // Dùng useCallback để MapBridge không nhận prop mới mỗi render → tránh re-mount
-  const handleMapCenter = useCallback((lat: number, lon: number) => {
-    // Luôn cập nhật ref (không gây re-render) – dùng cho fetchBbox
-    mapCenterRef.current = { lat, lon }
-    // Chỉ setMapCenter khi tọa độ thay đổi đáng kể để FloodWarningCard cập nhật
-    setMapCenter((prev) => {
-      if (Math.abs(prev.lat - lat) < 0.005 && Math.abs(prev.lon - lon) < 0.005) return prev
-      return { lat, lon }
-    })
-  }, [])
+    return () => clearTimeout(timer)
+  }, [map, mapCenter])  // re-run khi mapCenter thay đổi (MapBridge cập nhật sau moveend)
 
   // Xử lý chọn kết quả từ Nominatim geocoding
   const handleGeoResult = useCallback((result: NominatimResult) => {
@@ -578,6 +503,19 @@ export function MapPage() {
               </div>
             )}
 
+            {/* ── Empty State: Không có nguy cơ ngập ── */}
+            {!isFetchingBbox && bboxData.districts.length === 0 && (
+              <div className="absolute top-16 left-1/2 z-[1000] -translate-x-1/2 flex items-center gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/95 px-5 py-3 shadow-lg backdrop-blur dark:border-emerald-800 dark:bg-emerald-950/90">
+                <div className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-full bg-emerald-100 dark:bg-emerald-900/50">
+                  <span className="text-lg">✅</span>
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-emerald-800 dark:text-emerald-200">Không có nguy cơ ngập lụt</div>
+                  <div className="text-[11px] text-emerald-600 dark:text-emerald-400">Hệ thống ghi nhận hiện tại không có khu vực nào có nguy cơ ngập trong vùng hiển thị.</div>
+                </div>
+              </div>
+            )}
+
             {/* ── Leaflet MapContainer ── */}
             <MapContainer
               center={center}
@@ -594,7 +532,7 @@ export function MapPage() {
               {/* Cầu nối để lấy Leaflet map instance và theo dõi center map */}
               <MapBridge
                 onMap={setMap}
-                onCenter={handleMapCenter}
+                onCenter={(lat, lon) => setMapCenter({ lat, lon })}
               />
 
               {/* Fly đến vị trí đã chọn (cả quận nội bộ lẫn Nominatim) */}
@@ -611,13 +549,86 @@ export function MapPage() {
               {showFloodMarkers && (
                 <FloodClustersLayer
                   points={showRiskOverlay ? bboxData.districts : []}
-                  onSelectPoint={(p) => {
+                  onSelectPoint={async (p) => {
                     map?.flyTo(p.position, 15, { animate: true, duration: 0.6 })
+                    setSelectedNodeData({ ...p, loading: true })
+                    try {
+                      // GỌI API THEO YÊU CẦU CỦA USER: lấy data thật từ DB (không phải mock 1.1cm / 0 nữa)
+                      const data = await getNodeCurrentData(p.id)
+                      console.log('[Node Details API Result]', data)
+                      setSelectedNodeData({ ...p, loading: false, details: data })
+                    } catch (err) {
+                      console.error(err)
+                      setSelectedNodeData({ ...p, loading: false, error: true })
+                    }
                   }}
                   onSelectCluster={(lat, lng, nextZoom) => {
                     map?.flyTo([lat, lng], nextZoom, { animate: true, duration: 0.4 })
                   }}
                 />
+              )}
+
+              {/* Thẻ Popup hiển thị chi tiết điểm ngập và thời tiết thật (thay thế thẻ màu xanh lá hardcode) */}
+              {selectedNodeData && (
+                <Popup
+                  position={selectedNodeData.position as LatLngExpression}
+                  closeButton
+                  autoClose={false}
+                  closeOnClick={false}
+                  eventHandlers={{ remove: () => setSelectedNodeData(null) }}
+                >
+                  <div className="w-[260px] space-y-2">
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-100 pb-1">
+                      {selectedNodeData.name}
+                    </div>
+
+                    {selectedNodeData.loading ? (
+                       <div className="flex items-center gap-2 py-3 text-sm text-slate-600">
+                         <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+                         Đang tải dữ liệu thực tế...
+                       </div>
+                    ) : selectedNodeData.error ? (
+                       <div className="text-sm text-rose-600 py-2">Không thể lấy dữ liệu điểm này.</div>
+                    ) : (
+                       <div className="space-y-2">
+                         {/* Thẻ báo ngập chính */}
+                         <div className={cn(
+                           "flex items-center justify-between p-2 rounded-lg font-bold text-white shadow-sm",
+                           selectedNodeData.details?.flood?.risk_level === 'safe' || !selectedNodeData.details?.flood?.flood_depth_cm 
+                             ? "bg-emerald-600" 
+                             : "bg-rose-600"
+                         )}>
+                           <span className="text-xs">{selectedNodeData.details?.flood?.risk_level === 'safe' || !selectedNodeData.details?.flood?.flood_depth_cm ? '✅ AN TOÀN' : '⚠️ CÓ NGẬP'}</span>
+                           <span className="text-sm">{selectedNodeData.details?.flood?.flood_depth_cm ?? 0} cm</span>
+                         </div>
+                         
+                         <div className="text-[10px] text-slate-500">
+                           {selectedNodeData.details?.flood?.explanation}
+                         </div>
+
+                         {/* Dữ liệu thời tiết lấy theo station_id */}
+                         <div className="grid grid-cols-2 gap-1.5 pt-1">
+                           <div className="flex flex-col items-center bg-slate-50 dark:bg-slate-800 p-1.5 rounded-md border border-slate-100 dark:border-slate-700">
+                             <span className="text-[10px] text-slate-400">Nhiệt độ</span>
+                             <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{selectedNodeData.details?.weather?.temp ?? '--'}°C</span>
+                           </div>
+                           <div className="flex flex-col items-center bg-slate-50 dark:bg-slate-800 p-1.5 rounded-md border border-slate-100 dark:border-slate-700">
+                             <span className="text-[10px] text-slate-400">Độ ẩm</span>
+                             <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{selectedNodeData.details?.weather?.rhum ?? '--'}%</span>
+                           </div>
+                           <div className="flex flex-col items-center bg-sky-50 dark:bg-sky-900/30 p-1.5 rounded-md border border-sky-100 dark:border-sky-800/50">
+                             <span className="text-[10px] text-sky-500">Lượng mưa</span>
+                             <span className="text-xs font-bold text-sky-700 dark:text-sky-300">{selectedNodeData.details?.weather?.prcp ?? '--'} mm</span>
+                           </div>
+                           <div className="flex flex-col items-center bg-slate-50 dark:bg-slate-800 p-1.5 rounded-md border border-slate-100 dark:border-slate-700">
+                             <span className="text-[10px] text-slate-400">Mây che phủ</span>
+                             <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{selectedNodeData.details?.weather?.clouds ?? '--'}%</span>
+                           </div>
+                         </div>
+                       </div>
+                    )}
+                  </div>
+                </Popup>
               )}
             </MapContainer>
           </div>
@@ -652,15 +663,6 @@ export function MapPage() {
             Geocoding: OpenStreetMap Nominatim API
           </div>
         </Card>
-
-        {/* ── Expert Chatbot: chèn ngoài MapContainer, dùng memo nên không trigger re-render bản đồ ── */}
-        <div className="col-span-12 lg:col-span-4">
-          <ExpertChatbot
-            lat={mapCenter.lat}
-            lng={mapCenter.lon}
-            className="h-full"
-          />
-        </div>
       </div>
 
       {/* ── Modal Báo cáo ngập lụt ── */}

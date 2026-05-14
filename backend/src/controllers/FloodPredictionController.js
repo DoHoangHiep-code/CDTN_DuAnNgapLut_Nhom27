@@ -26,8 +26,8 @@ const { QueryTypes } = require('sequelize')
 const GRID_SIZE = 0.012
 
 // Số records tối đa có thể yêu cầu (chặn client gửi limit=99999)
-const MAX_LIMIT = 500
-const DEFAULT_LIMIT = 200
+const MAX_LIMIT = 5000
+const DEFAULT_LIMIT = 2000
 
 /**
  * Tạo shape polygon hình vuông quanh một điểm node.
@@ -85,48 +85,32 @@ class FloodPredictionController {
           })
         }
 
-        // Query flood_predictions JOIN grid_nodes trong bbox
-        // idx_grid_nodes_lat_lng + idx_flood_predictions_node_time đảm bảo query < 1s
-        let rows
-        try {
-          rows = await this.sequelize.query(
-            `SELECT
-               gn.node_id,
-               gn.latitude,
-               gn.longitude,
-               gn.location_name,
-               fp.risk_level,
-               fp.flood_depth_cm,
-               fp.time        AS prediction_time,
-               fp.explanation
-             FROM grid_nodes gn
-             LEFT JOIN LATERAL (
-               SELECT risk_level, flood_depth_cm, time, explanation
-               FROM   flood_predictions
-               WHERE  node_id = gn.node_id
-               ORDER  BY time DESC
-               LIMIT  1
-             ) fp ON TRUE
-             WHERE gn.latitude  BETWEEN :minLat AND :maxLat
-               AND gn.longitude BETWEEN :minLng AND :maxLng
-             ORDER BY gn.node_id
-             LIMIT :limit`,
-            {
-              replacements: { minLat, maxLat, minLng, maxLng, limit },
-              type: QueryTypes.SELECT,
-            },
-          )
-        } catch (dbErr) {
-          // Pool exhausted hoặc DB timeout → trả 503 rõ ràng thay vì crash
-          console.error('[FloodPredictionController] BBox DB error:', dbErr.message)
-          return res.status(503).json({
-            success: false,
-            error: {
-              message: 'Database đang bận, vui lòng thử lại sau vài giây.',
-              code: 'DB_TIMEOUT',
-            },
-          })
-        }
+        // ── Ultra-fast BBox Query (Materialized View) ─────────────────────
+        // mv_latest_flood_predictions = DISTINCT ON (node_id) ORDER BY time DESC
+        // Chỉ có 53K rows, được index trên node_id → JOIN nhanh với grid_nodes.
+        // Migration 015 tạo MV này; Cronjob refresh sau mỗi lần chạy.
+        const rows = await this.sequelize.query(
+          `SELECT
+             gn.node_id,
+             gn.latitude,
+             gn.longitude,
+             gn.location_name,
+             mv.risk_level,
+             mv.flood_depth_cm,
+             mv.time        AS prediction_time,
+             mv.explanation
+           FROM mv_latest_flood_predictions mv
+           JOIN grid_nodes gn ON gn.node_id = mv.node_id
+           WHERE mv.flood_depth_cm > 10
+             AND gn.latitude  BETWEEN :minLat AND :maxLat
+             AND gn.longitude BETWEEN :minLng AND :maxLng
+           ORDER BY mv.flood_depth_cm DESC
+           LIMIT :limit`,
+          {
+            replacements: { minLat, maxLat, minLng, maxLng, limit },
+            type: QueryTypes.SELECT,
+          },
+        )
 
         if (!rows || rows.length === 0) {
           // Viewport không có node nào → trả mảng rỗng (không fallback demoData)
