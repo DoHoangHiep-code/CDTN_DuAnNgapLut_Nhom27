@@ -352,7 +352,7 @@ export function MapPage() {
   const defaultZoom = 12
 
   // ── BBox dynamic fetch khi map di chuyển ──────────────────────────────────
-  // bboxData: nodes trong viewport hiện tại (tối đa 200)
+  // bboxData: nodes trong viewport hiện tại (tối đa 2000)
   const [bboxData, setBboxData] = useState<{ districts: FloodPoint[] }>({
     districts: [],
   })
@@ -369,8 +369,6 @@ export function MapPage() {
     return flood.data?.districts?.find((d) => d.id === districtIdFromUrl)
   }, [flood.data, districtIdFromUrl])
 
-  // floodPoints đã được thay bằng bboxData.districts (dynamic fetch theo viewport)
-
   // Fly đến quận từ URL param khi dữ liệu sẵn sàng
   useEffect(() => {
     if (!map || !districtFromUrl) return
@@ -378,13 +376,23 @@ export function MapPage() {
     map.flyTo(pos, 15, { animate: true, duration: 0.6 })
   }, [map, districtFromUrl])
 
+  // ── Ref for AbortController to cancel in-flight BBox requests ──────────
+  const bboxAbortRef = useRef<AbortController | null>(null)
+
   // ── Fetch BBox khi map thay đổi bounds ────────────────────────────────────
-  // Delay 400ms sau khi map dừng để tránh quá nhiều request liên tiếp
+  // Debounce 300ms + AbortController to cancel stale requests and free pg-pool
   useEffect(() => {
     if (!map) return
     const b = map.getBounds()
 
     const timer = setTimeout(async () => {
+      // Abort previous in-flight request before starting new one
+      if (bboxAbortRef.current) {
+        bboxAbortRef.current.abort()
+      }
+      const controller = new AbortController()
+      bboxAbortRef.current = controller
+
       setIsFetchingBbox(true)
       try {
         const result = await getFloodPredictionBbox({
@@ -393,7 +401,7 @@ export function MapPage() {
           minLng: b.getWest(),
           maxLng: b.getEast(),
           limit: 2000,  // chỉ nhận điểm ngập (flood_depth_cm > 10) → 2000 điểm vẫn nhẹ
-        })
+        }, controller.signal)
         const pts: FloodPoint[] = (result?.districts ?? []).map((d) => ({
           id:                   d.id,
           name:                 d.name,
@@ -404,13 +412,23 @@ export function MapPage() {
         }))
         setBboxData({ districts: pts })
       } catch (err) {
-        console.warn('[MapPage] BBox fetch lỗi:', err)
+        // Silently ignore abort errors – expected when user pans/zooms rapidly
+        if (!axios.isCancel(err)) {
+          console.warn('[MapPage] BBox fetch lỗi:', err)
+        }
       } finally {
         setIsFetchingBbox(false)
       }
-    }, 400)
+    }, 300)
 
-    return () => clearTimeout(timer)
+    return () => {
+      clearTimeout(timer)
+      // Also abort any in-flight request when effect cleans up
+      if (bboxAbortRef.current) {
+        bboxAbortRef.current.abort()
+        bboxAbortRef.current = null
+      }
+    }
   }, [map, mapCenter])  // re-run khi mapCenter thay đổi (MapBridge cập nhật sau moveend)
 
   // Xử lý chọn kết quả từ Nominatim geocoding

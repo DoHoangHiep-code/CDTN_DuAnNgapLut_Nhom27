@@ -5,6 +5,7 @@ Dự đoán độ ngập lụt bằng CatBoost model đã train sẵn.
 Chạy: uvicorn main:app --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 import math
 import logging
 from contextlib import asynccontextmanager
@@ -29,6 +30,18 @@ async def lifespan(app: FastAPI):
     _model = CatBoostRegressor()
     _model.load_model(MODEL_PATH)
     logger.info("Model tải thành công. Features: %s", _model.feature_names_)
+
+    # ── Warm-up: chạy predict giả để JIT/nội bộ CatBoost khởi tạo đầy đủ ──────
+    # Tránh độ trễ lớn ở request THỰC ĐẦU TIÊN do lazy initialization.
+    try:
+        num_features = len(FEATURE_ORDER)
+        dummy_data = [[0.0] * num_features]  # 1 dòng toàn số 0
+        _model.predict(dummy_data)
+        logger.info("[Warm-up] Model warm-up thành công với %d features.", num_features)
+    except Exception as e:
+        # Warm-up thất bại không crash server – chỉ log cảnh báo
+        logger.warning("[Warm-up] Warm-up thất bại (bỏ qua): %s", e)
+
     yield
     logger.info("AI service đang tắt.")
 
@@ -182,7 +195,14 @@ async def predict_flood_batch(request: Request):
 
     try:
         matrix = [[row[feat] for feat in FEATURE_ORDER] for row in items]
-        raw = _model.predict(matrix)
+
+        # ── Chạy predict trong thread riêng để không block Event Loop ────────────
+        # _model.predict() là tác vụ CPU-bound (tính toán CatBoost thuần Python/C++).
+        # Nếu chạy trực tiếp trong async handler, nó sẽ block toàn bộ event loop
+        # của FastAPI trong suốt thời gian tính toán → các request khác bị treo.
+        # asyncio.to_thread() đẩy sang ThreadPoolExecutor, giải phóng event loop.
+        raw = await asyncio.to_thread(_model.predict, matrix)
+
         results = []
         for val in raw:
             depth = max(0.0, float(val))

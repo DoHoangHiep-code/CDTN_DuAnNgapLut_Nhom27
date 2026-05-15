@@ -63,7 +63,7 @@ export async function getFloodPredictionBbox(bbox: {
   minLng: number
   maxLng: number
   limit?: number
-}) {
+}, signal?: AbortSignal) {
   const res = await apiV1.get<any>('/flood-prediction', {
     params: {
       min_lat: bbox.minLat,
@@ -72,6 +72,7 @@ export async function getFloodPredictionBbox(bbox: {
       max_lng: bbox.maxLng,
       limit: bbox.limit ?? 200,
     },
+    signal,
   })
   return (res.data?.data ?? res.data) as {
     updatedAtIso: string
