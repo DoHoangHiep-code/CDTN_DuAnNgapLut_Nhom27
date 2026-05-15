@@ -1,168 +1,163 @@
 'use strict'
 
 /**
- * scripts/geocode_location_names.js
- * ─────────────────────────────────────────────────────────────────────────────
- * Cập nhật location_name cho grid_nodes theo phương pháp phân vùng ô lưới:
- *
- * Thay vì gọi API từng node (53K = không khả thi), script dùng chiến thuật:
- *   1. Chia bản đồ Hà Nội thành lưới ô ~0.5km × 0.5km (~2000 ô)
- *   2. Với mỗi ô, gọi Nominatim 1 lần cho tọa độ tâm ô
- *   3. Tất cả nodes trong ô đó được gán cùng tên địa danh
- *   4. Delay 1.2s giữa mỗi call để tránh rate limit
- *
- * Kết quả: ~100% nodes có tên Phường/Xã chính xác, chỉ cần ~2000 API calls.
- *
- * Chạy: node scripts/geocode_location_names.js
- * ─────────────────────────────────────────────────────────────────────────────
+ * Tối ưu hóa: Zoom 18 (lấy Ngõ/Ngách), Chống Rác Dữ Liệu, Cập nhật cả Quận/Huyện và 88 Trạm
  */
 
 require('dotenv').config()
-
 const axios  = require('axios')
-const { sequelize } = require('../src/db/sequelize')
+const { sequelize } = require('../../src/db/sequelize') 
 const { QueryTypes } = require('sequelize')
 
-// ─── Cấu hình ─────────────────────────────────────────────────────────────────
-const CELL_DEG    = 0.004    // ~0.44km per cell (cân bằng giữa accuracy và số API calls)
-const DELAY_MS    = 1200     // 1.2s giữa mỗi Nominatim call
-const UPDATE_BATCH = 2000    // rows mỗi UPDATE batch
+const CELL_DEG    = 0.004
+const DELAY_MS    = 1200
+const UPDATE_BATCH = 2000
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse'
-
 const sleep = ms => new Promise(r => setTimeout(r, ms))
-
-// ─── Hà Nội bounding box (thực tế từ grid_nodes) ─────────────────────────────
 const BBOX = { minLat: 20.86, maxLat: 21.18, minLon: 105.62, maxLon: 105.95 }
 
-// ─── Parse địa chỉ từ Nominatim response ─────────────────────────────────────
-function parseLocationName(addr) {
-  if (!addr) return null
-  const ward     = addr.quarter || addr.suburb || addr.neighbourhood
-  const district = addr.city_district || addr.county
-  const city     = addr.city || addr.state
-
-  if (ward && district) return `${ward}, ${district}`
-  if (ward && city)     return `${ward}, ${city}`
-  if (district)         return district
-  return null
+// ─── Hàm lọc rác dữ liệu ─────────────────────────────────────────────────────
+function cleanData(text) {
+  if (!text) return null;
+  text = text.trim();
+  // Loại bỏ nếu là số (105.xxx), hoặc quá ngắn, hoặc chứa ký tự lạ
+  if (!isNaN(text) || text.match(/^[0-9.]+$/) || text.length < 3) return null;
+  return text;
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Bóc tách địa chỉ chi tiết ───────────────────────────────────────────────
+function parseAddress(addr) {
+  if (!addr) return { locationName: null, districtName: null }
+
+  // Lấy chi tiết Ngõ/Ngách/Đường
+  const roadRaw = addr.road || addr.pedestrian || addr.footway || addr.residential || addr.path
+  const road = cleanData(roadRaw)
+
+  // Lấy Phường/Xã (Đã cover Xã Thư Lâm, Xã Liên Minh...)
+  const wardRaw = addr.quarter || addr.suburb || addr.village || addr.neighbourhood || addr.hamlet
+  const ward = cleanData(wardRaw)
+
+  // Lấy Quận/Huyện
+  const districtRaw = addr.city_district || addr.county || addr.district || addr.town
+  const district = cleanData(districtRaw)
+
+  let locationName = '';
+  if (road && ward && district) locationName = `${road}, ${ward}, ${district}`;
+  else if (road && ward) locationName = `${road}, ${ward}`;
+  else if (road && district) locationName = `${road}, ${district}`;
+  else if (ward && district) locationName = `Khu vực ${ward}, ${district}`;
+  else if (ward) locationName = `Khu vực ${ward}`;
+  else if (district) locationName = `Khu vực ${district}`;
+  else locationName = null;
+
+  return { locationName, districtName: district }
+}
+
 async function main() {
   console.log('\n╔══════════════════════════════════════════════════════════════╗')
-  console.log('║   AQUAALERT – Geocode location_name (Cell Grid Strategy)     ║')
+  console.log('║   AQUAALERT – ĐẠI TU GEOCODING (Nodes + Stations) - V2       ║')
   console.log('╚══════════════════════════════════════════════════════════════╝\n')
 
   await sequelize.authenticate()
 
-  // Tải nodes chưa có tên hoặc có tên dạng "Grid_"
-  console.log('[Query] Đang tải nodes cần geocode...')
-  const nodes = await sequelize.query(`
-    SELECT node_id, latitude, longitude, location_name
-    FROM grid_nodes
-    WHERE location_name IS NULL OR location_name LIKE 'Grid_%'
-    ORDER BY node_id;
-  `, { type: QueryTypes.SELECT })
-  console.log(`[Query] ${nodes.length.toLocaleString('vi-VN')} nodes cần cập nhật.\n`)
+  // SỬA ĐỔI QUAN TRỌNG: Xóa trắng TOÀN BỘ dữ liệu định vị hiện tại để ép chạy lại từ A-Z
+  console.log('[Cleanup] Đang xóa toàn bộ dữ liệu Geocoding cũ để làm mới 100%...')
+  await sequelize.query(`
+    UPDATE grid_nodes SET location_name = NULL, district_name = NULL;
+  `)
+  await sequelize.query(`
+    UPDATE weather_stations SET location_name = NULL;
+  `)
 
+  // =====================================================================
+  // PHẦN 1: GEOCODING CHO 88 TRẠM (WEATHER STATIONS)
+  // =====================================================================
+  console.log('\n[Stations] Đang cập nhật 88 Trạm thời tiết...')
+  const stations = await sequelize.query(`SELECT id, latitude, longitude FROM weather_stations`, { type: QueryTypes.SELECT })
+  
+  for (let i = 0; i < stations.length; i++) {
+    try {
+      const res = await axios.get(NOMINATIM_URL, {
+        params: { lat: stations[i].latitude, lon: stations[i].longitude, format: 'json', zoom: 18, addressdetails: 1 },
+        headers: { 'User-Agent': 'AQUAALERT-Geocoder/3.0' }
+      })
+      const parsed = parseAddress(res.data?.address)
+      if (parsed.locationName) {
+        await sequelize.query(`UPDATE weather_stations SET location_name = '${parsed.locationName.replace(/'/g, "''")}' WHERE id = '${stations[i].id}'`)
+      }
+    } catch (e) {}
+    process.stdout.write(`\r  └ Tiến độ trạm: ${i+1}/${stations.length}`)
+    await sleep(DELAY_MS)
+  }
+
+  // =====================================================================
+  // PHẦN 2: GEOCODING CHO GRID NODES (Chia lưới 0.44km)
+  // =====================================================================
+  console.log('\n\n[Nodes] Đang tải 53K nodes...')
+  // Bỏ điều kiện WHERE vì ta đã xóa trắng ở bước Cleanup, giờ select ALL
+  const nodes = await sequelize.query(`SELECT node_id, latitude, longitude FROM grid_nodes`, { type: QueryTypes.SELECT })
+  
   if (!nodes.length) {
-    console.log('✅ Tất cả nodes đã có location_name. Không cần làm gì.')
+    console.log('✅ Lỗi: Không tìm thấy nodes nào trong Database!')
     return
   }
 
-  // ── Bước 1: Nhóm nodes theo ô lưới ──────────────────────────────────────────
-  console.log('[Grid] Đang nhóm nodes theo ô lưới...')
-  const cellMap = new Map()  // key: `${cellR}_${cellC}` → { centLat, centLon, nodeIds[] }
-
+  const cellMap = new Map() 
   for (const n of nodes) {
-    const lat = parseFloat(n.latitude)
-    const lon = parseFloat(n.longitude)
-    const r   = Math.floor((lat - BBOX.minLat) / CELL_DEG)
-    const c   = Math.floor((lon - BBOX.minLon) / CELL_DEG)
+    const r = Math.floor((parseFloat(n.latitude) - BBOX.minLat) / CELL_DEG)
+    const c = Math.floor((parseFloat(n.longitude) - BBOX.minLon) / CELL_DEG)
     const key = `${r}_${c}`
-
-    if (!cellMap.has(key)) {
-      cellMap.set(key, {
-        centLat: BBOX.minLat + (r + 0.5) * CELL_DEG,
-        centLon: BBOX.minLon + (c + 0.5) * CELL_DEG,
-        nodeIds: [],
-      })
-    }
+    if (!cellMap.has(key)) cellMap.set(key, { centLat: BBOX.minLat + (r + 0.5) * CELL_DEG, centLon: BBOX.minLon + (c + 0.5) * CELL_DEG, nodeIds: [] })
     cellMap.get(key).nodeIds.push(String(n.node_id))
   }
-  console.log(`[Grid] Tổng ô lưới cần gọi API: ${cellMap.size}\n`)
 
-  // ── Bước 2: Gọi Nominatim cho từng ô + update DB theo batch ──────────────────
-  const nameMap = new Map()   // node_id → location_name
+  console.log(`[Nodes] Đã tạo lưới: Cần gọi ${cellMap.size} ô lưới...`)
+  const nameMap = new Map() 
   let cellDone = 0
-  let apiSuccess = 0
-  let apiFail = 0
 
   for (const [key, cell] of cellMap.entries()) {
     try {
       const res = await axios.get(NOMINATIM_URL, {
-        params: { lat: cell.centLat, lon: cell.centLon, format: 'json', zoom: 16, addressdetails: 1 },
-        headers: { 'User-Agent': 'AQUAALERT-GeocoderBot/1.0' },
+        params: { lat: cell.centLat, lon: cell.centLon, format: 'json', zoom: 18, addressdetails: 1 },
+        headers: { 'User-Agent': 'AQUAALERT-Geocoder/3.0' },
         timeout: 8000,
       })
-      const name = parseLocationName(res.data?.address)
-      if (name) {
-        apiSuccess++
-        for (const nid of cell.nodeIds) nameMap.set(nid, name)
-      } else {
-        apiFail++
-        // Fallback: format tọa độ đẹp hơn dạng cũ
-        const fallback = `Khu vực ${cell.centLat.toFixed(3)}, ${cell.centLon.toFixed(3)}`
-        for (const nid of cell.nodeIds) nameMap.set(nid, fallback)
-      }
+      const parsed = parseAddress(res.data?.address)
+      
+      const locName = parsed.locationName || `Khu vực ${cell.centLat.toFixed(3)}, ${cell.centLon.toFixed(3)}`
+      const distName = parsed.districtName || 'Hà Nội'
+
+      for (const nid of cell.nodeIds) nameMap.set(nid, { loc: locName, dist: distName })
     } catch {
-      apiFail++
-      const fallback = `Khu vực ${cell.centLat.toFixed(3)}, ${cell.centLon.toFixed(3)}`
-      for (const nid of cell.nodeIds) nameMap.set(nid, fallback)
+      for (const nid of cell.nodeIds) nameMap.set(nid, { loc: `Khu vực ${cell.centLat.toFixed(3)}, ${cell.centLon.toFixed(3)}`, dist: 'Hà Nội' })
     }
 
     cellDone++
-    process.stdout.write(`\r  Tiến độ: ${cellDone}/${cellMap.size} ô | ✅ ${apiSuccess} | ❌ ${apiFail}`)
+    process.stdout.write(`\r  Tiến độ: ${cellDone}/${cellMap.size} ô`)
     await sleep(DELAY_MS)
 
-    // Batch update DB mỗi 200 ô để không mất dữ liệu nếu bị gián đoạn
     if (cellDone % 200 === 0 || cellDone === cellMap.size) {
       if (nameMap.size > 0) {
         const entries = [...nameMap.entries()]
         for (let i = 0; i < entries.length; i += UPDATE_BATCH) {
           const chunk = entries.slice(i, i + UPDATE_BATCH)
-          const values = chunk.map(([id, name]) =>
-            `('${id}', '${name.replace(/'/g, "''")}')`
+          const values = chunk.map(([id, data]) => 
+            `('${id}', '${data.loc.replace(/'/g, "''")}', '${data.dist.replace(/'/g, "''")}')`
           ).join(',\n')
+          
           await sequelize.query(`
             UPDATE grid_nodes AS gn
-            SET location_name = v.name
-            FROM (VALUES ${values}) AS v(node_id, name)
+            SET location_name = v.loc, district_name = v.dist
+            FROM (VALUES ${values}) AS v(node_id, loc, dist)
             WHERE gn.node_id::text = v.node_id;
           `)
         }
-        console.log(`\n  → Đã lưu ${nameMap.size.toLocaleString('vi-VN')} nodes vào DB`)
         nameMap.clear()
       }
     }
   }
 
-  // ── Tổng kết ──────────────────────────────────────────────────────────────
-  const [check] = await sequelize.query(`
-    SELECT
-      COUNT(*) FILTER (WHERE location_name NOT LIKE 'Grid_%' AND location_name IS NOT NULL) AS named,
-      COUNT(*) FILTER (WHERE location_name LIKE 'Grid_%' OR location_name IS NULL) AS unnamed
-    FROM grid_nodes;
-  `, { type: QueryTypes.SELECT })
-
-  console.log('\n──────────────────────────────────────────────────────────────')
-  console.log(`✅ HOÀN THÀNH Geocoding`)
-  console.log(`   Đã đặt tên: ${Number(check.named).toLocaleString('vi-VN')} nodes`)
-  console.log(`   Còn khuyết: ${Number(check.unnamed).toLocaleString('vi-VN')} nodes`)
-  console.log(`   API success: ${apiSuccess} | fail: ${apiFail} / ${cellMap.size} ô`)
-  console.log('──────────────────────────────────────────────────────────────\n')
+  console.log('\n✅ Xong! Database đã được Geocode lại 100% từ đầu!')
 }
 
-main()
-  .catch(e => { console.error('❌', e.message); process.exit(1) })
-  .finally(() => sequelize.close())
+main().catch(e => console.error('❌', e.message)).finally(() => sequelize.close())

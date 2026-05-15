@@ -20,8 +20,7 @@ module.exports = (sequelize) => {
       hour:             { type: DataTypes.INTEGER,  allowNull: true }, // 0–23
       rainy_season_flag:{ type: DataTypes.BOOLEAN,  allowNull: true }, // true = tháng 5–10
 
-      // ── De-normalize từ GridNode (để báo cáo nhanh, tránh JOIN) ──────────
-      location_name: { type: DataTypes.STRING(512), allowNull: true },
+
     },
     {
       tableName:   'flood_predictions',

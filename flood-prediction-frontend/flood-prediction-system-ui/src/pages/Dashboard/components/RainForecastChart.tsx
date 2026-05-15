@@ -10,7 +10,7 @@ import {
   Legend,
 } from 'chart.js'
 import { Chart } from 'react-chartjs-2'
-import type { DashboardForecastPoint } from '../utils/types'
+import type { DashboardForecastPoint } from '../../../utils/types'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Filler, Tooltip, Legend)
 

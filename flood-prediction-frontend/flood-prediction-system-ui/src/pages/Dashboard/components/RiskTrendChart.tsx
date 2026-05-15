@@ -7,7 +7,7 @@ import {
   Legend,
 } from 'chart.js'
 import { Bar } from 'react-chartjs-2'
-import type { DashboardRiskTrendDay } from '../utils/types'
+import type { DashboardRiskTrendDay } from '../../../utils/types'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 
