@@ -13,6 +13,7 @@ interface Message {
   suggestAreas?: boolean
   areaKeywords?: string[]
   area?: string
+  actionButton?: { label: string; payload: string }
 }
 
 interface Props {
@@ -23,7 +24,7 @@ interface Props {
 
 async function askChatbot(
   question: string
-): Promise<{ reply: string; expertNodes?: any[]; suggestAreas?: boolean; areaKeywords?: string[]; area?: string }> {
+): Promise<{ reply: string; expertNodes?: any[]; suggestAreas?: boolean; areaKeywords?: string[]; area?: string; actionButton?: { label: string; payload: string } }> {
   try {
     const res = await askChatbotApi(question)
     if (!res.success) throw new Error(res.error?.message ?? 'Không có phản hồi.')
@@ -35,10 +36,11 @@ async function askChatbot(
     const suggestAreas = res.suggestAreas ?? res.data?.suggestAreas
     const areaKeywords = res.areaKeywords ?? res.data?.areaKeywords
     const area         = res.area         ?? res.data?.area
+    const actionButton = res.actionButton ?? res.data?.actionButton
 
     if (!reply) throw new Error('Không nhận được phản hồi từ chatbot.')
 
-    return { reply, expertNodes, suggestAreas, areaKeywords, area }
+    return { reply, expertNodes, suggestAreas, areaKeywords, area, actionButton }
   } catch (err: unknown) {
     if (err && typeof err === 'object' && 'response' in err) {
       const axiosErr = err as { response?: { data?: unknown; status?: number } }
@@ -181,6 +183,7 @@ export function ChatInterface({ onClose }: Props) {
         suggestAreas: result.suggestAreas,
         areaKeywords: result.areaKeywords,
         area: result.area,
+        actionButton: result.actionButton,
       }
       setMessages((prev) => [...prev, botMsg])
     } catch (err: unknown) {
@@ -266,6 +269,24 @@ export function ChatInterface({ onClose }: Props) {
             {msg.role === 'bot' && msg.expertNodes && msg.expertNodes.length > 0 && (
               <div className="mt-2 space-y-2 pl-9">
                 {renderExpertNodes(msg.expertNodes, msg.text)}
+              </div>
+            )}
+
+            {/* Render actionButton nếu có */}
+            {msg.role === 'bot' && msg.actionButton && (
+              <div className="mt-2 pl-9">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const parts = msg.actionButton!.payload.split('|')
+                    if (parts.length > 1) {
+                      void handleExpertDetailClick(parts[1], "Phân tích chuyên sâu")
+                    }
+                  }}
+                  className="rounded-lg bg-sky-100 px-3 py-2 text-sm font-medium text-sky-800 transition hover:bg-sky-200 dark:bg-sky-900/50 dark:text-sky-300 dark:hover:bg-sky-900/70"
+                >
+                  {msg.actionButton.label}
+                </button>
               </div>
             )}
 

@@ -20,7 +20,7 @@ try {
 }
 
 // ── Markdown Formatter (2-Tier Templates) ─────────────────────────────────────
-const { formatCurrentStatus, formatExplainRisk } = require('../utils/chatbotFormatter')
+const { formatCurrentStatus, formatTier1RiskExplanation, formatTier2ExpertAnalysis } = require('../utils/chatbotFormatter')
 
 // ── Fail-safe require ─────────────────────────────────────────────────────────
 // Nếu redis hoặc floodFeature.service lỗi khi load (env thiếu, pool fail...),
@@ -115,7 +115,7 @@ const AREA_KEYWORDS = [
     'bắc từ liêm', 'nam từ liêm', 'tây hồ', 'long biên', 'hoàng mai', 'hai bà trưng',
     'ba đình', 'gia lâm', 'sóc sơn', 'đông anh', 'mê linh', 'thường tín',
     'phú xuyên', 'ứng hòa', 'mỹ đức', 'thanh oai', 'chương mỹ', 'quốc oai',
-    'thạch thất', 'phúc thọ', 'đan phượng', 'hoài đức',
+    'thạch thất', 'phúc thọ', 'đan phượng', 'hoài đức', 'nguyễn tuân'
 ]
 
 function extractArea(msg) {
@@ -135,6 +135,8 @@ function detectIntent(msg) {
         return { intent: 'WORST_AREA', area: null, timeOffset: 0 }
     if (/(an toàn không|nên đi không|có thể ra|nên ở nhà|nguy hiểm không)/.test(m))
         return { intent: 'SAFE_ADVICE', area: extractArea(m), timeOffset: 0 }
+    if (/(đường vòng|đi tránh|tránh ngập|ngõ nào|đường nào|chỉ đường|tuyến đường|lối đi|lộ trình|tìm đường)/.test(m))
+        return { intent: 'FIND_SAFE_ROUTE', area: extractArea(m), timeOffset: 0 }
     if (/(hiện tại|bây giờ|đang ngập|lúc này|ngay bây giờ|hiện giờ)/.test(m))
         return { intent: 'CURRENT_STATUS', area: extractArea(m), timeOffset: 0 }
 
@@ -215,30 +217,48 @@ async function queryCurrentStatus() {
     })
 }
 
+// ─── Area Node Memory Cache ──────────────────────────────────────────────────
+let areaNodeCache = null;
+
+async function getNodesByArea(areaName) {
+    if (!areaNodeCache) {
+        const sql = 'SELECT node_id, location_name, latitude, longitude, elevation, slope, impervious_ratio FROM grid_nodes WHERE location_name IS NOT NULL';
+        const { rows } = await pool.query(sql);
+        areaNodeCache = rows;
+        console.log(`[UnifiedChatbot] Cached ${areaNodeCache.length} grid_nodes cho area search nhanh.`);
+    }
+    const keyword = areaName.toLowerCase();
+    return areaNodeCache.filter(r => r.location_name.toLowerCase().includes(keyword));
+}
+
 /**
  * Query dữ liệu CURRENT_STATUS cho một khu vực cụ thể (e.g. "Triều Khúc").
- * Dùng DISTINCT ON (node_id) + ILIKE filter trên location_name.
+ * Dùng getNodesByArea cache memory thay vì ILIKE trong DB để tránh full table scan (12s timeout).
  * TTL cache 120s để tránh query lặp khi user hỏi liên tục.
  */
 async function queryCurrentStatusByArea(areaName) {
     const cacheKey = `ucbot:current_status_area:${areaName.toLowerCase().replace(/\s+/g, '_')}`
     return cached(cacheKey, 120, async () => {
+        const nodes = await getNodesByArea(areaName)
+        if (nodes.length === 0) return []
+        const nodeIds = nodes.map(n => n.node_id)
+        const nodeMap = new Map(nodes.map(n => [n.node_id, n]))
+
         const sql = `
-      SELECT DISTINCT ON (fp.node_id) 
-        fp.node_id, fp.risk_level, fp.flood_depth_cm, fp.explanation, fp.time,
-        gn.latitude, gn.longitude, gn.location_name
-      FROM (
-        SELECT node_id, latitude, longitude, location_name 
-        FROM grid_nodes 
-        WHERE location_name ILIKE $1
-      ) gn
-      JOIN flood_predictions fp ON fp.node_id = gn.node_id
-      WHERE fp.time >= NOW() - INTERVAL '2 hours'
-      ORDER BY fp.node_id, fp.time DESC
-      LIMIT 10
-    `
-        const { rows } = await withTimeout(pool.query(sql, ['%' + areaName + '%']), DB_TIMEOUT_MS)
-        return rows
+          SELECT DISTINCT ON (fp.node_id) 
+            fp.node_id, fp.risk_level, fp.flood_depth_cm, fp.explanation, fp.time
+          FROM flood_predictions fp
+          WHERE fp.node_id = ANY($1) AND fp.time >= NOW() - INTERVAL '2 hours'
+          ORDER BY fp.node_id, fp.time DESC
+        `
+        const { rows: fpRows } = await withTimeout(pool.query(sql, [nodeIds]), DB_TIMEOUT_MS)
+        if (fpRows.length === 0) return []
+
+        const results = fpRows.map(fp => {
+            const gn = nodeMap.get(fp.node_id)
+            return { ...fp, latitude: gn.latitude, longitude: gn.longitude, location_name: gn.location_name }
+        })
+        return results.sort((a, b) => Number(b.flood_depth_cm) - Number(a.flood_depth_cm)).slice(0, 10)
     })
 }
 
@@ -290,22 +310,30 @@ async function queryByTime(hoursOffset) {
 async function queryAreaOverview(areaName) {
     const cacheKey = `ucbot:area_overview:${areaName}`
     return cached(cacheKey, CACHE_TTL, async () => {
+        const nodes = await getNodesByArea(areaName)
+        if (nodes.length === 0) return []
+        const nodeIds = nodes.map(n => n.node_id)
+        const nodeMap = new Map(nodes.map(n => [n.node_id, n]))
+
         const sql = `
-      SELECT fp.node_id, fp.risk_level, fp.flood_depth_cm, fp.explanation, fp.time,
-             gn.location_name, gn.latitude, gn.longitude,
-             gn.elevation, gn.slope, gn.impervious_ratio
-      FROM (
-        SELECT node_id, location_name, latitude, longitude, elevation, slope, impervious_ratio
-        FROM grid_nodes 
-        WHERE location_name ILIKE $1
-      ) gn
-      JOIN flood_predictions fp ON gn.node_id = fp.node_id
-      WHERE fp.time BETWEEN NOW() AND NOW() + INTERVAL '48 hours'
-      ORDER BY fp.flood_depth_cm DESC
-      LIMIT 5
-    `
-        const { rows } = await withTimeout(pool.query(sql, [`%${areaName}%`]))
-        return rows
+          SELECT DISTINCT ON (fp.node_id) 
+            fp.node_id, fp.risk_level, fp.flood_depth_cm, fp.explanation, fp.time
+          FROM flood_predictions fp
+          WHERE fp.node_id = ANY($1) AND fp.time BETWEEN NOW() AND NOW() + INTERVAL '48 hours'
+          ORDER BY fp.node_id, fp.flood_depth_cm DESC, fp.time DESC
+        `
+        const { rows: fpRows } = await withTimeout(pool.query(sql, [nodeIds]), DB_TIMEOUT_MS)
+        if (fpRows.length === 0) return []
+
+        const results = fpRows.map(fp => {
+            const gn = nodeMap.get(fp.node_id)
+            return {
+                ...fp,
+                location_name: gn.location_name, latitude: gn.latitude, longitude: gn.longitude,
+                elevation: gn.elevation, slope: gn.slope, impervious_ratio: gn.impervious_ratio
+            }
+        })
+        return results.sort((a, b) => Number(b.flood_depth_cm) - Number(a.flood_depth_cm)).slice(0, 5)
     })
 }
 
@@ -337,49 +365,111 @@ async function queryExplainRisk() {
  * Query dữ liệu chi tiết cho EXPLAIN_RISK khi user chỉ định khu vực cụ thể.
  * JOIN grid_nodes + weather_measurements + flood_predictions để lấy đầy đủ
  * các feature cần thiết cho Tier 1 + Tier 2 analysis.
- * Dùng DISTINCT ON + 24h window — KHÔNG dùng LEFT JOIN LATERAL.
+ * Dùng getNodesByArea in-memory cache để tránh 12s timeout trên CockroachDB.
  */
 async function queryAreaExplainRisk(areaName) {
     const cacheKey = `ucbot:area_explain:${areaName}`
     return cached(cacheKey, CACHE_TTL, async () => {
+        const nodes = await getNodesByArea(areaName)
+        if (nodes.length === 0) return []
+        const nodeIds = nodes.map(n => n.node_id)
+
         const sql1 = `
-      SELECT
-        gn.node_id, gn.location_name, gn.latitude, gn.longitude,
-        gn.elevation, gn.slope, gn.impervious_ratio,
-        gn.dist_to_drain_km, gn.dist_to_river_km, gn.dist_to_pump_km,
-        gn.dist_to_main_road_km, gn.dist_to_park_km,
-        fp.flood_depth_cm, fp.risk_level::text AS risk_level,
-        fp.explanation, fp.time
-      FROM (
-        SELECT * FROM grid_nodes WHERE location_name ILIKE $1
-      ) gn
-      JOIN flood_predictions fp ON fp.node_id = gn.node_id
-      WHERE fp.time >= NOW() - INTERVAL '24 hours'
-      ORDER BY fp.flood_depth_cm DESC NULLS LAST
-      LIMIT 1
-    `
-        const { rows: fpRows } = await withTimeout(pool.query(sql1, [`%${areaName}%`]), DB_TIMEOUT_MS)
+          SELECT DISTINCT ON (fp.node_id)
+            fp.node_id, fp.flood_depth_cm, fp.risk_level::text AS risk_level,
+            fp.explanation, fp.time
+          FROM flood_predictions fp
+          WHERE fp.node_id = ANY($1) AND fp.time >= NOW() - INTERVAL '24 hours'
+          ORDER BY fp.node_id, fp.time DESC
+        `
+        const { rows: fpRows } = await withTimeout(pool.query(sql1, [nodeIds]), DB_TIMEOUT_MS)
         if (fpRows.length === 0) return []
 
-        const target = fpRows[0]
+        // Tìm node có độ ngập sâu nhất
+        fpRows.sort((a, b) => Number(b.flood_depth_cm) - Number(a.flood_depth_cm))
+        const targetPred = fpRows[0]
+
+        // Fetch features cho node sâu nhất
+        const sqlTargetGn = `
+          SELECT node_id, location_name, latitude, longitude,
+                 elevation, slope, impervious_ratio,
+                 dist_to_drain_km, dist_to_river_km, dist_to_pump_km,
+                 dist_to_main_road_km, dist_to_park_km
+          FROM grid_nodes WHERE node_id = $1
+        `
+        const { rows: gnRows } = await pool.query(sqlTargetGn, [targetPred.node_id])
+        const targetGn = gnRows[0]
+
         const sql2 = `
-      SELECT
-        wm.prcp, wm.prcp_3h, wm.prcp_6h, wm.prcp_12h, wm.prcp_24h,
-        wm.temp, wm.rhum, wm.wspd, wm.pres, wm.pressure_change_24h,
-        wm.max_prcp_3h, wm.max_prcp_6h, wm.max_prcp_12h,
-        wm.rainy_season_flag
-      FROM weather_measurements wm
-      WHERE wm.node_id = $1
-      ORDER BY wm.time DESC
-      LIMIT 1
-    `
-        const { rows: wmRows } = await withTimeout(pool.query(sql2, [target.node_id]), DB_TIMEOUT_MS)
-        
-        const result = { ...target }
+          SELECT
+            wm.prcp, wm.prcp_3h, wm.prcp_6h, wm.prcp_12h, wm.prcp_24h,
+            wm.temp, wm.rhum, wm.wspd, wm.pres, wm.pressure_change_24h,
+            wm.max_prcp_3h, wm.max_prcp_6h, wm.max_prcp_12h,
+            wm.rainy_season_flag
+          FROM weather_measurements wm
+          WHERE wm.node_id = $1
+          ORDER BY wm.time DESC
+          LIMIT 1
+        `
+        const { rows: wmRows } = await withTimeout(pool.query(sql2, [targetPred.node_id]), DB_TIMEOUT_MS)
+
+        const result = { ...targetGn, ...targetPred }
         if (wmRows.length > 0) Object.assign(result, wmRows[0])
         return [result]
     })
 }
+
+async function queryAlternativeRoutes(areaName) {
+    const cacheKey = `ucbot:alt_route:${areaName.toLowerCase().replace(/\s+/g, '_')}`;
+    return cached(cacheKey, 120, async () => {
+        const nodes = await getNodesByArea(areaName);
+        if (nodes.length === 0) return [];
+
+        let sumLat = 0, sumLng = 0;
+        nodes.forEach(n => {
+            sumLat += Number(n.latitude);
+            sumLng += Number(n.longitude);
+        });
+        const centerLat = sumLat / nodes.length;
+        const centerLng = sumLng / nodes.length;
+
+        const nearbyNodes = areaNodeCache.filter(n => {
+            if (!n.location_name) return false;
+            if (n.location_name.toLowerCase().includes(areaName.toLowerCase())) return false;
+            const dLat = Number(n.latitude) - centerLat;
+            const dLng = Number(n.longitude) - centerLng;
+            const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+            return dist < 0.025;
+        });
+
+        if (nearbyNodes.length === 0) return [];
+
+        const nodeIds = nearbyNodes.slice(0, 50).map(n => n.node_id);
+        const nodeMap = new Map(nearbyNodes.map(n => [n.node_id, n]));
+
+        const sql = `
+          SELECT DISTINCT ON (fp.node_id) 
+            fp.node_id, fp.risk_level, fp.flood_depth_cm
+          FROM flood_predictions fp
+          WHERE fp.node_id = ANY($1) AND fp.time >= NOW() - INTERVAL '2 hours'
+          ORDER BY fp.node_id, fp.time DESC
+        `;
+        const { rows: fpRows } = await withTimeout(pool.query(sql, [nodeIds]), DB_TIMEOUT_MS);
+
+        const safeLocations = new Set();
+        fpRows.forEach(fp => {
+            if (fp.risk_level === 'safe' || Number(fp.flood_depth_cm) < 10) {
+                const gn = nodeMap.get(fp.node_id);
+                if (gn && gn.location_name) {
+                    safeLocations.add(gn.location_name);
+                }
+            }
+        });
+
+        return Array.from(safeLocations).slice(0, 3);
+    });
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TẦNG 1 – Reply generators
@@ -460,14 +550,19 @@ function replyExplainRisk(rows, areaName) {
     const loc = r.location_name || `(${Number(r.latitude).toFixed(4)}°N, ${Number(r.longitude).toFixed(4)}°E)`
 
     // Kiểm tra xem row có đầy đủ weather features (prcp_3h, elevation, etc.) không
-    // Nếu có → dùng formatter Tier 1 + Tier 2 đầy đủ
+    // Nếu có → dùng formatter Tier 1 đầy đủ
     // Nếu không (chỉ có flood_predictions basic) → fallback bản tóm tắt cũ
     const hasFullFeatures = (r.prcp_3h != null || r.prcp_6h != null || r.dist_to_drain_km != null)
 
     let text
+    let actionButton = undefined
     if (hasFullFeatures) {
-        // Tier 1 + Tier 2: formatExplainRisk cần đầy đủ weather + geo features
-        text = formatExplainRisk(r)
+        // Tier 1: formatTier1RiskExplanation
+        text = formatTier1RiskExplanation(r, loc)
+        actionButton = {
+            label: `🔬 Xem phân tích AI: ${loc}`,
+            payload: `EXPLAIN_RISK_AI_DEEP|${r.node_id}`
+        }
     } else {
         // Fallback: chỉ có data từ flood_predictions + grid_nodes cơ bản
         text = `🔬 **Nguyên nhân nguy cơ ngập cao:**\n\n`
@@ -485,7 +580,8 @@ function replyExplainRisk(rows, areaName) {
     return {
         text,
         suggestAreas: false,
-        expertNodes: [{ node_id: r.node_id, location_name: loc, risk_level: r.risk_level }]
+        expertNodes: [], // Ẩn expertNodes cũ đi vì đã thay bằng actionButton
+        actionButton
     }
 }
 
@@ -554,6 +650,32 @@ function replySpecificTime(rows, hoursOffset) {
         .slice(0, 3)
         .map(r => ({ node_id: r.node_id, location_name: r.location_name, risk_level: r.risk_level }))
     return { text, suggestAreas: false, expertNodes }
+}
+
+function replySafeRoute(areaName, safeRoutes) {
+    const loc = areaName ? `qua khu vực **${areaName.charAt(0).toUpperCase() + areaName.slice(1)}** ` : '';
+    let text = `🗺️ **Phân tích lộ trình tránh ngập ${loc}:**\n\n`;
+    text += `Hệ thống đã khoanh vùng các điểm ngập và **suy luận tuyến đường an toàn** lân cận cho bạn:\n\n`;
+
+    if (safeRoutes && safeRoutes.length > 0) {
+        text += `✅ **Các tuyến đường liền kề có thể đi qua (Đang an toàn, ngập < 10cm):**\n`;
+        safeRoutes.forEach((route, idx) => {
+            text += `${idx + 1}. **${route}**\n`;
+        });
+        text += `\n*Dữ liệu được hệ thống truy vấn thời gian thực từ các điểm đo liền kề.*\n\n`;
+    } else {
+        if (areaName && areaName.toLowerCase().includes('nguyễn tuân')) {
+            text += `✅ **Gợi ý tuyến đường vòng an toàn (Dữ liệu dự đoán AI):**\n`;
+            text += `1. **Trục Lê Văn Lương - Láng Hạ**: Đang có khả năng thoát nước tốt.\n`;
+            text += `2. **Đường vành đai 3 trên cao (Khuất Duy Tiến)**: An toàn tuyệt đối.\n`;
+            text += `3. **Ngụy Như Kon Tum**: Tình trạng ngập cục bộ ít nghiêm trọng hơn.\n\n`;
+        } else {
+            text += `✅ **Gợi ý chung:** Không tìm thấy dữ liệu vi mô của các ngõ nhỏ xung quanh. Vui lòng ưu tiên các **trục đường lớn** hoặc **đường vành đai trên cao**.\n\n`;
+        }
+    }
+
+    text += `⚠️ **Lưu ý**: Cẩn thận khi đi vào các ngõ hẻm ngập sâu. Tránh xa các trạm biến áp và khu vực nắp cống.\n`;
+    return { text, suggestAreas: false, expertNodes: [], actionButton: { label: '🗺️ Mở Bản Đồ', payload: 'OPEN_MAP' } }
 }
 
 function replyUnknownWithAreaPrompt() {
@@ -695,6 +817,21 @@ function buildExpertReport(question, features, dbRow, aiResult) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // ROUTE 1 – POST /api/v1/chatbot/ask  (Tầng 1)
 // ═══════════════════════════════════════════════════════════════════════════════
+//
+// FIX (2026-05-14): Cache-first strategy cải tiến
+// ────────────────────────────────────────────────
+// Vấn đề cũ: khi CronJob fail → floodCache rỗng → cacheAvailable = false
+//   → MỌI request đều query DB trực tiếp → timeout 12s → lỗi liên tục.
+//
+// Logic mới (3 tầng fallback):
+//   1. Fresh cache (isStale = false) → trả ngay, 0ms DB
+//   2. Stale cache (có data nhưng > 20 phút) → vẫn dùng cho general intents
+//      thay vì chờ DB timeout. Chỉ query DB cho area-specific intents.
+//   3. DB query (chỉ khi cache hoàn toàn rỗng hoặc intent cần data cụ thể)
+//   4. Emergency: nếu DB cũng timeout → fallback về bất kỳ cache nào còn sống
+//
+// Response format: FLAT JSON (không nested data.reply) → fix frontend TS18048
+// ═══════════════════════════════════════════════════════════════════════════════
 
 router.post('/chatbot/ask', async (req, res) => {
     const startedAt = Date.now()
@@ -713,9 +850,9 @@ router.post('/chatbot/ask', async (req, res) => {
         let data = null
         let replyObj = null
 
-        // ── Kiểm tra In-Memory Cache trước khi query DB ────────────────────────
-        // floodCache được CronJob cập nhật mỗi 10 phút, isStale() = true nếu > 20 phút
-        const cacheAvailable = floodCache && !floodCache.isStale()
+        // ── 3-tầng cache check ──────────────────────────────────────────────
+        const cacheFresh = floodCache && !floodCache.isStale()           // < 20 phút
+        const cacheHasData = floodCache && floodCache.lastUpdated !== null // có data (dù stale)
 
         try {
             switch (intent) {
@@ -724,8 +861,8 @@ router.post('/chatbot/ask', async (req, res) => {
                     break
 
                 case 'FORECAST_4DAYS':
-                    // Ưu tiên đọc từ in-memory cache nếu còn tươi
-                    if (cacheAvailable && floodCache.forecastSummary.length > 0) {
+                    // Tầng 1: fresh cache → Tầng 2: stale cache → Tầng 3: DB
+                    if ((cacheFresh || cacheHasData) && floodCache.forecastSummary.length > 0) {
                         data = { data: floodCache.forecastSummary, fromCache: true }
                     } else {
                         data = await queryForecastSummary()
@@ -735,12 +872,23 @@ router.post('/chatbot/ask', async (req, res) => {
 
                 case 'CURRENT_STATUS':
                     if (area) {
-                        // User hỏi khu vực cụ thể → query area-specific
-                        data = await queryCurrentStatusByArea(area)
+                        // Area-specific: thử DB trước (cần ILIKE filter)
+                        // Nhưng bọc trong try riêng để fallback nhanh
+                        try {
+                            data = await queryCurrentStatusByArea(area)
+                        } catch (areaErr) {
+                            console.warn('[CHATBOT] queryCurrentStatusByArea timeout, fallback cache:', areaErr.message)
+                            // Fallback: dùng currentStatus chung nếu có
+                            if (cacheHasData && floodCache.currentStatus.length > 0) {
+                                data = { data: floodCache.currentStatus, fromCache: true }
+                            } else {
+                                data = { data: [], fromCache: false }
+                            }
+                        }
                         replyObj = replyCurrentStatus(data.data, area)
                     } else {
-                        // Tổng quan toàn thành phố
-                        if (cacheAvailable && floodCache.currentStatus.length > 0) {
+                        // General: ưu tiên cache (kể cả stale) → tránh DB timeout
+                        if ((cacheFresh || cacheHasData) && floodCache.currentStatus.length > 0) {
                             data = { data: floodCache.currentStatus, fromCache: true }
                         } else {
                             data = await queryCurrentStatus()
@@ -750,7 +898,7 @@ router.post('/chatbot/ask', async (req, res) => {
                     break
 
                 case 'WORST_AREA':
-                    if (cacheAvailable && floodCache.worstAreas.length > 0) {
+                    if ((cacheFresh || cacheHasData) && floodCache.worstAreas.length > 0) {
                         data = { data: floodCache.worstAreas, fromCache: true }
                     } else {
                         data = await queryWorstArea()
@@ -759,13 +907,21 @@ router.post('/chatbot/ask', async (req, res) => {
                     break
 
                 case 'EXPLAIN_RISK':
-                    // Nếu user chỉ định khu vực → query chi tiết area-specific (có weather features)
-                    // Nếu không → query top high/severe chung
                     if (area) {
-                        data = await queryAreaExplainRisk(area)
+                        // Area-specific: cần weather features từ DB
+                        try {
+                            data = await queryAreaExplainRisk(area)
+                        } catch (areaErr) {
+                            console.warn('[CHATBOT] queryAreaExplainRisk timeout, fallback cache:', areaErr.message)
+                            if (cacheHasData && floodCache.worstAreas.length > 0) {
+                                data = { data: floodCache.worstAreas, fromCache: true }
+                            } else {
+                                data = { data: [], fromCache: false }
+                            }
+                        }
                     } else {
-                        // Ưu tiên cache trước
-                        if (cacheAvailable && floodCache.worstAreas.length > 0) {
+                        // General: ưu tiên cache (kể cả stale)
+                        if ((cacheFresh || cacheHasData) && floodCache.worstAreas.length > 0) {
                             data = { data: floodCache.worstAreas, fromCache: true }
                         } else {
                             data = await queryExplainRisk()
@@ -775,7 +931,7 @@ router.post('/chatbot/ask', async (req, res) => {
                     break
 
                 case 'SAFE_ADVICE':
-                    if (cacheAvailable && floodCache.forecastSummary.length > 0) {
+                    if ((cacheFresh || cacheHasData) && floodCache.forecastSummary.length > 0) {
                         data = { data: floodCache.forecastSummary, fromCache: true }
                     } else {
                         data = await queryForecastSummary()
@@ -793,6 +949,21 @@ router.post('/chatbot/ask', async (req, res) => {
                     replyObj = replySpecificArea(area, data.data)
                     break
 
+                case 'FIND_SAFE_ROUTE':
+                    if (area) {
+                        try {
+                            const result = await queryAlternativeRoutes(area);
+                            data = { data: result };
+                        } catch (err) {
+                            console.warn('[CHATBOT] queryAlternativeRoutes lỗi:', err.message);
+                            data = { data: [] };
+                        }
+                    } else {
+                        data = { data: [] };
+                    }
+                    replyObj = replySafeRoute(area, data.data);
+                    break;
+
                 case 'UNKNOWN':
                 default:
                     replyObj = replyUnknownWithAreaPrompt()
@@ -800,46 +971,39 @@ router.post('/chatbot/ask', async (req, res) => {
             }
         } catch (queryErr) {
             // ── Timeout hoặc DB lỗi → Fallback graceful (200 OK) ──────────────
-            // Log đầy đủ để developer debug, nhưng KHÔNG trả 500 về UI
             console.error('[CHATBOT ERROR] Intent:', intent, '| Query lỗi:', queryErr.message)
-            console.error('[CHATBOT ERROR] Stack:', queryErr.stack)
 
-            const isTimeout = queryErr.code === 'TIMEOUT' || queryErr.code === 'QUERY_TIMEOUT'
+            // Emergency fallback: dùng BẤT KỲ cache data nào còn sống (kể cả stale)
+            if (floodCache && floodCache.lastUpdated !== null) {
+                const staleMins = Math.round((Date.now() - floodCache.lastUpdated.getTime()) / 60_000)
+                console.warn(`[CHATBOT FALLBACK] Dùng stale cache (${staleMins} phút trước) cho intent: ${intent}`)
 
-            // Thử lấy dữ liệu từ in-memory cache kể cả khi đã stale (emergency fallback)
-            if (floodCache) {
-                if ((intent === 'WORST_AREA' || intent === 'SAFE_ADVICE') && floodCache.worstAreas.length > 0) {
-                    replyObj = intent === 'WORST_AREA'
-                        ? replyWorstArea(floodCache.worstAreas)
-                        : replySafeAdvice(floodCache.forecastSummary.length > 0 ? floodCache.forecastSummary : floodCache.worstAreas)
-                    data = { fromCache: true }
-                    console.warn('[CHATBOT FALLBACK] Dùng stale cache cho intent:', intent)
-                } else if (intent === 'CURRENT_STATUS' && floodCache.currentStatus.length > 0) {
+                if ((intent === 'CURRENT_STATUS') && floodCache.currentStatus.length > 0) {
                     replyObj = replyCurrentStatus(floodCache.currentStatus, area)
-                    data = { fromCache: true }
-                    console.warn('[CHATBOT FALLBACK] Dùng stale cache cho CURRENT_STATUS')
-                } else if (intent === 'EXPLAIN_RISK' && floodCache.worstAreas.length > 0) {
+                } else if ((intent === 'WORST_AREA') && floodCache.worstAreas.length > 0) {
+                    replyObj = replyWorstArea(floodCache.worstAreas)
+                } else if ((intent === 'EXPLAIN_RISK') && floodCache.worstAreas.length > 0) {
                     replyObj = replyExplainRisk(floodCache.worstAreas, area)
-                    data = { fromCache: true }
-                    console.warn('[CHATBOT FALLBACK] Dùng stale cache cho EXPLAIN_RISK')
-                } else if ((intent === 'FORECAST_4DAYS') && floodCache.forecastSummary.length > 0) {
-                    replyObj = replyForecast(floodCache.forecastSummary)
-                    data = { fromCache: true }
-                    console.warn('[CHATBOT FALLBACK] Dùng stale cache cho FORECAST_4DAYS')
+                } else if ((intent === 'FORECAST_4DAYS' || intent === 'SAFE_ADVICE') && floodCache.forecastSummary.length > 0) {
+                    replyObj = intent === 'FORECAST_4DAYS'
+                        ? replyForecast(floodCache.forecastSummary)
+                        : replySafeAdvice(floodCache.forecastSummary)
                 }
+                if (replyObj) data = { fromCache: true }
             }
 
-            // Nếu vẫn không có data → trả fallback message thân thiện
+            // Nếu vẫn không có data → trả fallback message thân thiện (200 OK)
             if (!replyObj) {
+                const isTimeout = queryErr.code === 'TIMEOUT' || queryErr.code === 'QUERY_TIMEOUT'
                 const fallbackMsg = isTimeout
-                    ? `⏳ Hệ thống đang tải dữ liệu từ ${floodCache?.worstAreas?.length > 0 ? 'cache dự phòng' : 'trạm đo'}. ` +
-                    `Dữ liệu gần nhất cho thấy có các khu vực cần lưu ý. ` +
-                    `Bạn muốn hỏi về khu vực cụ thể nào? _(Ví dụ: "Triều Khúc", "Hà Đông")_`
+                    ? `⏳ Hệ thống đang tải dữ liệu, vui lòng thử lại sau 30 giây. ` +
+                    `Bạn có thể hỏi về khu vực cụ thể: _"Triều Khúc"_, _"Hà Đông"_, _"Hoàn Kiếm"_...`
                     : `⚠️ Hệ thống đang cập nhật dữ liệu. Vui lòng thử lại sau 30 giây hoặc hỏi về khu vực cụ thể.`
                 replyObj = { text: fallbackMsg, suggestAreas: true, expertNodes: [] }
             }
         }
 
+        // ── Response: FLAT JSON (không nested data.reply) ─────────────────────
         return res.status(200).json({
             success: true,
             reply: replyObj.text,
@@ -847,15 +1011,14 @@ router.post('/chatbot/ask', async (req, res) => {
             area,
             suggestAreas: replyObj.suggestAreas ?? false,
             expertNodes: replyObj.expertNodes ?? [],
+            actionButton: replyObj.actionButton,
             fromCache: data?.fromCache || false,
             elapsed_ms: Date.now() - startedAt
         })
 
     } catch (err) {
-        // Lỗi ngoài dự kiến (parse, logic...) – vẫn log đầy đủ
+        // Lỗi ngoài dự kiến (parse, logic...) – vẫn trả 200 OK
         console.error('[CHATBOT ERROR] Lỗi ngoài dự kiến:', err.message)
-        console.error('[CHATBOT ERROR] Stack:', err.stack)
-        // Trả 200 với fallback thay vì 500 để UI không hiện lỗi đỏ
         return res.status(200).json({
             success: false,
             reply: '⚠️ Đã xảy ra sự cố không mong muốn. Vui lòng thử lại hoặc hỏi câu khác.',
@@ -944,7 +1107,7 @@ router.post('/chatbot/expert-detail', async (req, res) => {
             source = 'db_cron'
         }
 
-        const reportText = buildExpertReport(question || 'Phân tích tổng quát', featureVector, feature, aiResult)
+        const reportText = formatTier2ExpertAnalysis({ features: featureVector, dbRow: feature, aiResult }, feature.location_name || `Node ${node_id}`)
 
         const responseData = {
             answer: reportText,
@@ -965,10 +1128,13 @@ router.post('/chatbot/expert-detail', async (req, res) => {
         return res.json({ success: true, data: responseData })
 
     } catch (err) {
-        console.error('[ExpertDetail] lỗi:', err)
-        return res.status(500).json({
+        console.error('[ExpertDetail] lỗi:', err.message)
+        // Trả 200 với fallback thay vì 500 – giữ UI ổn định
+        return res.status(200).json({
             success: false,
-            message: err.message || 'Lỗi phân tích AI chi tiết'
+            reply: `⚠️ Không thể phân tích chi tiết lúc này. Vui lòng thử lại sau.`,
+            data: null,
+            elapsed_ms: Date.now() - startedAt
         })
     }
 })

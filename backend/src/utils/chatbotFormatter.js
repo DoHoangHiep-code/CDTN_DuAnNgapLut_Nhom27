@@ -19,7 +19,7 @@ const TZ = 'Asia/Ho_Chi_Minh'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Format Date → giờ Việt Nam dạng ngắn gọn: "22:05, 12/05" */
+/** Format Date → giờ Việt Nam dạng ngắn gọn: "22:05, 12/05/2026" */
 function formatVN(dt) {
   return new Intl.DateTimeFormat('vi-VN', {
     timeZone: TZ,
@@ -92,6 +92,7 @@ function computeRiskScore(f) {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // FORMAT: CURRENT_STATUS
+// Template 3-section: Đang ngập → Dự báo 1-2h → Khuyến cáo lộ trình
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -108,13 +109,13 @@ function formatCurrentStatus(rows, areaName) {
     ? areaName.charAt(0).toUpperCase() + areaName.slice(1)
     : 'Hà Nội'
 
-  // Header
+  // ── Header ──────────────────────────────────────────────────────────────
   let md = `🌧️ **Báo Cáo Tình Trạng Ngập Lụt ${areaLabel}** (Cập nhật lúc ${now})\n\n`
   md += `Chào bạn! Dựa trên dữ liệu lượng mưa đo được từ các trạm quan trắc tự động `
   md += `và mô hình dự báo thủy văn của hệ thống, tình hình ngập úng tại khu vực `
   md += `**${areaLabel}** hiện tại được ghi nhận như sau:\n\n`
 
-  // ── Section 1: Các điểm ĐANG NGẬP ──────────────────────────────────────────
+  // ── Section 1: Các điểm ĐANG NGẬP ──────────────────────────────────────
   const flooding = rows.filter(r =>
     ['high', 'severe'].includes(r.risk_level) && Number(r.flood_depth_cm) > 0
   )
@@ -134,7 +135,7 @@ function formatCurrentStatus(rows, areaName) {
     md += `- ✅ Hiện chưa ghi nhận điểm ngập nghiêm trọng nào tại ${areaLabel}.\n`
   }
 
-  // ── Section 2: Dự báo nguy cơ ngập 1-2 giờ tới ────────────────────────────
+  // ── Section 2: Dự báo nguy cơ ngập 1-2 giờ tới ────────────────────────
   md += `\n### 2. Dự báo nguy cơ ngập trong 1-2 giờ tới:\n\n`
   md += `Do mây đối lưu vẫn đang phát triển và lượng mưa tích lũy chưa giảm, `
   md += `hệ thống cảnh báo nguy cơ ngập sâu tại các "điểm đen" sau đây:\n\n`
@@ -154,7 +155,7 @@ function formatCurrentStatus(rows, areaName) {
     md += `- Hiện tại chưa phát hiện nguy cơ ngập đáng kể trong thời gian tới.\n`
   }
 
-  // ── Section 3: Khuyến cáo lộ trình & An toàn ──────────────────────────────
+  // ── Section 3: Khuyến cáo lộ trình & An toàn ──────────────────────────
   md += `\n### 3. ⚠️ Khuyến cáo lộ trình & An toàn:\n\n`
 
   if (flooding.length > 0) {
@@ -170,154 +171,180 @@ function formatCurrentStatus(rows, areaName) {
     md += `- Vẫn nên theo dõi diễn biến thời tiết trong các giờ tới.\n`
   }
 
-  md += `\n💡 _Hỏi thêm: \"Vì sao khu vực này có nguy cơ ngập?\" để xem phân tích chuyên sâu._`
+  md += `\n💡 _Hỏi thêm: "Vì sao khu vực này có nguy cơ ngập?" để xem phân tích chuyên sâu._`
 
   return md
 }
 
 
 // ═════════════════════════════════════════════════════════════════════════════
-// FORMAT: EXPLAIN_RISK (TIER 1 + TIER 2)
+// FORMAT: EXPLAIN_RISK (TIER 1)
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
- * Tạo Markdown 2-Tier cho intent EXPLAIN_RISK.
+ * Tạo Markdown Tier 1 cho intent EXPLAIN_RISK.
  *
  * @param {Object} f  - Bản ghi đã JOIN đầy đủ: grid_nodes + weather_measurements + flood_predictions
- *                      (gồm elevation, slope, impervious_ratio, prcp, prcp_3h, prcp_6h,
- *                       prcp_24h, dist_to_drain_km, dist_to_river_km, dist_to_pump_km,
- *                       rainy_season_flag, risk_level, flood_depth_cm, location_name, ...)
- * @returns {string} Markdown (Tier 1 + Tier 2 kết hợp)
+ * @param {string} locationName - Tên địa danh
+ * @returns {string} Markdown Tier 1
  */
-function formatExplainRisk(f) {
-  const locationName = f.location_name || `Điểm đo #${f.node_id}`
+function formatTier1RiskExplanation(f, locationName) {
   const riskScore = computeRiskScore(f)
   const riskLabel = riskLevelLabel(riskScore)
 
-  const prcp = safe(f.prcp, 1)
   const prcp3 = safe(f.prcp_3h, 1)
-  const prcp6 = safe(f.prcp_6h, 1)
   const prcp24 = safe(f.prcp_24h, 1)
   const elevation = safe(f.elevation, 1)
-  const slope = safe(f.slope, 2)
-  const impRatio = safe(f.impervious_ratio, 2)
   const impPct = safe(Number(f.impervious_ratio || 0) * 100, 0)
   const drainKm = safe(f.dist_to_drain_km, 2)
-  const riverKm = safe(f.dist_to_river_km, 2)
-  const pumpKm = safe(f.dist_to_pump_km, 2)
   const isRainy = (f.rainy_season_flag === true || f.rainy_season_flag === 1 || Number(f.rainy_season_flag) === 1)
 
-  let md = ''
+  let md = `📍 **Phân tích nguy cơ ngập – ${locationName}**\n\n`
+  md += `⚡ **Đánh giá nhanh:**\n`
+  md += `- Mức nguy cơ ngập: **${riskLabel}**\n`
+  md += `- Điểm rủi ro nội bộ: **${riskScore}/12** ⚠️\n\n`
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // TIER 1: Quick Assessment (Đánh giá nhanh)
-  // ─────────────────────────────────────────────────────────────────────────
-  md += `## 🔍 Phân tích nguy cơ ngập – ${locationName}\n\n`
+  md += `❓ **Vì sao khu vực này có nguy cơ ngập?**\n`
 
-  md += `> **Đánh giá nhanh:**\n`
-  md += `> - **Mức nguy cơ ngập:** ${riskLabel}\n`
-  md += `> - **Điểm rủi ro nội bộ:** ${riskScore}/12\n`
-  md += `>\n`
-  md += `> **Vì sao khu vực này có nguy cơ ngập?**\n`
-  md += `> 1. Mưa 3 giờ gần nhất đạt **${prcp3} mm**, cho thấy cường độ mưa ngắn hạn lớn.\n`
-  md += `> 2. Mưa 6 giờ đạt **${prcp6} mm**, nghĩa là nước mưa tích lũy liên tục trong nhiều giờ.\n`
-  md += `> 3. Tổng mưa 24 giờ đạt **${prcp24} mm**, làm hệ thống thoát nước dễ bị quá tải.\n`
-  md += `> 4. Cao độ chỉ khoảng **${elevation} m**, đây là vùng thấp nên nước dễ dồn về.\n`
-  md += `> 5. Tỷ lệ bê tông hóa **${impPct}%**, nước khó thấm xuống đất và tạo dòng chảy mặt lớn.\n`
-  md += `> 6. Khoảng cách tới hệ thống thoát nước chỉ **${drainKm} km** – `
-  md += Number(f.dist_to_drain_km || 0) <= 0.4
-    ? `gần nhưng có thể là điểm nghẽn.\n`
-    : `xa, nước thoát chậm.\n`
-  md += `> 7. Khu vực cách sông khoảng **${riverKm} km** – `
-  md += Number(f.dist_to_river_km || 0) <= 1
-    ? `chịu ảnh hưởng mực nước sông khi mưa lớn.\n`
-    : `ít chịu ảnh hưởng trực tiếp từ sông.\n`
-  md += `> 8. Thời điểm hiện tại ${isRainy ? '**nằm trong mùa mưa** – xác suất mưa lớn cao hơn bình thường.' : 'không nằm trong mùa mưa chính.'}\n`
+  // Nhận xét động
+  const prcp3Comment = Number(f.prcp_3h) >= 50 ? 'cho thấy cường độ mưa lớn' : (Number(f.prcp_3h) === 0 ? 'mưa chưa đáng kể' : 'ở mức an toàn')
+  const prcp24Comment = Number(f.prcp_24h) >= 100 ? 'tích lũy lượng nước rất lớn, dễ gây quá tải cống' : (Number(f.prcp_24h) === 0 ? 'chưa có tích lũy mưa lớn' : 'lượng mưa tích lũy trung bình')
+  const elevComment = Number(f.elevation) <= 5 ? 'vùng thấp nước dễ dồn về' : 'địa hình cao dễ thoát'
+  const impComment = Number(f.impervious_ratio) >= 0.6 ? 'bề mặt bê tông hóa cao, nước khó thấm' : 'vẫn còn diện tích thấm nước tự nhiên'
+  const drainComment = Number(f.dist_to_drain_km) <= 0.4 ? 'rất gần cống thoát' : 'khoảng cách xa, nước thoát chậm'
 
-  md += `\n---\n\n`
+  md += `1. 🌧️ **Mưa 3 giờ gần nhất:** Đạt ${prcp3} mm, ${prcp3Comment}.\n`
+  md += `2. 🌧️ **Tổng mưa 24 giờ:** Đạt ${prcp24} mm, ${prcp24Comment}.\n`
+  md += `3. ⛰️ **Cao độ:** Chỉ khoảng ${elevation} m, ${elevComment}.\n`
+  md += `4. 🏢 **Tỷ lệ bê tông hóa:** ${impPct}%, ${impComment}.\n`
+  md += `5. 🕳️ **Khoảng cách tới hệ thống thoát nước:** ${drainKm} km, ${drainComment}.\n`
+  md += `6. 📅 **Thời điểm hiện tại:** ${isRainy ? 'nằm trong' : 'không nằm trong'} mùa mưa chính.\n\n`
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // TIER 2: Deep Analysis (Phân tích chuyên sâu)
-  // ─────────────────────────────────────────────────────────────────────────
-  md += `### 📊 Phân tích chuyên sâu:\n\n`
+  md += `🔍 **Phân tích chuyên sâu:**\n`
+  // Nhóm mưa
+  md += `1. ☔ *Nhóm yếu tố mưa:* `
+  if (Number(f.prcp_24h) >= 100) md += `Lượng mưa tích lũy lớn có nguy cơ gây quá tải hệ thống thoát nước nghiêm trọng.\n`
+  else if (Number(f.prcp_6h) >= 50) md += `Lượng mưa trong thời gian ngắn khá cao, cần theo dõi.\n`
+  else md += `Lượng mưa hiện hành chưa phải là mối đe dọa lớn.\n`
 
-  // Nhóm 1: Mưa
-  md += `**1. Nhóm yếu tố mưa**\n\n`
-  md += `Mưa hiện tại là **${prcp} mm**, mưa 3 giờ là **${prcp3} mm**, `
-  md += `mưa 6 giờ là **${prcp6} mm** và mưa 24 giờ là **${prcp24} mm**. `
-  if (Number(f.prcp_24h || 0) >= 100) {
-    md += `Nếu mưa lớn kéo dài, hệ thống thoát nước có thể bị quá tải nghiêm trọng, `
-    md += `dẫn tới ngập úng diện rộng trong khu vực.\n\n`
-  } else if (Number(f.prcp_6h || 0) >= 50) {
-    md += `Lượng mưa tích lũy 6 giờ đáng kể, cần theo dõi sát trong các giờ tới.\n\n`
-  } else {
-    md += `Lượng mưa hiện tại ở mức vừa phải, chưa vượt ngưỡng nguy hiểm.\n\n`
-  }
+  // Nhóm địa hình
+  md += `2. 📉 *Nhóm yếu tố địa hình:* `
+  if (Number(f.elevation) < 5) md += `Địa hình thấp, dạng trũng khiến nước dễ bề tích tụ.\n`
+  else md += `Địa hình thuận lợi cho tiêu thoát tự nhiên.\n`
 
-  // Nhóm 2: Địa hình
-  md += `**2. Nhóm yếu tố địa hình**\n\n`
-  md += `Cao độ khu vực là **${elevation} m** và độ dốc là **${slope}°**. `
-  if (Number(f.elevation || 10) < 5) {
-    md += `Vùng có cao độ thấp kết hợp độ dốc nhỏ khiến nước mưa tích tụ nhanh, `
-    md += `không thoát được, tạo thành các vùng trũng ngập úng.\n\n`
-  } else {
-    md += `Địa hình tương đối thuận lợi cho việc thoát nước tự nhiên.\n\n`
-  }
+  // Nhóm đô thị hóa
+  md += `3. 🏙️ *Nhóm yếu tố đô thị hóa:* `
+  if (Number(f.impervious_ratio) >= 0.6) md += `Đô thị hóa mạnh làm giảm khả năng thấm, sinh ra dòng chảy mặt lớn.\n`
+  else md += `Không gian mở còn đủ để hỗ trợ thấm nước tự nhiên.\n\n`
 
-  // Nhóm 3: Đô thị hoá
-  md += `**3. Nhóm yếu tố đô thị hóa**\n\n`
-  md += `Tỷ lệ bê tông hóa là **${impPct}%** (${impRatio}). `
-  if (Number(f.impervious_ratio || 0) >= 0.6) {
-    md += `Khi tỷ lệ bê tông hóa cao, phần lớn lượng mưa chảy trên bề mặt thay vì thấm vào đất, `
-    md += `gây ra dòng chảy mặt lớn và tăng áp lực lên hệ thống cống thoát nước đô thị.\n\n`
-  } else {
-    md += `Mức bê tông hóa chưa quá cao, vẫn có khả năng thấm nước tự nhiên hỗ trợ thoát nước.\n\n`
-  }
-
-  // Nhóm 4: Hạ tầng thoát nước
-  md += `**4. Nhóm yếu tố thoát nước**\n\n`
-  md += `Khoảng cách tới hệ thống thoát nước là **${drainKm} km**, `
-  md += `tới sông là **${riverKm} km** và tới trạm bơm là **${pumpKm} km**. `
-  if (Number(f.dist_to_drain_km || 0) >= 1 || Number(f.dist_to_pump_km || 0) >= 3) {
-    md += `Vị trí xa hệ thống thoát nước và trạm bơm cho thấy khả năng tiêu thoát chậm `
-    md += `khi mưa lớn xảy ra.\n\n`
-  } else if (Number(f.dist_to_drain_km || 0) <= 0.3) {
-    md += `Gần hệ thống thoát nước nhưng cũng có thể là điểm nghẽn dòng chảy khi công suất cống bị vượt.\n\n`
-  } else {
-    md += `Hạ tầng thoát nước ở mức trung bình, đủ đáp ứng khi mưa vừa phải.\n\n`
-  }
-
-  // Kết luận
-  md += `### 📝 Kết luận:\n\n`
-  md += `Khu vực **${locationName}** có nguy cơ ngập chủ yếu do sự kết hợp giữa `
+  md += `📌 **Kết luận:**\n`
+  md += `Khu vực ${locationName} có nguy cơ ngập chủ yếu do `
   const factors = []
-  if (Number(f.prcp_24h || 0) >= 50) factors.push('mưa tích lũy lớn')
-  if (Number(f.elevation || 10) < 6) factors.push('địa hình thấp')
-  if (Number(f.impervious_ratio || 0) >= 0.5) factors.push('bề mặt bê tông hóa cao')
-  if (Number(f.dist_to_drain_km || 0) >= 0.8 || Number(f.dist_to_pump_km || 0) >= 2) factors.push('khả năng thoát nước hạn chế')
+  if (Number(f.prcp_24h) >= 50) factors.push('mưa lớn kéo dài')
+  if (Number(f.elevation) < 5) factors.push('địa hình trũng thấp')
+  if (Number(f.impervious_ratio) >= 0.6) factors.push('bề mặt bê tông hóa cao')
+  if (Number(f.dist_to_drain_km) >= 1) factors.push('xa hạ tầng thoát nước')
   if (factors.length === 0) factors.push('các yếu tố tổng hợp')
   md += `**${factors.join(', ')}**.\n\n`
 
-  // Khuyến nghị
-  md += `### 🛡 Khuyến nghị:\n\n`
-  md += `- Theo dõi thêm lượng mưa trong **1 đến 3 giờ tới**.\n`
-  md += `- Kiểm tra các điểm trũng, hầm chui và khu vực gần sông/kênh.\n`
+  md += `💡 **Khuyến nghị:**\n`
   if (riskScore >= 6) {
-    md += `- ⚠️ **Hạn chế di chuyển** qua khu vực này khi đang có mưa lớn.\n`
-    md += `- Chuẩn bị phương án dự phòng: bao cát, bơm nước, liên hệ cơ quan phòng chống lụt bão.\n`
+    md += `- 🚶 Hạn chế đi qua khu vực này khi trời mưa lớn.\n`
+    md += `- 📱 Chú ý các cảnh báo ngập lụt tiếp theo từ hệ thống.\n`
   } else {
-    md += `- Di chuyển thận trọng nếu trời mưa lớn, theo dõi cập nhật từ hệ thống.\n`
+    md += `- 🚶 Có thể di chuyển bình thường, nhưng vẫn nên chú ý quan sát.\n`
+    md += `- 📱 Theo dõi cập nhật nếu trời có dấu hiệu mưa lớn.\n`
   }
-  md += `\n---\n`
-  md += `_🤖 Phân tích tự động bởi AQUAALERT | Dữ liệu cập nhật: ${formatVN(new Date())}_`
+
+  md += `\n*---- Phân tích tự động bởi AQUAALERT 🤖 | Cập nhật: ${formatVN(new Date())} 🕒*\n`
+  return md
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FORMAT: TIER 2 EXPERT ANALYSIS
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Tạo Markdown Tier 2 cho phân tích chuyên gia CatBoost.
+ *
+ * @param {Object} catboostData - Chứa features vector, AI result (flood_depth_cm, risk_level), dbRow
+ * @param {string} locationName - Tên địa danh
+ * @returns {string} Markdown Tier 2
+ */
+function formatTier2ExpertAnalysis(catboostData, locationName) {
+  const { features, dbRow, aiResult } = catboostData
+  const riskLevel = aiResult?.risk_level ?? dbRow?.risk_level ?? 'safe'
+  const depthCm = Number(aiResult?.flood_depth_cm ?? dbRow?.flood_depth_cm ?? 0)
+
+  // Tag rủi ro
+  const riskLabels = { safe: 'AN TOÀN 🟢', medium: 'NGUY CƠ THẤP 🟡', high: 'NGUY CƠ CAO 🟠', severe: 'NGUY HIỂM 🔴' }
+  const riskTag = riskLabels[riskLevel] || 'AN TOÀN 🟢'
+  const depthAssess = depthCm > 30 ? 'Ngập sâu nguy hiểm' : (depthCm > 10 ? 'Ngập nhẹ' : 'An toàn')
+
+  // Top features (giả định dựa trên rule vì không có SHAP value thực tế từ CatBoost API trả về)
+  const topFeatures = []
+  if (features.prcp_24h >= 100) topFeatures.push(`🌧️ Lượng mưa 24h cực lớn (${features.prcp_24h}mm) gây quá tải cục bộ`)
+  else if (features.prcp_3h >= 50) topFeatures.push(`🌧️ Cường độ mưa 3h mạnh (${features.prcp_3h}mm) tạo dòng chảy mặt`)
+  if (features.elevation <= 5) topFeatures.push(`📉 Cao độ địa hình thấp (${features.elevation}m) dễ tích tụ nước`)
+  if (features.impervious_ratio >= 0.7) topFeatures.push(`🏢 Tỷ lệ bê tông hóa rất cao (${(features.impervious_ratio * 100).toFixed(0)}%) ngăn nước thấm`)
+  if (features.dist_to_drain_km >= 1.5) topFeatures.push(`🕳️ Khoảng cách đến cống thoát khá xa (${features.dist_to_drain_km}km)`)
+  if (topFeatures.length === 0) topFeatures.push('✅ Không có yếu tố nào vượt ngưỡng nguy hiểm đột biến')
+
+  let md = `> 🔬 **Phân tích chuyên gia – ${locationName}**\n`
+  md += `> 🛡️ Mức rủi ro ngập: **${riskTag}**\n`
+  md += `> \n`
+  md += `> 🧠 **Mô hình CatBoost dự báo:** **${depthCm.toFixed(1)} cm** ➡️ ${depthAssess}\n`
+  md += `> \n`
+  md += `> ⚠️ **Các yếu tố nguy cơ chính:**\n`
+  topFeatures.slice(0, 3).forEach((feat, idx) => {
+    md += `> ${idx + 1}. ${feat}\n`
+  })
+  if (topFeatures.length === 0) {
+    md += `> 1. ✅ Dữ liệu các biến đều nằm trong ngưỡng an toàn\n`
+  }
+  md += `> \n`
+  md += `> 📊 **Dữ liệu chi tiết tại thời điểm phân tích:**\n`
+  md += `> \n`
+  md += `> | 🗂️ Nhóm | 📝 Chỉ số | 🔢 Giá trị |\n`
+  md += `> |---|---|---|\n`
+  md += `> | 🌧️ **Mưa** | Hiện tại | ${features.prcp} mm |\n`
+  md += `> | | 3h | ${features.prcp_3h} mm |\n`
+  md += `> | | 6h | ${features.prcp_6h} mm |\n`
+  md += `> | | 12h | ${features.prcp_12h} mm |\n`
+  md += `> | | 24h | ${features.prcp_24h} mm |\n`
+  md += `> | 🌤️ **Khí tượng** | Nhiệt độ | ${features.temp}°C |\n`
+  md += `> | | Độ ẩm | ${features.rhum}% |\n`
+  md += `> | | Gió | ${features.wspd} m/s |\n`
+  md += `> | | Áp suất | ${features.pres} hPa |\n`
+  md += `> | | Biến thiên 24h | ${features.pressure_change_24h} hPa |\n`
+  md += `> | ⛰️ **Địa hình** | Cao độ | ${features.elevation} m |\n`
+  md += `> | | Độ dốc | ${features.slope}° |\n`
+  md += `> | 🏢 **Đô thị** | Bê tông hóa | ${(features.impervious_ratio * 100).toFixed(0)}% |\n`
+  md += `> | 🌊 **Hạ tầng** | Khoảng cách cống | ${features.dist_to_drain_km} km |\n`
+  md += `> | | Khoảng cách sông | ${features.dist_to_river_km} km |\n`
+  md += `> | | Khoảng cách trạm bơm | ${features.dist_to_pump_km} km |\n`
+  md += `> | 🕒 **Thời gian** | Giờ | ${features.hour}h |\n`
+  md += `> | | Ngày trong tuần | Thứ ${features.dayofweek + 1} |\n`
+  md += `> | | Mùa mưa | ${features.rainy_season_flag ? 'Có' : 'Không'} |\n`
+  md += `> \n`
+  md += `> 💡 **Khuyến nghị:**\n`
+  if (depthCm > 30) {
+    md += `> 🚗 Tuyệt đối không di chuyển phương tiện qua khu vực này. Cảnh báo rủi ro chết máy và mất an toàn cao.\n`
+  } else if (depthCm > 10) {
+    md += `> 🚗 Di chuyển chậm, tránh các vũng nước đục và khu vực gần cống thoát nước.\n`
+  } else {
+    md += `> 🚗 Giao thông đi lại bình thường, tiếp tục theo dõi thời tiết.\n`
+  }
+  md += `> \n`
+  md += `> *--- Phân tích bằng mô hình AI CatBoost 🧠 + dữ liệu Open-Meteo ☁️.*`
 
   return md
 }
 
-
 module.exports = {
   formatCurrentStatus,
-  formatExplainRisk,
+  formatTier1RiskExplanation,
+  formatTier2ExpertAnalysis,
   computeRiskScore,
   riskLevelLabel,
   formatVN,

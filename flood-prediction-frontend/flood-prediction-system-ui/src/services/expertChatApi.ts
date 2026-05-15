@@ -46,6 +46,7 @@ export interface ChatbotResponse {
     expertNodes?: ExpertNode[]
     suggestAreas?: boolean
     areaKeywords?: string[]
+    actionButton?: { label: string; payload: string }
   }
 
   // Một số backend có thể trả reply ở top-level
@@ -55,6 +56,7 @@ export interface ChatbotResponse {
   expertNodes?: ExpertNode[]
   suggestAreas?: boolean
   areaKeywords?: string[]
+  actionButton?: { label: string; payload: string }
 
   error?: { message: string }
 }
