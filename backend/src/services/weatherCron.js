@@ -101,7 +101,7 @@ async function ingestCurrentWeatherFromOWM() {
 
   // Lấy node đại diện của mỗi trạm (node_id nhỏ nhất trong trạm đó)
   const repNodeRows = await sequelize.query(`
-    SELECT DISTINCT ON (weather_station_id) node_id, weather_station_id, location_name
+    SELECT DISTINCT ON (weather_station_id) node_id, weather_station_id
     FROM grid_nodes
     WHERE weather_station_id IS NOT NULL
     ORDER BY weather_station_id, node_id ASC;
@@ -141,7 +141,6 @@ async function ingestCurrentWeatherFromOWM() {
       max_prcp_3h:   Number(w.rain1h)     || 0,
       max_prcp_6h:   Number(w.rain1h)     || 0,
       max_prcp_12h:  Number(w.rain1h)     || 0,
-      location_name: repNode.location_name ?? station.name,
       visibility_km: w.visibility != null ? (w.visibility / 1000) : null,
       feels_like_c:  Number(w.feels_like) || 0,
     })
@@ -159,7 +158,7 @@ async function ingestCurrentWeatherFromOWM() {
       'temp', 'rhum', 'prcp', 'prcp_3h', 'prcp_6h', 'prcp_12h', 'prcp_24h',
       'clouds', 'wspd', 'wdir', 'pres', 'date_only', 'month', 'hour', 'rainy_season_flag',
       'pressure_change_24h', 'max_prcp_3h', 'max_prcp_6h', 'max_prcp_12h',
-      'location_name', 'visibility_km', 'feels_like_c',
+      'visibility_km', 'feels_like_c',
     ],
     logging: false,
     returning: false,
@@ -212,7 +211,6 @@ async function callAIPredictBatch(featuresArray) {
 async function processNodeWithOWMForecast(node, owmPoints, presHistoryMap) {
   const {
     node_id, elevation, slope, impervious_ratio,
-    location_name = null,
   } = node
 
   if (!owmPoints || !owmPoints.length) {
@@ -320,7 +318,6 @@ async function processNodeWithOWMForecast(node, owmPoints, presHistoryMap) {
       month,
       hour,
       rainy_season_flag: rainyMonths.includes(month) ? true : false,
-      location_name,
       temp,
       rhum,
       clouds,
@@ -499,7 +496,7 @@ async function upsertWeatherMeasurements(records) {
         'temp', 'rhum', 'prcp', 'prcp_3h', 'prcp_6h', 'prcp_12h', 'prcp_24h',
         'clouds', 'wspd', 'wdir', 'pres', 'date_only',
         'visibility_km', 'feels_like_c',
-        'month', 'hour', 'rainy_season_flag', 'location_name',
+        'month', 'hour', 'rainy_season_flag',
       ],
       logging: false,
       returning: false,
@@ -652,7 +649,7 @@ async function runWeatherCron() {
     // Pre-fetch tất cả nodes 1 lần
     const [allNodeRows] = await sequelize.query(`
       SELECT node_id, latitude, longitude, elevation, slope, impervious_ratio,
-             location_name, weather_station_id
+              weather_station_id
       FROM grid_nodes
       WHERE weather_station_id = ANY(:ids)
     `, { replacements: { ids: allStationIds } })
@@ -689,7 +686,6 @@ async function runWeatherCron() {
           time:                p.timeUtc,
           date_only, month, hour,
           rainy_season_flag:   rainyMonths.includes(month),
-          location_name:       station.name,
           temp:                p.temp,
           rhum:                p.humidity,
           clouds:              p.clouds,

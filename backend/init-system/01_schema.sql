@@ -35,13 +35,14 @@ CREATE TABLE IF NOT EXISTS users (
 -- TABLE: weather_stations (Trạm thời tiết ảo 3×3km)
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS weather_stations (
-  id         SERIAL PRIMARY KEY,
-  name       VARCHAR(128) NOT NULL,
-  latitude   DECIMAL(9,6) NOT NULL,
-  longitude  DECIMAL(9,6) NOT NULL,
-  node_count INTEGER      NOT NULL DEFAULT 0,
-  grid_row   INTEGER,
-  grid_col   INTEGER
+  id             SERIAL PRIMARY KEY,
+  name           VARCHAR(128) NOT NULL,
+  latitude       DECIMAL(9,6) NOT NULL,
+  longitude      DECIMAL(9,6) NOT NULL,
+  node_count     INTEGER      NOT NULL DEFAULT 0,
+  grid_row       INTEGER,
+  grid_col       INTEGER,
+  location_name  VARCHAR(512)
 );
 
 CREATE INDEX IF NOT EXISTS idx_weather_stations_lat_lon
@@ -94,7 +95,6 @@ CREATE TABLE IF NOT EXISTS weather_measurements (
   month                SMALLINT,
   hour                 SMALLINT,
   rainy_season_flag    BOOLEAN,
-  location_name        VARCHAR(512),
   temp                 DECIMAL(6,2),
   rhum                 DECIMAL(5,2),
   clouds               DECIMAL(5,2),
@@ -130,7 +130,6 @@ CREATE TABLE IF NOT EXISTS flood_predictions (
   target             SMALLINT,
   risk_level         VARCHAR(16),
   explanation        TEXT,
-  location_name      VARCHAR(512),
   date_only          DATE,
   month              SMALLINT,
   hour               SMALLINT,
@@ -157,7 +156,8 @@ CREATE TABLE IF NOT EXISTS actual_flood_reports (
   flood_depth_cm   DECIMAL(8,2),
   description      TEXT,
   image_url        TEXT,
-  verified         BOOLEAN DEFAULT FALSE
+  verified         BOOLEAN DEFAULT FALSE,
+  location_name    VARCHAR(512)
 );
 
 CREATE INDEX IF NOT EXISTS idx_actual_flood_reports_geom_gist ON actual_flood_reports USING GIST (geom);
@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS system_logs (
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_latest_flood_predictions AS
 SELECT DISTINCT ON (node_id)
   prediction_id, node_id, time, flood_depth_cm, risk_level,
-  explanation, location_name, date_only, month, hour, rainy_season_flag
+  explanation, date_only, month, hour, rainy_season_flag
 FROM flood_predictions
 ORDER BY node_id, time DESC;
 

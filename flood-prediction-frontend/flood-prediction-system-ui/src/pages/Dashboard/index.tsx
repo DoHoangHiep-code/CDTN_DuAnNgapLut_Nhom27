@@ -239,7 +239,7 @@ export function DashboardPage() {
         </div>
       )}
 
-      <DashboardCards cw={cw} />
+      <DashboardCards cw={cw} tempHumData={data.tempHumidity24h ?? []} />
 
       <DashboardCharts
         forecast24h={forecast24h}

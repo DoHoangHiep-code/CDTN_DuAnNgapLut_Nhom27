@@ -8,7 +8,7 @@ class DashboardRepository {
   }
 
   /**
-   * Autocomplete tìm kiếm địa điểm
+   * Autocomplete tìm kiếm địa điểm — trả về location_name chi tiết (Đường, Xã, Huyện)
    */
   async getLocationAutocomplete(search) {
     if (!search || !search.trim()) return []
@@ -16,21 +16,22 @@ class DashboardRepository {
       `SELECT DISTINCT location_name
        FROM grid_nodes
        WHERE location_name ILIKE :pattern AND location_name IS NOT NULL
-       ORDER BY location_name LIMIT 10`,
+       ORDER BY location_name LIMIT 15`,
       { type: QueryTypes.SELECT, replacements: { pattern: `%${search.trim()}%` } },
     )
     return rows.map((r, i) => ({
       node_id: i,
       location_name: r.location_name,
-      district_name: '',
+      // Parse district từ phần cuối cùng của location_name (sau dấu phẩy cuối)
+      district_name: (r.location_name || '').split(',').slice(-1)[0]?.trim() || '',
       weather_station_id: 0
     }))
   }
 
   /**
-   * Trả về danh sách nodes dựa trên search.
+   * Trả về danh sách nodes dựa trên search (exact match location_name).
    * Nếu search rỗng -> { isGlobal: true }
-   * Nếu có search -> tìm node khớp
+   * Nếu có search -> tìm tất cả nodes thuộc location_name đó
    */
   async resolveNodes(search) {
     if (!search || !search.trim()) {
@@ -49,17 +50,20 @@ class DashboardRepository {
     return { isGlobal: false, predictionNodeIds, weatherNodeIds }
   }
 
+  /**
+   * Thời tiết hiện tại — lấy bản ghi GẦN NHẤT với thời điểm hiện tại (không phải AVG 72h)
+   */
   async getCurrentWeather(weatherNodeIds, isGlobal) {
     const tz = 'Asia/Ho_Chi_Minh'
     const nodesStr = isGlobal ? await this.getRepresentativeNodeIds() : weatherNodeIds.join(',')
     let whereWm = `AND node_id IN (${nodesStr})`
 
-    // Lấy thời điểm mới nhất trong bảng weather_measurements
     const sql = `
       WITH latest_time AS (
         SELECT MAX(time) AS max_time 
         FROM weather_measurements
-        WHERE 1=1 ${whereWm}
+        WHERE time <= now()
+          ${whereWm}
       )
       SELECT
         AVG(temp)::float AS temp,
@@ -75,42 +79,47 @@ class DashboardRepository {
     return rows[0] || null
   }
 
+  /**
+   * Dự báo mưa + ngập — dùng JOIN grid_nodes khi lọc theo location
+   */
   async getRainForecast(weatherNodeIds, isGlobal, predictionNodeIds, hours) {
     const tz = 'Asia/Ho_Chi_Minh'
-    const h = Number(hours) || 24
+    const h = Number(hours) || 72
     const nodesStr = isGlobal ? await this.getRepresentativeNodeIds() : weatherNodeIds.join(',')
-    let whereWm = `AND node_id IN (${nodesStr})`
-    let whereFp = isGlobal ? '' : `AND node_id IN (${predictionNodeIds.join(',')})`
+    let whereWm = `AND wm.node_id IN (${nodesStr})`
 
     const sqlWm = `
       SELECT
-        date_trunc('hour', (time AT TIME ZONE :tz)) AS real_time,
-        to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
-        MAX(prcp)::float AS prcp
-      FROM weather_measurements
-      WHERE time >= now() AND time < now() + interval '${h} hours'
+        date_trunc('hour', (wm.time AT TIME ZONE :tz)) AS real_time,
+        to_char(date_trunc('hour', (wm.time AT TIME ZONE :tz)), 'DD/MM HH24:MI') AS time,
+        MAX(wm.prcp)::float AS prcp
+      FROM weather_measurements wm
+      WHERE wm.time >= now() AND wm.time < now() + interval '${h} hours'
         ${whereWm}
       GROUP BY 1, 2 ORDER BY 1 ASC LIMIT ${h};
     `
+
     let sqlFp
     if (isGlobal) {
       sqlFp = `
         SELECT
-          bucket_time AS real_time,
-          to_char(bucket_time AT TIME ZONE :tz, 'HH24:MI') AS time,
-          avg_depth AS flood_depth_cm
+          time AS real_time,
+          to_char(time AT TIME ZONE :tz, 'DD/MM HH24:MI') AS time,
+          avg_depth_cm AS flood_depth_cm
         FROM mv_global_flood_avg
-        WHERE bucket_time >= now() AND bucket_time < now() + interval '${h} hours'
+        WHERE time >= now() AND time < now() + interval '${h} hours'
         ORDER BY 1 ASC LIMIT ${h};
       `
     } else {
+      // JOIN flood_predictions với grid_nodes thông qua node_id
+      const whereFp = `AND fp.node_id IN (${predictionNodeIds.join(',')})`
       sqlFp = `
         SELECT
-          date_trunc('hour', (time AT TIME ZONE :tz)) AS real_time,
-          to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
-          MAX(flood_depth_cm)::float AS flood_depth_cm
-        FROM flood_predictions
-        WHERE time >= now() AND time < now() + interval '${h} hours'
+          date_trunc('hour', (fp.time AT TIME ZONE :tz)) AS real_time,
+          to_char(date_trunc('hour', (fp.time AT TIME ZONE :tz)), 'DD/MM HH24:MI') AS time,
+          MAX(fp.flood_depth_cm)::float AS flood_depth_cm
+        FROM flood_predictions fp
+        WHERE fp.time >= now() AND fp.time < now() + interval '${h} hours'
           ${whereFp}
         GROUP BY 1, 2 ORDER BY 1 ASC LIMIT ${h};
       `
@@ -146,15 +155,15 @@ class DashboardRepository {
       return this.sequelize.query(sql, { type: QueryTypes.SELECT })
     }
 
-    // Filtered mode
-    let whereFp = `AND node_id IN (${predictionNodeIds.join(',')})`
+    // Filtered mode — JOIN qua node_id (không cần location_name trên fp)
+    let whereFp = `AND fp.node_id IN (${predictionNodeIds.join(',')})`
     const sql = `
       WITH latest AS (
-        SELECT DISTINCT ON (node_id) node_id, flood_depth_cm
-        FROM flood_predictions
-        WHERE time >= now() - interval '${h} hours'
+        SELECT DISTINCT ON (fp.node_id) fp.node_id, fp.flood_depth_cm
+        FROM flood_predictions fp
+        WHERE fp.time >= now() - interval '${h} hours'
         ${whereFp}
-        ORDER BY node_id, time DESC
+        ORDER BY fp.node_id, fp.time DESC
       )
       SELECT
         CASE
@@ -184,18 +193,18 @@ class DashboardRepository {
 
   async getTempHumidity(weatherNodeIds, isGlobal, hours) {
     const tz = 'Asia/Ho_Chi_Minh'
-    const h = Number(hours) || 24
+    const h = Number(hours) || 72
     const nodesStr = isGlobal ? await this.getRepresentativeNodeIds() : weatherNodeIds.join(',')
-    let whereWm = `AND node_id IN (${nodesStr})`
+    let whereWm = `AND wm.node_id IN (${nodesStr})`
 
     const sql = `
       SELECT
-        date_trunc('hour', (time AT TIME ZONE :tz)) AS real_time,
-        to_char(date_trunc('hour', (time AT TIME ZONE :tz)), 'HH24:MI') AS time,
-        COALESCE(AVG(temp), 0)::float AS temp,
-        COALESCE(AVG(rhum), 0)::float AS rhum
-      FROM weather_measurements
-      WHERE time >= now() AND time < now() + interval '${h} hours'
+        date_trunc('hour', (wm.time AT TIME ZONE :tz)) AS real_time,
+        to_char(date_trunc('hour', (wm.time AT TIME ZONE :tz)), 'DD/MM HH24:MI') AS time,
+        COALESCE(AVG(wm.temp), 0)::float AS temp,
+        COALESCE(AVG(wm.rhum), 0)::float AS rhum
+      FROM weather_measurements wm
+      WHERE wm.time >= now() AND wm.time < now() + interval '${h} hours'
         ${whereWm}
       GROUP BY 1, 2 ORDER BY 1 ASC LIMIT ${h};
     `
@@ -204,18 +213,11 @@ class DashboardRepository {
 
   async getRiskTrend(predictionNodeIds, isGlobal, hours) {
     const tz = 'Asia/Ho_Chi_Minh'
-    const h = Number(hours) || 168 // default 7 ngày
+    const h = Number(hours) || 168
     const bucket = h <= 48 ? 'hour' : 'day'
-    const fmt    = h <= 48 ? 'MM-DD HH24:00' : 'MM-DD'
+    const fmt    = h <= 48 ? 'DD/MM HH24:00' : 'DD/MM'
 
     if (isGlobal) {
-      // Global: Query cực nhanh từ Materialized View đã pre-aggregate
-      // Nếu h <= 48 (hour): lấy mọi record
-      // Nếu h > 48 (day): để biểu đồ bớt rậm rạp, có thể chỉ lấy các mốc 12h trưa làm đại diện,
-      // hoặc lấy toàn bộ. Ở đây ta lấy toàn bộ (Chart.js tự scale), nhưng format ngày theo fmt.
-      // Tuy nhiên nếu format MM-DD thì group by sẽ gộp các giờ lại?
-      // Bản chất MV là đếm theo từng giờ. Nếu ta đổi label thành ngày, Chart sẽ hiện n điểm có cùng nhãn ngày.
-      // Tốt nhất: nếu h > 48, lấy mốc 12h trưa.
       let hourFilter = ''
       if (h > 48) {
         hourFilter = `AND extract(hour from bucket_time AT TIME ZONE :tz) = 12`
@@ -234,23 +236,22 @@ class DashboardRepository {
       return this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { tz, fmt } })
     }
 
-    // Filtered: Query on-the-fly (dữ liệu nhỏ nên vẫn nhanh)
-    let whereFp = `AND node_id IN (${predictionNodeIds.join(',')})`
+    // Filtered: JOIN qua node_id
+    let whereFp = `AND fp.node_id IN (${predictionNodeIds.join(',')})`
 
-    // Tối ưu: Nếu bucket là hour, vì mỗi node chỉ có 1 record 1 giờ, ta có thể bỏ subquery
     if (bucket === 'hour') {
       const sql = `
         SELECT
-          to_char(date_trunc('hour', (time AT TIME ZONE :tz)), :fmt) AS date,
+          to_char(date_trunc('hour', (fp.time AT TIME ZONE :tz)), :fmt) AS date,
           CASE
-            WHEN flood_depth_cm <= 10 THEN 'safe'
-            WHEN flood_depth_cm <= 20 THEN 'medium'
-            WHEN flood_depth_cm <= 40 THEN 'high'
+            WHEN fp.flood_depth_cm <= 10 THEN 'safe'
+            WHEN fp.flood_depth_cm <= 20 THEN 'medium'
+            WHEN fp.flood_depth_cm <= 40 THEN 'high'
             ELSE 'severe'
           END AS risk_level,
           COUNT(*)::int AS count
-        FROM flood_predictions
-        WHERE time >= now() - interval '${h} hours'
+        FROM flood_predictions fp
+        WHERE fp.time >= now() - interval '${h} hours'
           ${whereFp}
         GROUP BY 1, 2
         ORDER BY 1, 2;
@@ -258,15 +259,14 @@ class DashboardRepository {
       return this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { tz, fmt } })
     }
 
-    // Nếu bucket là day, bắt buộc phải dùng max_per_bucket để tìm max(depth) trong ngày của từng node
     const sql = `
       WITH max_per_bucket AS (
         SELECT
-          to_char(date_trunc('${bucket}', (time AT TIME ZONE :tz)), :fmt) AS date,
-          node_id,
-          MAX(flood_depth_cm) as max_depth
-        FROM flood_predictions
-        WHERE time >= now() - interval '${h} hours'
+          to_char(date_trunc('${bucket}', (fp.time AT TIME ZONE :tz)), :fmt) AS date,
+          fp.node_id,
+          MAX(fp.flood_depth_cm) as max_depth
+        FROM flood_predictions fp
+        WHERE fp.time >= now() - interval '${h} hours'
           ${whereFp}
         GROUP BY 1, 2
       )
@@ -298,4 +298,3 @@ class DashboardRepository {
 }
 
 module.exports = { DashboardRepository }
-
