@@ -15,12 +15,9 @@ class WeatherRepository {
     })
   }
 
-  /**
-   * Step 1: nearest neighbor node_id using <-> (requires GIST index on geom).
-   */
-  async findNearestNodeId({ lat, lng }) {
+  async findNearestNode({ lat, lng }) {
     const sql = `
-      SELECT gn.node_id
+      SELECT gn.node_id, gn.st1_id
       FROM grid_nodes gn
       ORDER BY ST_Distance(gn.geom::geography, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography) ASC
       LIMIT 1;
@@ -32,7 +29,7 @@ class WeatherRepository {
           replacements: { lat, lng },
           transaction: t,
         })
-        .then((rows) => rows?.[0]?.node_id ?? null),
+        .then((rows) => rows?.[0] ?? null),
     )
   }
 

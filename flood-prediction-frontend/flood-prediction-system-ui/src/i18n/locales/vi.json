@@ -37,7 +37,7 @@
     "districtsCount": "{{count}} quận",
     "overall": "Tổng thể",
     "observedAt": "Quan sát lúc",
-    "comfortHint": "Chỉ số thoải mái (demo)",
+    "comfortHint": "Dựa trên nhiệt độ và độ ẩm",
     "windHint": "Không bao gồm giật",
     "riskCountSafe": "An toàn",
     "riskCountMedium": "Trung bình",

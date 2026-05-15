@@ -9,7 +9,7 @@ import {
   Legend,
 } from 'chart.js'
 import { Line } from 'react-chartjs-2'
-import type { DashboardTempHumPoint } from '../utils/types'
+import type { DashboardTempHumPoint } from '../../../utils/types'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend)
 
