@@ -1,8 +1,8 @@
 require('dotenv').config() // Load .env trước tất cả (phải đứng đầu file)
 
 const express = require('express') // Import Express để tạo HTTP server
-const cors    = require('cors')    // Import CORS để cho phép frontend gọi API khác port
-const path    = require('path')    // Import path để build đường dẫn static an toàn
+const cors = require('cors')       // Import CORS để cho phép frontend gọi API khác port
+const path = require('path')       // Import path để build đường dẫn static an toàn
 
 const { dashboardRouter }      = require('./routes/dashboardRoutes')      // Router dashboard
 const { mapRouter }            = require('./routes/mapRoutes')             // Router flood map
@@ -12,16 +12,17 @@ const { profileRouter }        = require('./routes/profileRoutes')         // Ro
 const { adminUserRouter }      = require('./routes/adminUserRoutes')       // Router admin CRUD users
 const { reportsRouter }        = require('./routes/reportsRoutes')         // Router reports
 const { floodPredictionRouter} = require('./routes/floodPredictionRoutes') // Router compat /flood-prediction
-const { chatbotRouter }        = require('./routes/chatbotRoutes')         // Router chatbot AI
+const { unifiedChatbotRouter } = require('./routes/unifiedChatbotRoutes') // Router chatbot AI (unified)
 const { healthCheckRouter }    = require('./routes/healthCheckRoutes')     // Router health-check cloud
 const { statisticsRouter }     = require('./routes/statisticsRoutes')      // Router statistics
 const { alertsRouter }         = require('./routes/alertsRoutes')           // Router alerts/banner
 const { sequelize }            = require('./db/sequelize')                 // Sequelize instance để sync/auth
 require('./models') // Nạp toàn bộ model trước sync để Sequelize biết cần tạo/alter bảng nào
 
-// ── Weather & Backup Cronjobs ─────────────────────────────────────────────────
+// ── Weather & Backup & Flood Prediction Cronjobs ─────────────────────────────
 const { startWeatherCron, manualTrigger } = require('./services/weatherCron')
 const { startBackupCron }                 = require('./services/backupCron')
+const { startFloodPredictionCron }        = require('./services/floodPredictionCron')
 
 const app = express() // Khởi tạo app Express
 
@@ -42,7 +43,7 @@ app.use('/api/v1', dashboardRouter)
 app.use('/api/v1', mapRouter)
 app.use('/api/v1', weatherRouter)
 app.use('/api/v1', floodPredictionRouter)
-app.use('/api/v1', chatbotRouter)
+app.use('/api/v1', unifiedChatbotRouter)
 app.use('/api/v1', healthCheckRouter)
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1', profileRouter)
@@ -68,7 +69,7 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')))
 // ── Global error handler ─────────────────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
-  const status  = Number(err?.statusCode) || 500
+  const status = Number(err?.statusCode) || 500
   const message = err instanceof Error ? err.message : 'Unknown error'
   return res.status(status).json({ success: false, error: { message } })
 })
@@ -91,13 +92,27 @@ async function bootstrapAndStart() {
     console.log('[DB] Đã bỏ qua sequelize.sync do quản lý bằng Migrations.')
 
     // 3) Chỉ listen khi DB đã sẵn sàng.
-    app.listen(port, () => {
+    const server = app.listen(port, () => {
       console.log(`Backend listening on :${port}`)
 
-      // Đăng ký Weather Cronjob sau khi server đã listen thành công
+      // Đăng ký Cronjobs sau khi server đã listen thành công
       // → tránh cron chạy trước khi DB connection sẵn sàng
-      startWeatherCron()
-      startBackupCron()
+      startWeatherCron()           // Mỗi 1 giờ: lấy OWM forecast + ghi flood_predictions
+      startBackupCron()            // Ngày 1 hàng tháng: backup CSV + xóa data cũ
+      startFloodPredictionCron()   // Mỗi 10 phút: cập nhật dự báo dựa trên thời tiết hiện tại
+    })
+
+    // Bắt lỗi EADDRINUSE riêng: in hướng dẫn kill port thay vì stack trace khó đọc
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[Bootstrap] Port ${port} đang bị chiếm dụng bởi tiến trình khác.`)
+        console.error(`[Bootstrap] Chạy lệnh sau để giải phóng port:`)
+        console.error(`  PowerShell: Stop-Process -Id (Get-NetTCPConnection -LocalPort ${port}).OwningProcess -Force`)
+        console.error(`  CMD:        FOR /F "tokens=5" %p IN ('netstat -ano ^| findstr :${port}') DO taskkill /F /PID %p`)
+      } else {
+        console.error('[Bootstrap] Lỗi server không xử lý được:', err.message)
+      }
+      process.exit(1)
     })
   } catch (err) {
     // Xử lý kỹ lỗi SSL/kết nối CockroachDB để dễ debug trên cloud.
@@ -111,4 +126,3 @@ async function bootstrapAndStart() {
 }
 
 bootstrapAndStart()
-

@@ -2,9 +2,11 @@
 
 // weatherCron.js – Cronjob tự động dự báo ngập lụt mỗi 1 tiếng
 //
-// Nguồn dữ liệu thời tiết: OpenWeatherMap
-//   • Current weather    : GET /data/2.5/weather  (88 calls/lần – 88 trạm ảo)
-//   • Forecast 5d/3h     : GET /data/2.5/forecast (88 calls/lần)
+// Nguồn dữ liệu thời tiết (DUY NHẤT): OpenWeatherMap Developer Plan
+//   • Current weather    : GET /data/2.5/weather              (101 calls/lần – 101 trạm)
+//   • Hourly 4d Forecast : GET pro.openweathermap.org/data/2.5/forecast/hourly
+//                           (96 điểm × 1h = 4 ngày, 101 calls/lần)
+//   • Fallback           : GET /data/2.5/forecast (5d/3h) nếu key chưa kích hoạt Developer
 //
 // ⚠️  KIẾN TRÚC ĐÚNG – KHÔNG FAN-OUT:
 //   Phase 0 → Fetch OWM current cho 88 trạm → lưu 88 rows vào weather_measurements (1 row/trạm)
