@@ -11,6 +11,10 @@ export function NewsTicker({ items, mode = 'flood' }: { items: NewsTickerItem[];
 
   const dangerClass = mode === 'landslide' ? 'fps-news-ticker--danger-landslide' : 'fps-news-ticker--danger-flood'
 
+  // Tính toán thời gian chạy động dựa trên số lượng tin (để dài thì chạy chậm lại)
+  // Ít nhất 40s, thêm 20s cho mỗi cảnh báo
+  const duration = Math.max(40, items.length * 25)
+
   return (
     <div
       className={cn(
@@ -18,7 +22,10 @@ export function NewsTicker({ items, mode = 'flood' }: { items: NewsTickerItem[];
         hasDanger ? dangerClass : 'fps-news-ticker--base',
       )}
     >
-      <div className="fps-news-ticker-track">
+      <div 
+        className="fps-news-ticker-track" 
+        style={{ animationDuration: `${duration}s` }}
+      >
         {[0, 1].map((k) => (
           <div key={k} className="flex items-center gap-10 whitespace-nowrap">
             {items.map((item) => (
