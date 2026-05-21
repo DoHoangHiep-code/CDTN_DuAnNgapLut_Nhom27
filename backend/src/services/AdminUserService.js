@@ -32,7 +32,7 @@ class AdminUserService {
   // Update user: admin đổi thông tin và role, nhưng cấm tự đổi role (tránh tự khóa quyền admin)
   async updateUser({ adminUserId, targetUserId, patch }) {
     // Nếu admin đang update chính mình và có ý định đổi role thì chặn (no self-role-change)
-    if (Number(adminUserId) === Number(targetUserId) && patch.role != null) {
+    if (String(adminUserId) === String(targetUserId) && patch.role != null) {
       const err = new Error('Không thể tự thay đổi role của chính mình')
       err.statusCode = 400
       throw err
@@ -60,7 +60,7 @@ class AdminUserService {
 
   // Delete user: cấm admin tự xóa chính mình (no self-deletion)
   async deleteUser({ adminUserId, targetUserId }) {
-    if (Number(adminUserId) === Number(targetUserId)) {
+    if (String(adminUserId) === String(targetUserId)) {
       const err = new Error('Không thể tự xóa tài khoản của chính mình')
       err.statusCode = 400
       throw err

@@ -4,7 +4,7 @@ import {
   Bell, BellOff, Moon, Palette, Settings2, Sun,
   Globe, Map, Layers, Thermometer, BarChart2, MapPin, Clock,
 } from 'lucide-react'
-import { Toggle } from '../components/Toggle'
+import { Toggle } from '../components/common/Toggle'
 import { useSettings, type MapStyle, type RefreshInterval, type Language } from '../context/SettingsContext'
 import { useTranslation } from 'react-i18next'
 import { updateUserSettings } from '../services/api'
@@ -176,7 +176,7 @@ export function SettingsPage() {
       {/* Container toàn bộ (View to) */}
       <div className="mt-4">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8 items-start">
-          
+
           {/* --- CỘT TRÁI --- */}
           <div className="space-y-8">
             {/* ── Giao diện ── */}

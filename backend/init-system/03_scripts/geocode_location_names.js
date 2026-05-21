@@ -5,12 +5,12 @@
  */
 
 require('dotenv').config()
-const axios  = require('axios')
-const { sequelize } = require('../../src/db/sequelize') 
+const axios = require('axios')
+const { sequelize } = require('../../src/db/sequelize')
 const { QueryTypes } = require('sequelize')
 
-const CELL_DEG    = 0.004
-const DELAY_MS    = 1200
+const CELL_DEG = 0.004
+const DELAY_MS = 1200
 const UPDATE_BATCH = 2000
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse'
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -25,6 +25,8 @@ function cleanData(text) {
   return text;
 }
 
+const ADMIN_MAP_2025 = require('../../scripts/administrative_mapping_2025.json')
+
 // ─── Bóc tách địa chỉ chi tiết ───────────────────────────────────────────────
 function parseAddress(addr) {
   if (!addr) return { locationName: null, districtName: null }
@@ -35,11 +37,24 @@ function parseAddress(addr) {
 
   // Lấy Phường/Xã (Đã cover Xã Thư Lâm, Xã Liên Minh...)
   const wardRaw = addr.quarter || addr.suburb || addr.village || addr.neighbourhood || addr.hamlet
-  const ward = cleanData(wardRaw)
+  let ward = cleanData(wardRaw)
 
   // Lấy Quận/Huyện
   const districtRaw = addr.city_district || addr.county || addr.district || addr.town
-  const district = cleanData(districtRaw)
+  let district = cleanData(districtRaw)
+
+  // BẮT BUỘC chọc vào Mapping Dictionary
+  if (ward && ADMIN_MAP_2025[ward]) {
+    ward = ADMIN_MAP_2025[ward]
+    // Cập nhật cả district_name tương ứng nếu cần (Thường xã lên Phường thì quận cũng đổi hoặc giữ nguyên)
+    // Tạm thời nếu mapping có kết quả thì ta cho nó vẫn thuộc district cũ hoặc update district_name
+    // VD: Phường Hàng Bạc -> Phường Hoàn Kiếm, District = Quận Hoàn Kiếm
+    if (ward.includes('Hoàn Kiếm')) district = 'Quận Hoàn Kiếm'
+    else if (ward.includes('Hai Bà Trưng')) district = 'Quận Hai Bà Trưng'
+    else if (ward.includes('Đống Đa')) district = 'Quận Đống Đa'
+    else if (ward.includes('Ba Đình')) district = 'Quận Ba Đình'
+    // .. có thể tự động parse hoặc dựa vào district hiện tại
+  }
 
   let locationName = '';
   if (road && ward && district) locationName = `${road}, ${ward}, ${district}`;
@@ -74,7 +89,7 @@ async function main() {
   // =====================================================================
   console.log('\n[Stations] Đang cập nhật 88 Trạm thời tiết...')
   const stations = await sequelize.query(`SELECT id, latitude, longitude FROM weather_stations`, { type: QueryTypes.SELECT })
-  
+
   for (let i = 0; i < stations.length; i++) {
     try {
       const res = await axios.get(NOMINATIM_URL, {
@@ -85,8 +100,8 @@ async function main() {
       if (parsed.locationName) {
         await sequelize.query(`UPDATE weather_stations SET location_name = '${parsed.locationName.replace(/'/g, "''")}' WHERE id = '${stations[i].id}'`)
       }
-    } catch (e) {}
-    process.stdout.write(`\r  └ Tiến độ trạm: ${i+1}/${stations.length}`)
+    } catch (e) { }
+    process.stdout.write(`\r  └ Tiến độ trạm: ${i + 1}/${stations.length}`)
     await sleep(DELAY_MS)
   }
 
@@ -96,13 +111,13 @@ async function main() {
   console.log('\n\n[Nodes] Đang tải 53K nodes...')
   // Bỏ điều kiện WHERE vì ta đã xóa trắng ở bước Cleanup, giờ select ALL
   const nodes = await sequelize.query(`SELECT node_id, latitude, longitude FROM grid_nodes`, { type: QueryTypes.SELECT })
-  
+
   if (!nodes.length) {
     console.log('✅ Lỗi: Không tìm thấy nodes nào trong Database!')
     return
   }
 
-  const cellMap = new Map() 
+  const cellMap = new Map()
   for (const n of nodes) {
     const r = Math.floor((parseFloat(n.latitude) - BBOX.minLat) / CELL_DEG)
     const c = Math.floor((parseFloat(n.longitude) - BBOX.minLon) / CELL_DEG)
@@ -112,7 +127,7 @@ async function main() {
   }
 
   console.log(`[Nodes] Đã tạo lưới: Cần gọi ${cellMap.size} ô lưới...`)
-  const nameMap = new Map() 
+  const nameMap = new Map()
   let cellDone = 0
 
   for (const [key, cell] of cellMap.entries()) {
@@ -123,7 +138,7 @@ async function main() {
         timeout: 8000,
       })
       const parsed = parseAddress(res.data?.address)
-      
+
       const locName = parsed.locationName || `Khu vực ${cell.centLat.toFixed(3)}, ${cell.centLon.toFixed(3)}`
       const distName = parsed.districtName || 'Hà Nội'
 
@@ -141,10 +156,10 @@ async function main() {
         const entries = [...nameMap.entries()]
         for (let i = 0; i < entries.length; i += UPDATE_BATCH) {
           const chunk = entries.slice(i, i + UPDATE_BATCH)
-          const values = chunk.map(([id, data]) => 
+          const values = chunk.map(([id, data]) =>
             `('${id}', '${data.loc.replace(/'/g, "''")}', '${data.dist.replace(/'/g, "''")}')`
           ).join(',\n')
-          
+
           await sequelize.query(`
             UPDATE grid_nodes AS gn
             SET location_name = v.loc, district_name = v.dist

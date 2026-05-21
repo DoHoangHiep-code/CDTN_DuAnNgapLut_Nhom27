@@ -5,54 +5,55 @@ import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { cn } from '../utils/cn'
 import { BRAND_ICON, NAV_ITEMS } from '../utils/nav'
-import { NewsTicker, type NewsTickerItem } from '../components/NewsTicker'
+import { NewsTicker, type NewsTickerItem } from '../components/common/NewsTicker'
 import { useTranslation } from 'react-i18next'
-import { FloatingChatBotIcon } from '../components/FloatingChatBotIcon'
-import { getAlertsBanner } from '../services/api'
-import type { AlertsBannerItem } from '../utils/types'
+import { FloatingChatBotIcon } from '../components/common/FloatingChatBotIcon'
+import { HazardSwitcher } from '../components/common/HazardSwitcher'
+import { useDisasterMode } from '../context/DisasterContext'
+import { getDynamicAlerts } from '../services/api'
 
-const RISK_EMOJI: Record<string, string> = {
-  severe: '🚨',
-  high:   '⚠️',
-  medium: '🟡',
-  safe:   '✅',
-}
+function buildTickerItems(alertsData: Array<{ district: string; max_depth: number; time: string }>): NewsTickerItem[] {
+  if (!alertsData.length) {
+    const timeStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+    return [{
+      id: 'safe_status',
+      severity: 'info',
+      text: `✅ Cập nhật ${timeStr}: Hệ thống hoạt động ổn định. Không có cảnh báo ngập lụt trong 24h tới.`
+    }]
+  }
 
-function buildTickerItems(bannerData: AlertsBannerItem[]): NewsTickerItem[] {
-  if (!bannerData.length) return []
+  // Nối các thông báo lại với nhau hoặc trả về nhiều item
+  const items: NewsTickerItem[] = alertsData.map((item, idx) => ({
+    id: `alert_${item.district}_${idx}`,
+    severity: 'danger',
+    text: `⚠️ CẢNH BÁO: Quận ${item.district} dự báo ngập ${item.max_depth}cm vào lúc ${item.time}. Hãy chú ý di chuyển!`
+  }))
 
-  const items: NewsTickerItem[] = []
-  bannerData.forEach((item) => {
-    const emoji = RISK_EMOJI[item.riskLevel] ?? '💧'
-    const sev: NewsTickerItem['severity'] =
-      item.riskLevel === 'severe' ? 'danger' :
-      item.riskLevel === 'high'   ? 'warning' : 'info'
-
-    if (item.floodDepthCm > 0 && item.predTime) {
-      const timeStr = new Date(item.predTime).toLocaleTimeString('vi-VN', {
-        timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit',
-      })
-      items.push({
-        id:       `fp_${item.district}`,
-        severity: sev,
-        text:     `${emoji} ${item.district}: Dự báo ngập ${item.floodDepthCm}cm lúc ${timeStr}`,
-      })
-    } else if (item.rain1h > 0) {
-      items.push({
-        id:       `wx_${item.district}`,
-        severity: item.rain1h > 5 ? 'warning' : 'info',
-        text:     `🌧 ${item.district}: Mưa ${item.rain1h}mm/h — ${item.temp}°C`,
-      })
-    } else {
-      items.push({
-        id:       `ok_${item.district}`,
-        severity: 'info',
-        text:     `${emoji} ${item.district}: An toàn — ${item.temp}°C, độ ẩm ${item.humidity}%`,
-      })
-    }
-  })
   return items
 }
+
+const LANDSLIDE_TICKER_ITEMS: NewsTickerItem[] = [
+  {
+    id: 'ls_1',
+    severity: 'danger',
+    text: '⚠️ CẢNH BÁO ĐỎ: Nền đất tại Mù Cang Chải đã bão hòa nước — độ ẩm đất 88%. Nguy cơ sạt lở, trượt lở đất đá ở mức RẤT CAO trong 24h tới. Người dân vùng thấp cần di chuyển khẩn!',
+  },
+  {
+    id: 'ls_2',
+    severity: 'warning',
+    text: '🟠 Hoàng Su Phì (Hà Giang): Mưa lớn kéo dài 7 ngày liên tiếp (142mm). Cảnh báo trượt lở dọc Quốc lộ 34. Cẩn trọng khi lưu thông qua các đèo.',
+  },
+  {
+    id: 'ls_3',
+    severity: 'danger',
+    text: '🔴 Mường Tè (Lai Châu): Độ dốc địa hình 40°, phủ thực vật thưa (NDVI 0.35) kết hợp mưa lớn 163mm/7 ngày — rủi ro sạt lở nghiêm trọng. Bộ đội đang sẵn sàng ứng phó.',
+  },
+  {
+    id: 'ls_4',
+    severity: 'warning',
+    text: '🟠 Sa Pa (Lào Cai): Đất đã ngậm nước 71%, mưa tích lũy 118mm. Nguy cơ sụt lún đất trong các khu vực canh tác ruộng bậc thang. Theo dõi chặt tình hình.',
+  },
+]
 
 export function MainLayout() {
   const { user, logout } = useAuth()
@@ -60,16 +61,16 @@ export function MainLayout() {
   const navigate = useNavigate()
   const BrandIcon = BRAND_ICON
   const { t, i18n } = useTranslation()
+  const { mode } = useDisasterMode()
 
-  // Live banner data — fetch một lần khi layout mount, refresh mỗi 5 phút
-  const [bannerData, setBannerData] = useState<AlertsBannerItem[]>([])
+  const [alertsData, setAlertsData] = useState<Array<{ district: string; max_depth: number; time: string }>>([])
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const data = await getAlertsBanner()
-        if (!cancelled) setBannerData(data)
+        const data = await getDynamicAlerts()
+        if (!cancelled) setAlertsData(data)
       } catch {
         // Không crash layout nếu API lỗi
       }
@@ -79,9 +80,12 @@ export function MainLayout() {
     return () => { cancelled = true; window.clearInterval(id) }
   }, [])
 
-  const newsItems: NewsTickerItem[] = bannerData.length
-    ? buildTickerItems(bannerData)
-    : [{ id: 'loading', severity: 'info', text: '💧 Đang tải dữ liệu cảnh báo…' }]
+  const newsItems: NewsTickerItem[] =
+    mode === 'landslide'
+      ? LANDSLIDE_TICKER_ITEMS
+      : alertsData
+        ? buildTickerItems(alertsData)
+        : []
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 dark:bg-slate-950">
@@ -207,6 +211,11 @@ export function MainLayout() {
               <div className="text-xs text-slate-500 dark:text-slate-400">{t('app.subtitle')}</div>
             </div>
             <div className="flex items-center gap-2">
+              {/* Multi-hazard switcher */}
+              <HazardSwitcher />
+
+              <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-slate-700" />
+
               <button
                 type="button"
                 onClick={() => {
@@ -234,7 +243,7 @@ export function MainLayout() {
             </div>
           </header>
 
-          <NewsTicker items={newsItems} />
+          <NewsTicker items={newsItems} mode={mode} />
 
           <div className="fps-card flex-1 p-4 sm:p-6 mb-8">
             <Outlet />

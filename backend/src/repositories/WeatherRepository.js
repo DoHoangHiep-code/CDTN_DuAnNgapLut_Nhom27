@@ -17,8 +17,14 @@ class WeatherRepository {
 
   async findNearestNode({ lat, lng }) {
     const sql = `
-      SELECT gn.node_id, gn.st1_id
+      SELECT gn.node_id AS original_node_id, rep.node_id AS rep_node_id, gn.district_name, gn.location_name
       FROM grid_nodes gn
+      LEFT JOIN (
+        SELECT DISTINCT ON (weather_station_id) node_id, weather_station_id
+        FROM grid_nodes
+        WHERE weather_station_id IS NOT NULL
+        ORDER BY weather_station_id, node_id ASC
+      ) rep ON gn.weather_station_id = rep.weather_station_id
       ORDER BY ST_Distance(gn.geom::geography, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography) ASC
       LIMIT 1;
     `
@@ -46,7 +52,7 @@ class WeatherRepository {
         wm.prcp,
         wm.clouds
       FROM weather_measurements wm
-      WHERE wm.node_id = :nodeId
+      WHERE wm.node_id = :nodeId AND wm.time <= NOW()
       ORDER BY wm.time DESC
       LIMIT 1;
     `
@@ -205,7 +211,8 @@ class WeatherRepository {
    */
   async getHourlyForecast24h(nodeId) {
     const sql = `
-      SELECT
+      SELECT DISTINCT ON (trunc_time)
+        date_trunc('hour', wm.time) AS trunc_time,
         wm.time,
         COALESCE(wm.prcp,   0)::float AS prcp,
         COALESCE(wm.temp,  28)::float AS temp,
@@ -213,10 +220,10 @@ class WeatherRepository {
         COALESCE(wm.clouds, 0)::int   AS clouds
       FROM weather_measurements wm
       WHERE wm.node_id = :nodeId
-        AND wm.time >= now()
-        AND wm.time <  now() + interval '24 hours'
-      ORDER BY wm.time ASC
-      LIMIT 24;
+        AND wm.time >= now() - interval '12 hours'
+        AND wm.time <= now() + interval '168 hours'
+      ORDER BY trunc_time ASC, wm.time DESC
+      LIMIT 200;
     `
     return this._withStatementTimeout(6000, (t) =>
       this.sequelize.query(sql, {

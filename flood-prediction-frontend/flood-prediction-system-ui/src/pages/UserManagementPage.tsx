@@ -6,9 +6,9 @@ import {
   X, RefreshCcw, Filter, Mail, Calendar,
 } from 'lucide-react'
 
-import { Input } from '../components/Input'
-import { Spinner } from '../components/Spinner'
-import { ErrorState } from '../components/ErrorState'
+import { Input } from '../components/common/Input'
+import { Spinner } from '../components/common/Spinner'
+import { ErrorState } from '../components/common/ErrorState'
 import { useAsync } from '../hooks/useAsync'
 import { adminCreateUser, adminDeleteUser, adminListUsers, adminUpdateUser } from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -17,7 +17,7 @@ import { cn } from '../utils/cn'
 type Role = 'admin' | 'expert' | 'user'
 
 type AdminUserRow = {
-  user_id: number
+  user_id: string | number
   username: string
   email: string
   full_name: string
@@ -32,9 +32,9 @@ type ModalState =
   | { open: true; mode: 'edit'; initial: AdminUserRow }
 
 const ROLE_CONFIG: Record<Role, { label: string; bg: string; text: string; border: string; dot: string; icon: typeof ShieldCheck }> = {
-  admin:  { label: 'Admin',  bg: 'bg-rose-50 dark:bg-rose-950/30',    text: 'text-rose-700 dark:text-rose-400',    border: 'border-rose-200 dark:border-rose-800',    dot: 'bg-rose-500',    icon: ShieldCheck },
-  expert: { label: 'Expert', bg: 'bg-amber-50 dark:bg-amber-950/30',  text: 'text-amber-700 dark:text-amber-400',  border: 'border-amber-200 dark:border-amber-800',  dot: 'bg-amber-400',   icon: Star },
-  user:   { label: 'User',   bg: 'bg-sky-50 dark:bg-sky-950/30',      text: 'text-sky-700 dark:text-sky-400',      border: 'border-sky-200 dark:border-sky-800',      dot: 'bg-sky-500',     icon: UserIcon },
+  admin: { label: 'Admin', bg: 'bg-rose-50 dark:bg-rose-950/30', text: 'text-rose-700 dark:text-rose-400', border: 'border-rose-200 dark:border-rose-800', dot: 'bg-rose-500', icon: ShieldCheck },
+  expert: { label: 'Expert', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-800', dot: 'bg-amber-400', icon: Star },
+  user: { label: 'User', bg: 'bg-sky-50 dark:bg-sky-950/30', text: 'text-sky-700 dark:text-sky-400', border: 'border-sky-200 dark:border-sky-800', dot: 'bg-sky-500', icon: UserIcon },
 }
 
 const AVATAR_COLORS = [
@@ -80,12 +80,12 @@ function UserModal({ state, onClose, onSaved }: { state: ModalState; onClose: ()
 
   const [fullName, setFullName] = useState(String((initial as any).full_name ?? ''))
   const [username, setUsername] = useState(String((initial as any).username ?? ''))
-  const [email, setEmail]       = useState(String((initial as any).email ?? ''))
-  const [role, setRole]         = useState<Role>(((initial as any).role as Role) ?? 'user')
+  const [email, setEmail] = useState(String((initial as any).email ?? ''))
+  const [role, setRole] = useState<Role>(((initial as any).role as Role) ?? 'user')
   const [password, setPassword] = useState('')
-  const [saving, setSaving]     = useState(false)
+  const [saving, setSaving] = useState(false)
 
-  const isSelf = isEdit && user && Number(user.user_id) === Number((initial as any).user_id)
+  const isSelf = isEdit && user && String(user.user_id) === String((initial as any).user_id)
 
   async function handleSave() {
     if (!fullName.trim() || !username.trim() || !email.trim()) {
@@ -96,7 +96,7 @@ function UserModal({ state, onClose, onSaved }: { state: ModalState; onClose: ()
     setSaving(true)
     try {
       if (isEdit) {
-        await adminUpdateUser(Number((initial as any).user_id), {
+        await adminUpdateUser(String((initial as any).user_id), {
           full_name: fullName.trim(), username: username.trim(),
           email: email.trim(), role, password: password.trim() || undefined,
         })
@@ -209,7 +209,7 @@ function UserModal({ state, onClose, onSaved }: { state: ModalState; onClose: ()
 
 export function UserManagementPage() {
   const { user } = useAuth()
-  const [q, setQ]       = useState('')
+  const [q, setQ] = useState('')
   const [role, setRole] = useState<'all' | Role>('all')
   const [modal, setModal] = useState<ModalState>({ open: false })
 
@@ -220,7 +220,7 @@ export function UserManagementPage() {
   }, [q])
 
   const users = useAsync(() => adminListUsers({ q: qDebounced, role }), [qDebounced, role])
-  const rows  = useMemo<AdminUserRow[]>(() => (Array.isArray(users.data) ? (users.data as AdminUserRow[]) : []), [users.data])
+  const rows = useMemo<AdminUserRow[]>(() => (Array.isArray(users.data) ? (users.data as AdminUserRow[]) : []), [users.data])
 
   const hasFilter = Boolean(q || role !== 'all')
 
@@ -260,9 +260,9 @@ export function UserManagementPage() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           { label: 'Tổng tài khoản', value: rows.length, icon: Users, grad: 'from-violet-500 to-indigo-600', shadow: 'shadow-violet-100 dark:shadow-violet-900/20' },
-          { label: 'Admin',  value: roleCounts.admin,  icon: ShieldCheck, grad: 'from-rose-500 to-pink-600',    shadow: 'shadow-rose-100 dark:shadow-rose-900/20' },
-          { label: 'Expert', value: roleCounts.expert, icon: Star,        grad: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-100 dark:shadow-amber-900/20' },
-          { label: 'User',   value: roleCounts.user,   icon: UserIcon,    grad: 'from-sky-500 to-blue-600',     shadow: 'shadow-sky-100 dark:shadow-sky-900/20' },
+          { label: 'Admin', value: roleCounts.admin, icon: ShieldCheck, grad: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-100 dark:shadow-rose-900/20' },
+          { label: 'Expert', value: roleCounts.expert, icon: Star, grad: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-100 dark:shadow-amber-900/20' },
+          { label: 'User', value: roleCounts.user, icon: UserIcon, grad: 'from-sky-500 to-blue-600', shadow: 'shadow-sky-100 dark:shadow-sky-900/20' },
         ].map((s) => (
           <div key={s.label} className={cn('flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900', s.shadow)}>
             <div className={cn('grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl bg-gradient-to-br text-white shadow-sm', s.grad)}>
@@ -390,7 +390,7 @@ export function UserManagementPage() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {rows.map((r, idx) => {
-                  const isSelf = user && Number(user.user_id) === Number(r.user_id)
+                  const isSelf = user && String(user.user_id) === String(r.user_id)
                   return (
                     <tr key={r.user_id} className="group transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/30">
                       {/* # */}
@@ -481,11 +481,13 @@ export function UserManagementPage() {
         </div>
       </div>
 
-      <UserModal
-        state={modal}
-        onClose={() => setModal({ open: false })}
-        onSaved={() => void users.reload()}
-      />
+      {modal.open && (
+        <UserModal
+          state={modal}
+          onClose={() => setModal({ open: false })}
+          onSaved={() => void users.reload()}
+        />
+      )}
     </div>
   )
 }

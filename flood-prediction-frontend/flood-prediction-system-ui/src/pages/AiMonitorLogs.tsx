@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
 import {
   Activity, Clock, Terminal, Search, X,
   CheckCircle2, AlertTriangle, XCircle, Info,
   Cpu, Wifi, WifiOff, BarChart3, Filter,
 } from 'lucide-react'
 import { cn } from '../utils/cn'
+import { getSystemLogs } from '../services/api'
 
 // ── Kiểu dữ liệu ────────────────────────────────────────────────────
 type LogLevel = 'INFO' | 'WARNING' | 'ERROR' | 'DEBUG'
@@ -47,31 +48,7 @@ const LEVEL_CONFIG: Record<LogLevel, {
   },
 }
 
-// ── Dữ liệu log mock (trong thực tế sẽ fetch từ /api/v1/logs) ───────
-// Logic: mỗi entry có ts (timestamp), level, source (tên module), msg.
-// Source giúp admin biết lỗi đến từ AI worker, DB, cron hay API gateway.
-const SEED_LOGS: LogEntry[] = [
-  { ts: '2026-04-27 08:00:01', level: 'INFO',    source: 'System',     msg: 'Server khởi động. Node.js v20, port=3002' },
-  { ts: '2026-04-27 08:00:03', level: 'INFO',    source: 'Database',   msg: 'Kết nối PostgreSQL thành công. Pool size=10' },
-  { ts: '2026-04-27 08:00:05', level: 'INFO',    source: 'AI Worker',  msg: 'Model CatBoost đã tải. flood-predict-v2, features=12' },
-  { ts: '2026-04-27 08:01:00', level: 'INFO',    source: 'Cron',       msg: 'WeatherCron bắt đầu chu kỳ fetch dữ liệu thời tiết' },
-  { ts: '2026-04-27 08:01:04', level: 'INFO',    source: 'Weather',    msg: 'Fetch thời tiết thành công. 50 node, elapsed=1.2s' },
-  { ts: '2026-04-27 08:01:06', level: 'INFO',    source: 'AI Worker',  msg: 'Inference hoàn tất. districts=50, runtime=183ms' },
-  { ts: '2026-04-27 08:15:00', level: 'WARNING', source: 'Database',   msg: 'Slow query: /api/flood-prediction (742ms > threshold 500ms)' },
-  { ts: '2026-04-27 08:20:11', level: 'INFO',    source: 'API',        msg: 'GET /api/v1/flood-prediction 200 OK (210ms)' },
-  { ts: '2026-04-27 08:31:00', level: 'WARNING', source: 'Weather',    msg: 'OpenWeatherMap rate limit gần đạt (85/100 req/min)' },
-  { ts: '2026-04-27 08:45:18', level: 'ERROR',   source: 'Weather',    msg: 'Upstream weather provider timeout sau 15000ms. Dùng cache.' },
-  { ts: '2026-04-27 08:45:19', level: 'WARNING', source: 'AI Worker',  msg: 'Inference dùng dữ liệu thời tiết cached (offline mode)' },
-  { ts: '2026-04-27 09:00:00', level: 'INFO',    source: 'Cron',       msg: 'WeatherCron chu kỳ mới. Thử lại fetch sau lỗi trước đó.' },
-  { ts: '2026-04-27 09:00:03', level: 'INFO',    source: 'Weather',    msg: 'Kết nối khôi phục. Fetch thời tiết thành công.' },
-  { ts: '2026-04-27 09:16:25', level: 'INFO',    source: 'AI Worker',  msg: 'Inference hoàn tất. districts=50, runtime=201ms, avg_depth=12.4cm' },
-  { ts: '2026-04-27 09:30:00', level: 'DEBUG',   source: 'Database',   msg: 'Vacuum analyze grid_nodes: 50 rows, elapsed=48ms' },
-  { ts: '2026-04-27 09:45:00', level: 'ERROR',   source: 'AI Service', msg: 'Python AI service không phản hồi (port 8000). Retry 1/3...' },
-  { ts: '2026-04-27 09:45:02', level: 'ERROR',   source: 'AI Service', msg: 'Retry 2/3 thất bại. Fallback về demoData.' },
-  { ts: '2026-04-27 09:45:04', level: 'WARNING', source: 'AI Worker',  msg: 'Dùng demoData vì AI service không khả dụng.' },
-  { ts: '2026-04-27 10:00:01', level: 'INFO',    source: 'AI Service', msg: 'Python AI service khôi phục. Kết nối lại thành công.' },
-  { ts: '2026-04-27 10:16:25', level: 'INFO',    source: 'AI Worker',  msg: 'Inference bình thường. districts=50, runtime=178ms' },
-]
+// SEED_LOGS removed — using real-time database logs.
 
 // ── Component StatusCard nâng cấp ───────────────────────────────────
 function StatusCard({
@@ -85,10 +62,30 @@ function StatusCard({
   pulse?: boolean
 }) {
   const styles = {
-    good:    { card: 'border-emerald-800/40 bg-emerald-950/40', title: 'text-emerald-400', value: 'text-emerald-300', dot: 'bg-emerald-400' },
-    bad:     { card: 'border-red-800/40 bg-red-950/40',         title: 'text-red-400',     value: 'text-red-300',     dot: 'bg-red-500' },
-    warn:    { card: 'border-amber-800/40 bg-amber-950/40',     title: 'text-amber-400',   value: 'text-amber-300',   dot: 'bg-amber-400' },
-    neutral: { card: 'border-slate-700/50 bg-slate-800/50',     title: 'text-slate-400',   value: 'text-slate-200',   dot: 'bg-slate-400' },
+    good: {
+      card: 'border-emerald-200 bg-emerald-50 dark:border-emerald-800/40 dark:bg-emerald-950/40',
+      title: 'text-emerald-700 dark:text-emerald-400',
+      value: 'text-emerald-900 dark:text-emerald-300',
+      dot: 'bg-emerald-500 dark:bg-emerald-400',
+    },
+    bad: {
+      card: 'border-red-200 bg-red-50 dark:border-red-800/40 dark:bg-red-950/40',
+      title: 'text-red-700 dark:text-red-400',
+      value: 'text-red-900 dark:text-red-300',
+      dot: 'bg-red-500',
+    },
+    warn: {
+      card: 'border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-950/40',
+      title: 'text-amber-700 dark:text-amber-400',
+      value: 'text-amber-900 dark:text-amber-300',
+      dot: 'bg-amber-500 dark:bg-amber-400',
+    },
+    neutral: {
+      card: 'border-slate-200 bg-slate-50 dark:border-slate-700/50 dark:bg-slate-800/50',
+      title: 'text-slate-600 dark:text-slate-400',
+      value: 'text-slate-900 dark:text-slate-200',
+      dot: 'bg-slate-400',
+    },
   }
   const s = styles[tone]
   return (
@@ -162,33 +159,86 @@ function LogRow({ entry, query }: { entry: LogEntry; query: string }) {
 
 // ── Component chính ──────────────────────────────────────────────────
 export function AiMonitorLogs() {
-  const [filter, setFilter]     = useState('')
+  const [filter, setFilter] = useState('')
   const [levelFilter, setLevelFilter] = useState<LogLevel | 'ALL'>('ALL')
 
-  // Trạng thái hệ thống (mock — trong thực tế fetch từ /api/v1/system/status)
-  const modelOnline  = true
-  const dbConnected  = true
-  const lastRun      = '2026-04-27 10:16:25'
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [loading, setLoading] = useState(false)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+
+  // Fetch logs real-time
+  const fetchLogs = useCallback(async () => {
+    try {
+      setLoading(true)
+      const data = await getSystemLogs(200) // fetch latest 200 logs
+
+      const mappedLogs: LogEntry[] = data.map((d: any) => {
+        const typeStr = (d.event_type || '').toUpperCase()
+        const msgStr = (d.message || '').toUpperCase()
+
+        let level: LogLevel = 'INFO'
+        if (typeStr.includes('ERR') || msgStr.includes('ERROR') || msgStr.includes('FAIL')) level = 'ERROR'
+        else if (typeStr.includes('WARN') || msgStr.includes('WARN')) level = 'WARNING'
+        else if (typeStr.includes('DEBUG')) level = 'DEBUG'
+
+        const date = new Date(d.timestamp)
+        const ts = date.toLocaleString('vi-VN', {
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+        })
+
+        return {
+          ts,
+          level,
+          source: d.event_source || 'System',
+          msg: d.message || ''
+        }
+      })
+
+      setLogs(mappedLogs)
+      setLastRefresh(new Date())
+    } catch (err) {
+      console.error('Failed to fetch logs', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchLogs()
+    // Refresh every 5 seconds
+    const id = setInterval(fetchLogs, 5000)
+    return () => clearInterval(id)
+  }, [fetchLogs])
+
+  // Trạng thái hệ thống (giả lập hoặc kết hợp từ logs)
+  const modelOnline = true
+  const dbConnected = true
+
+  // Lấy thời gian run gần nhất từ các log của AI Worker hoặc Cron
+  const cronLogs = logs.filter(l => l.source.toLowerCase().includes('cron') || l.level === 'INFO')
+  const lastRunText = cronLogs.length > 0 ? cronLogs[0].ts.split(' ')[1] : '--:--'
+
   const totalInference = 50
 
   // Đếm từng level để hiển thị badge filter
   const levelCounts = useMemo(() => {
     const c: Record<string, number> = { INFO: 0, WARNING: 0, ERROR: 0, DEBUG: 0 }
-    SEED_LOGS.forEach((l) => { c[l.level] = (c[l.level] ?? 0) + 1 })
+    logs.forEach((l) => { c[l.level] = (c[l.level] ?? 0) + 1 })
     return c
-  }, [])
+  }, [logs])
 
   // Lọc log theo level + text search
   const rows = useMemo(() => {
     const q = filter.trim().toLowerCase()
-    return SEED_LOGS.filter((l) => {
+    return logs.filter((l) => {
       if (levelFilter !== 'ALL' && l.level !== levelFilter) return false
       if (!q) return true
       return `${l.ts} ${l.level} ${l.source} ${l.msg}`.toLowerCase().includes(q)
     })
-  }, [filter, levelFilter])
+  }, [filter, levelFilter, logs])
 
-  const errorCount   = levelCounts.ERROR ?? 0
+  const errorCount = levelCounts.ERROR ?? 0
   const warningCount = levelCounts.WARNING ?? 0
 
   return (
@@ -220,10 +270,10 @@ export function AiMonitorLogs() {
 
       {/* ── Status cards — nền tối để giống terminal ── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatusCard icon={Cpu}        title="AI Model"      value={modelOnline ? 'Online' : 'Offline'}        tone={modelOnline ? 'good' : 'bad'} pulse={modelOnline} />
+        <StatusCard icon={Cpu} title="AI Model" value={modelOnline ? 'Online' : 'Offline'} tone={modelOnline ? 'good' : 'bad'} pulse={modelOnline} />
         <StatusCard icon={dbConnected ? Wifi : WifiOff} title="Database" value={dbConnected ? 'Connected' : 'Disconnected'} tone={dbConnected ? 'good' : 'bad'} pulse={dbConnected} />
-        <StatusCard icon={Clock}      title="Last Run"      value={lastRun.split(' ')[1]}  sub={lastRun.split(' ')[0]}  tone="neutral" />
-        <StatusCard icon={BarChart3}  title="Tổng inference" value={`${totalInference} nodes`} sub="Chu kỳ gần nhất" tone="neutral" />
+        <StatusCard icon={Clock} title="Last Run" value={lastRunText} sub={cronLogs.length > 0 ? cronLogs[0].ts.split(' ')[0] : ''} tone="neutral" />
+        <StatusCard icon={BarChart3} title="Tổng inference" value={`${totalInference} nodes`} sub="Chu kỳ gần nhất" tone="neutral" />
       </div>
 
       {/* ── Terminal ── */}
@@ -254,7 +304,7 @@ export function AiMonitorLogs() {
           {(['ALL', 'INFO', 'WARNING', 'ERROR', 'DEBUG'] as const).map((lv) => {
             const active = levelFilter === lv
             const cfg = lv !== 'ALL' ? LEVEL_CONFIG[lv] : null
-            const count = lv === 'ALL' ? SEED_LOGS.length : (levelCounts[lv] ?? 0)
+            const count = lv === 'ALL' ? logs.length : (levelCounts[lv] ?? 0)
             return (
               <button
                 key={lv}
@@ -290,7 +340,7 @@ export function AiMonitorLogs() {
             )}
           </div>
 
-          <span className="text-[10px] text-slate-600 tabular-nums">{rows.length}/{SEED_LOGS.length} dòng</span>
+          <span className="text-[10px] text-slate-600 tabular-nums">{rows.length}/{logs.length} dòng</span>
         </div>
 
         {/* Log lines */}
@@ -320,7 +370,7 @@ export function AiMonitorLogs() {
           </div>
           <div className="flex items-center gap-1 text-[10px] text-slate-600">
             <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-            Dữ liệu mock — kết nối /api/v1/system/logs để xem log thật
+            {loading ? 'Đang cập nhật...' : (lastRefresh ? `Cập nhật theo thời gian thực (Lần cuối: ${lastRefresh.toLocaleTimeString()})` : 'Sẵn sàng')}
           </div>
         </div>
       </div>

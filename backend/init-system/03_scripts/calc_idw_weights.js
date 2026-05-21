@@ -15,19 +15,19 @@
 
 require('dotenv').config()
 
-const { sequelize }     = require('../src/db/sequelize')
-const { WeatherStation } = require('../src/models')
-const { QueryTypes }    = require('sequelize')
+const { sequelize } = require('../../src/db/sequelize')
+const { WeatherStation } = require('../../src/models')
+const { QueryTypes } = require('sequelize')
 
 const UPDATE_BATCH = 500  // rows per SQL batch
-const MIN_DIST_KM  = 0.05 // Tránh chia cho 0 (node trùng với trạm)
+const MIN_DIST_KM = 0.05 // Tránh chia cho 0 (node trùng với trạm)
 
 // ─── Haversine (km) ───────────────────────────────────────────────────────────
 function haversineKm(lat1, lon1, lat2, lon2) {
-  const R    = 6371
+  const R = 6371
   const dLat = (lat2 - lat1) * Math.PI / 180
   const dLon = (lon2 - lon1) * Math.PI / 180
-  const a    = Math.sin(dLat / 2) ** 2
+  const a = Math.sin(dLat / 2) ** 2
     + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
@@ -44,7 +44,7 @@ async function main() {
   const stations = await WeatherStation.findAll({ raw: true })
   console.log(`[Stations] Tải ${stations.length} trạm thời tiết.`)
   const stationsF = stations.map(s => ({
-    id:  Number(s.id),
+    id: Number(s.id),
     lat: parseFloat(s.latitude),
     lon: parseFloat(s.longitude),
   }))
@@ -67,8 +67,8 @@ async function main() {
 
     // Tính khoảng cách đến tất cả trạm, sắp xếp tăng dần
     const dists = stationsF.map(s => ({
-      id:  s.id,
-      km:  Math.max(haversineKm(lat, lon, s.lat, s.lon), MIN_DIST_KM),
+      id: s.id,
+      km: Math.max(haversineKm(lat, lon, s.lat, s.lon), MIN_DIST_KM),
     })).sort((a, b) => a.km - b.km)
 
     // Lấy 3 trạm gần nhất
@@ -84,18 +84,18 @@ async function main() {
     weights[0] = parseFloat((weights[0] + diff).toFixed(6))
 
     return {
-      node_id:    String(n.node_id),
-      st1_id:     top3[0].id,
+      node_id: String(n.node_id),
+      st1_id: top3[0].id,
       st1_weight: weights[0],
-      st2_id:     top3[1].id,
+      st2_id: top3[1].id,
       st2_weight: weights[1],
-      st3_id:     top3[2].id,
+      st3_id: top3[2].id,
       st3_weight: weights[2],
     }
   })
 
   const calcMs = Date.now() - startCalc
-  console.log(`[IDW] ✅ Tính xong ${updateData.length.toLocaleString('vi-VN')} nodes trong ${(calcMs/1000).toFixed(1)}s\n`)
+  console.log(`[IDW] ✅ Tính xong ${updateData.length.toLocaleString('vi-VN')} nodes trong ${(calcMs / 1000).toFixed(1)}s\n`)
 
   // 4. Batch UPDATE vào DB
   console.log(`[DB] Đang cập nhật DB (batch ${UPDATE_BATCH} rows/lần)...`)
@@ -128,7 +128,7 @@ async function main() {
   }
 
   const dbMs = Date.now() - startDb
-  console.log(`\n[DB] ✅ Cập nhật xong ${total.toLocaleString('vi-VN')} nodes trong ${(dbMs/1000).toFixed(1)}s\n`)
+  console.log(`\n[DB] ✅ Cập nhật xong ${total.toLocaleString('vi-VN')} nodes trong ${(dbMs / 1000).toFixed(1)}s\n`)
 
   // 5. Kiểm tra kết quả
   const [check] = await sequelize.query(`
@@ -144,7 +144,7 @@ async function main() {
   console.log(`   Còn NULL:    ${Number(check.remaining).toLocaleString('vi-VN')} nodes`)
 
   // Kiểm tra 1 sample
-  const [sample] = await sequelize.query(`
+  const sample = await sequelize.query(`
     SELECT node_id, st1_id, st1_weight, st2_id, st2_weight, st3_id, st3_weight
     FROM grid_nodes WHERE st1_id IS NOT NULL LIMIT 3;
   `, { type: QueryTypes.SELECT })

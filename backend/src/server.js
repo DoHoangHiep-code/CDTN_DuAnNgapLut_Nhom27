@@ -4,25 +4,31 @@ const express = require('express') // Import Express để tạo HTTP server
 const cors = require('cors')       // Import CORS để cho phép frontend gọi API khác port
 const path = require('path')       // Import path để build đường dẫn static an toàn
 
-const { dashboardRouter }      = require('./routes/dashboardRoutes')      // Router dashboard
-const { mapRouter }            = require('./routes/mapRoutes')             // Router flood map
-const { weatherRouter }        = require('./routes/weatherRoutes')         // Router weather
-const { authRouter }           = require('./routes/authRoutes')            // Router auth
-const { profileRouter }        = require('./routes/profileRoutes')         // Router profile
-const { adminUserRouter }      = require('./routes/adminUserRoutes')       // Router admin CRUD users
-const { reportsRouter }        = require('./routes/reportsRoutes')         // Router reports
-const { floodPredictionRouter} = require('./routes/floodPredictionRoutes') // Router compat /flood-prediction
+const { dashboardRouter } = require('./modules/flood/routes/dashboardRoutes')      // Router dashboard
+const { mapRouter } = require('./modules/flood/routes/mapRoutes')             // Router flood map
+const { weatherRouter } = require('./modules/flood/routes/weatherRoutes')         // Router weather
+const { authRouter } = require('./routes/authRoutes')            // Router auth
+const { profileRouter } = require('./routes/profileRoutes')         // Router profile
+const { adminUserRouter } = require('./routes/adminUserRoutes')       // Router admin CRUD users
+const { systemLogRouter } = require('./routes/systemLogRoutes')       // Router system logs
+const { reportsRouter } = require('./modules/flood/routes/reportsRoutes')         // Router reports
+const { floodPredictionRouter } = require('./modules/flood/routes/floodPredictionRoutes') // Router compat /flood-prediction
 const { unifiedChatbotRouter } = require('./routes/unifiedChatbotRoutes') // Router chatbot AI (unified)
-const { healthCheckRouter }    = require('./routes/healthCheckRoutes')     // Router health-check cloud
-const { statisticsRouter }     = require('./routes/statisticsRoutes')      // Router statistics
-const { alertsRouter }         = require('./routes/alertsRoutes')           // Router alerts/banner
-const { sequelize }            = require('./db/sequelize')                 // Sequelize instance để sync/auth
+const { healthCheckRouter } = require('./routes/healthCheckRoutes')     // Router health-check cloud
+const { landslideRouter } = require('./modules/landslide/routes/landslideRoutes') // Router landslide prediction
+const { initLandslideModel } = require('./modules/landslide/services/landslideInference') // ONNX model init
+const { statisticsRouter } = require('./routes/statisticsRoutes')      // Router statistics
+const { alertsRouter } = require('./modules/flood/routes/alertsRoutes')           // Router alerts/banner
+const { sequelize } = require('./db/sequelize')                 // Sequelize instance để sync/auth
+const { Pool } = require('pg')                             // Pool instance cho raw query
+const landslideCache = require('./utils/landslideCache')         // Landslide fast cache
 require('./models') // Nạp toàn bộ model trước sync để Sequelize biết cần tạo/alter bảng nào
 
 // ── Weather & Backup & Flood Prediction Cronjobs ─────────────────────────────
-const { startWeatherCron, manualTrigger } = require('./services/weatherCron')
-const { startBackupCron }                 = require('./services/backupCron')
-const { startFloodPredictionCron }        = require('./services/floodPredictionCron')
+const { startWeatherCron, manualTrigger } = require('./modules/flood/cron/weatherCron')
+const { startBackupCron } = require('./common/services/backupCron')
+const { startFloodPredictionCron } = require('./modules/flood/cron/floodPredictionCron')
+const { startLandslideCron } = require('./modules/landslide/cron/landslideCron')
 
 const app = express() // Khởi tạo app Express
 
@@ -48,7 +54,9 @@ app.use('/api/v1', healthCheckRouter)
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1', profileRouter)
 app.use('/api/v1', adminUserRouter)
+app.use('/api/v1', systemLogRouter)
 app.use('/api/v1', alertsRouter)
+app.use('/api/v1/landslide', landslideRouter)  // Landslide prediction ONNX
 
 // ── Route kích hoạt Cronjob thủ công (CHỈ dùng khi dev/test) ────────────────
 // QUAN TRỌNG: Phải đặt TRƯỚC reportsRouter vì router.use(verifyToken) bên trong
@@ -83,8 +91,29 @@ async function bootstrapAndStart() {
     await sequelize.authenticate()
     console.log('[DB] Kết nối thành công.')
 
+    // 1.5) Khởi tạo ONNX Model Sạt lở (load 1 lần vào RAM)
+    try {
+      await initLandslideModel()
+    } catch (modelErr) {
+      // Không crash server nếu model chưa được copy vào — chỉ cảnh báo
+      console.warn('[Bootstrap] ⚠️  Landslide ONNX model không load được:', modelErr.message)
+      console.warn('[Bootstrap]    → Endpoint /api/v1/landslide/predict sẽ trả 503 cho đến khi model được cài.')
+    }
+
     // 1.1) PostGIS đã được khởi tạo qua Migration 001. Không chạy ở đây để tránh lỗi read-only transaction.
     console.log('[DB] PostGIS đã được setup qua Migration.')
+
+    // 1.2) Pre-warm cache cho Landslide để API /nodes phản hồi nhanh (<300ms)
+    try {
+      const pool = new Pool({
+        connectionString: process.env.DATABASE_URL_POOLER || process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+      })
+      // Không await để server không bị block startup (có thể mất 1-60s tùy DB)
+      landslideCache.prewarmFromDb(pool).finally(() => pool.end())
+    } catch (cacheErr) {
+      console.warn('[Bootstrap] ⚠️ Khởi động cache prewarm lỗi:', cacheErr.message)
+    }
 
     // 2) Tự đồng bộ schema: tạo bảng mới + điều chỉnh cột khi khác biệt.
     // Lưu ý: alter=true tiện cho môi trường dev/staging; production lớn nên cân nhắc migration chuẩn.
@@ -100,6 +129,7 @@ async function bootstrapAndStart() {
       startWeatherCron()           // Mỗi 1 giờ: lấy OWM forecast + ghi flood_predictions
       startBackupCron()            // Ngày 1 hàng tháng: backup CSV + xóa data cũ
       startFloodPredictionCron()   // Mỗi 10 phút: cập nhật dự báo dựa trên thời tiết hiện tại
+      startLandslideCron()         // 0h & 12h hàng ngày: batch predict sạt lở (425K nodes)
     })
 
     // Bắt lỗi EADDRINUSE riêng: in hướng dẫn kill port thay vì stack trace khó đọc

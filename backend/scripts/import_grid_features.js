@@ -15,9 +15,9 @@
  */
 
 require('dotenv').config()
-const fs    = require('fs')
-const path  = require('path')
-const csv   = require('csv-parser')
+const fs = require('fs')
+const path = require('path')
+const csv = require('csv-parser')
 
 const { sequelize } = require('../src/db/sequelize')
 require('../src/models/index')
@@ -25,12 +25,12 @@ const { GridNode } = require('../src/models')
 
 // ─── Cấu hình Throttling ─────────────────────────────────────────────────────
 
-const BATCH_SIZE   = 1000   // Số rows mỗi lần bulkCreate (CockroachDB có thể chịu tải tốt hơn)
-const DELAY_MS     = 100    // Nghỉ giữa các batch (ms)
-const MAX_RETRIES  = 3      // Số lần thử lại khi batch lỗi
+const BATCH_SIZE = 1000   // Số rows mỗi lần bulkCreate (CockroachDB có thể chịu tải tốt hơn)
+const DELAY_MS = 100    // Nghỉ giữa các batch (ms)
+const MAX_RETRIES = 3      // Số lần thử lại khi batch lỗi
 const RETRY_BASE_MS = 1000  // Base delay cho exponential backoff (ms)
 
-const CSV_PATH = path.join(__dirname, '..', 'data', 'Hanoi_Grid_Features_Final_v2.csv')
+const CSV_PATH = path.join(__dirname, '../init-system/02_static_data/Hanoi_Grid_Features_Final_v2.csv')
 
 // ─── Helper: sleep ────────────────────────────────────────────────────────────
 
@@ -166,28 +166,28 @@ async function importGridFeatures() {
         const node_id = isNaN(gridNum) ? null : gridNum + 1
         if (!node_id) { parseSkipped++; return }
 
-        const hotspot      = lookupHotspotName(lat, lon)
+        const hotspot = lookupHotspotName(lat, lon)
         const location_name = hotspot ?? `Grid_${lat.toFixed(6)}_${lon.toFixed(6)}`
 
         allRows.push({
           node_id,
-          latitude:             lat,
-          longitude:            lon,
-          grid_id:              row.grid_id || null,
+          latitude: lat,
+          longitude: lon,
+          grid_id: row.grid_id || null,
           location_name,
-          dist_to_park_km:      parseFloat(row.dist_to_park_km)      || null,
-          dist_to_drain_km:     parseFloat(row.dist_to_drain_km)     || null,
-          dist_to_river_km:     parseFloat(row.dist_to_river_km)     || null,
+          dist_to_park_km: parseFloat(row.dist_to_park_km) || null,
+          dist_to_drain_km: parseFloat(row.dist_to_drain_km) || null,
+          dist_to_river_km: parseFloat(row.dist_to_river_km) || null,
           dist_to_main_road_km: parseFloat(row.dist_to_main_road_km) || null,
-          dist_to_pump_km:      parseFloat(row.dist_to_pump_km)      || null,
-          elevation:            parseFloat(row.elevation)             || null,
-          slope:                parseFloat(row.slope)                 || null,
-          impervious_ratio:     parseFloat(row.impervious_ratio)      || null,
-          geom:                 { type: 'Point', coordinates: [lon, lat] },
+          dist_to_pump_km: parseFloat(row.dist_to_pump_km) || null,
+          elevation: parseFloat(row.elevation) || null,
+          slope: parseFloat(row.slope) || null,
+          impervious_ratio: parseFloat(row.impervious_ratio) || null,
+          geom: { type: 'Point', coordinates: [lon, lat] },
         })
       })
       .on('error', reject)
-      .on('end',   resolve)
+      .on('end', resolve)
   })
 
   const totalBatches = Math.ceil(allRows.length / BATCH_SIZE)
@@ -200,10 +200,10 @@ async function importGridFeatures() {
   }
 
   // 5. Upsert theo batch với throttling
-  const startTime    = Date.now()
-  let totalUpserted  = 0
-  let totalFailed    = 0
-  let batchIndex     = 0
+  const startTime = Date.now()
+  let totalUpserted = 0
+  let totalFailed = 0
+  let batchIndex = 0
 
   for (let i = 0; i < allRows.length; i += BATCH_SIZE) {
     batchIndex++
@@ -221,7 +221,7 @@ async function importGridFeatures() {
 
   // 6. Tổng kết
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-  const status  = totalFailed === 0 ? '✅  THÀNH CÔNG HOÀN TOÀN' : '⚠️   HOÀN THÀNH CÓ LỖI'
+  const status = totalFailed === 0 ? '✅  THÀNH CÔNG HOÀN TOÀN' : '⚠️   HOÀN THÀNH CÓ LỖI'
 
   console.log('\n──────────────────────────────────────────────────────────────')
   console.log(`${status}`)

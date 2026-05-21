@@ -7,40 +7,47 @@
 
 require('dotenv').config()
 
-const bcrypt  = require('bcrypt')
-const { sequelize } = require('../src/db/sequelize')
+const bcrypt = require('bcrypt')
+const { sequelize } = require('../../src/db/sequelize')
 const { QueryTypes } = require('sequelize')
 
 const SALT_ROUNDS = 12
 
 const USERS = [
   {
-    username:  'admin',
-    email:     'admin@aquaalert.vn',
+    username: 'admin',
+    email: 'admin@aquaalert.vn',
     full_name: 'Quản trị viên AQUAALERT',
-    password:  'Admin@2026!',
-    role:      'admin',
+    password: 'Admin@2026!',
+    role: 'admin',
   },
   {
-    username:  'analyst1',
-    email:     'analyst1@aquaalert.vn',
+    username: 'analyst1',
+    email: 'analyst1@aquaalert.vn',
     full_name: 'Nguyễn Văn An – Phân tích viên',
-    password:  'Analyst@2026!',
-    role:      'expert',
+    password: 'Analyst@2026!',
+    role: 'expert',
   },
   {
-    username:  'analyst2',
-    email:     'analyst2@aquaalert.vn',
+    username: 'analyst2',
+    email: 'analyst2@aquaalert.vn',
     full_name: 'Trần Thị Bình – Phân tích viên',
-    password:  'Analyst@2026!',
-    role:      'expert',
+    password: 'Analyst@2026!',
+    role: 'expert',
   },
   {
-    username:  'analyst3',
-    email:     'analyst3@aquaalert.vn',
+    username: 'analyst3',
+    email: 'analyst3@aquaalert.vn',
     full_name: 'Lê Minh Cường – Phân tích viên',
-    password:  'Analyst@2026!',
-    role:      'expert',
+    password: 'Analyst@2026!',
+    role: 'expert',
+  },
+  {
+    username: 'hiep',
+    email: 'hiep@aquaalert.vn',
+    full_name: 'Đỗ Hoàng Hiệp – Người dùng',
+    password: 'Hiep@2026!',
+    role: 'user',
   },
 ]
 

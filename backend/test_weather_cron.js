@@ -1,6 +1,7 @@
 'use strict'
 require('dotenv').config()
-const { manualTrigger } = require('./src/services/weatherCron')
+
+const { manualTrigger } = require('./src/modules/flood/cron/weatherCron')
 const { sequelize } = require('./src/db/sequelize')
 
 async function main() {
@@ -8,4 +9,4 @@ async function main() {
   await manualTrigger()
   console.log('Done testing weatherCron.js')
 }
-main().catch(console.error).finally(()=>sequelize.close())
+main().catch(console.error).finally(() => sequelize.close())

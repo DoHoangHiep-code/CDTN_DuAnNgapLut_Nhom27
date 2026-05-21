@@ -14,22 +14,22 @@
 
 require('dotenv').config()
 
-const { sequelize } = require('../src/db/sequelize')
-const { WeatherStation, GridNode } = require('../src/models')
+const { sequelize } = require('../../src/db/sequelize')
+const { WeatherStation, GridNode } = require('../../src/models')
 const { QueryTypes } = require('sequelize')
 
 // ─── Cấu hình lưới ────────────────────────────────────────────────────────────
-const GRID_KM      = 3          // kích thước ô lưới (km)
+const GRID_KM = 3          // kích thước ô lưới (km)
 const GRID_DEG_LAT = GRID_KM / 111.0                             // ~0.02703°
 const GRID_DEG_LON = GRID_KM / (111.0 * Math.cos(21 * Math.PI / 180)) // ~0.02894°
-const MARGIN_DEG   = GRID_KM / 111.0 * 0.5  // margin ngoài bbox 0.5 ô
+const MARGIN_DEG = GRID_KM / 111.0 * 0.5  // margin ngoài bbox 0.5 ô
 
 // ─── Haversine (km) ───────────────────────────────────────────────────────────
 function haversineKm(lat1, lon1, lat2, lon2) {
-  const R    = 6371
+  const R = 6371
   const dLat = (lat2 - lat1) * Math.PI / 180
   const dLon = (lon2 - lon1) * Math.PI / 180
-  const a    = Math.sin(dLat / 2) ** 2
+  const a = Math.sin(dLat / 2) ** 2
     + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
@@ -126,8 +126,8 @@ async function main() {
     // Fallback: nếu không tìm thấy trong 9 ô lân cận (node ngoài margin), tìm toàn bộ
     if (bestIdx === -1) {
       for (let idx = 0; idx < candidateStations.length; idx++) {
-        const s   = candidateStations[idx]
-        const d   = haversineKm(node.lat, node.lon, s.lat, s.lon)
+        const s = candidateStations[idx]
+        const d = haversineKm(node.lat, node.lon, s.lat, s.lon)
         if (d < bestDist) { bestDist = d; bestIdx = idx }
       }
     }
@@ -140,26 +140,26 @@ async function main() {
 
   // ── Bước 4: Orphan Filter – chỉ giữ trạm có nodeCount > 0 ────────────────
   const validStations = candidateStations.filter(s => s.nodeCount > 0)
-  const orphanCount   = candidateStations.length - validStations.length
+  const orphanCount = candidateStations.length - validStations.length
   console.log(`[Bước 4] ✅ Trạm hợp lệ (node_count > 0): ${validStations.length}`)
   console.log(`[Bước 4]    Trạm rỗng bị loại (orphans):  ${orphanCount}`)
   console.log(`[Bước 4]    → Chỉ ${validStations.length} trạm được lưu vào DB.\n`)
 
-  // ── Bước 5: INSERT trạm vào DB (xóa cũ trước) ────────────────────────────
   console.log('[Bước 5] Đang xóa tất cả trạm cũ...')
-  await WeatherStation.destroy({ truncate: true, cascade: false })
+  await sequelize.query('UPDATE grid_nodes SET weather_station_id = NULL;')
+  await WeatherStation.destroy({ where: {}, truncate: false })
 
   console.log(`[Bước 5] Đang INSERT ${validStations.length} trạm hợp lệ...`)
   const BATCH = 100
   const insertedStations = []
   for (let i = 0; i < validStations.length; i += BATCH) {
     const chunk = validStations.slice(i, i + BATCH).map(s => ({
-      name:       `VS_R${s.grid_row}_C${s.grid_col}`,
-      latitude:   parseFloat(s.lat.toFixed(6)),
-      longitude:  parseFloat(s.lon.toFixed(6)),
+      name: `VS_R${s.grid_row}_C${s.grid_col}`,
+      latitude: parseFloat(s.lat.toFixed(6)),
+      longitude: parseFloat(s.lon.toFixed(6)),
       node_count: s.nodeCount,
-      grid_row:   s.grid_row,
-      grid_col:   s.grid_col,
+      grid_row: s.grid_row,
+      grid_col: s.grid_col,
     }))
     const created = await WeatherStation.bulkCreate(chunk, { returning: true })
     insertedStations.push(...created)
@@ -205,7 +205,7 @@ async function main() {
 
   // ── Tổng kết ──────────────────────────────────────────────────────────────
   const stationCheck = await WeatherStation.count()
-  const nodeCheck    = await sequelize.query(
+  const nodeCheck = await sequelize.query(
     'SELECT COUNT(*) as c FROM grid_nodes WHERE weather_station_id IS NOT NULL;',
     { type: QueryTypes.SELECT }
   )
