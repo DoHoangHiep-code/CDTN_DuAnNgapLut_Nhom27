@@ -159,10 +159,15 @@
   box-shadow: 0 4px 20px rgba(3, 105, 161, 0.35);
   border-color: rgba(14, 165, 233, 0.4) !important;
 }
-.fps-news-ticker--danger {
+.fps-news-ticker--danger-landslide {
   background: linear-gradient(90deg, #b45309 0%, #d97706 50%, #f59e0b 100%);
   border-color: rgba(245, 158, 11, 0.5) !important;
   box-shadow: 0 4px 20px rgba(180, 83, 9, 0.35);
+}
+.fps-news-ticker--danger-flood {
+  background: linear-gradient(90deg, #be123c 0%, #e11d48 50%, #f43f5e 100%);
+  border-color: rgba(225, 29, 72, 0.5) !important;
+  box-shadow: 0 4px 20px rgba(225, 29, 72, 0.35);
 }
 .fps-news-ticker--base {
   background: linear-gradient(90deg, #0369a1 0%, #0284c7 50%, #0ea5e9 100%);
@@ -170,7 +175,11 @@
 .fps-news-ticker-track {
   display: flex;
   width: max-content;
-  animation: fps-marquee 28s linear infinite;
+  animation: fps-marquee 60s linear infinite;
+}
+
+.fps-news-ticker:hover .fps-news-ticker-track {
+  animation-play-state: paused;
 }
 @keyframes fps-marquee {
   0% {

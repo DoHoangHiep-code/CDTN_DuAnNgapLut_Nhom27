@@ -15,8 +15,8 @@
 
 require('dotenv').config()
 
-const { sequelize }     = require('../src/db/sequelize')
-const { WeatherStation } = require('../src/models')
+const { sequelize }     = require('../../src/db/sequelize')
+const { WeatherStation } = require('../../src/models')
 const { QueryTypes }    = require('sequelize')
 
 const UPDATE_BATCH = 500  // rows per SQL batch
@@ -144,7 +144,7 @@ async function main() {
   console.log(`   Còn NULL:    ${Number(check.remaining).toLocaleString('vi-VN')} nodes`)
 
   // Kiểm tra 1 sample
-  const [sample] = await sequelize.query(`
+  const sample = await sequelize.query(`
     SELECT node_id, st1_id, st1_weight, st2_id, st2_weight, st3_id, st3_weight
     FROM grid_nodes WHERE st1_id IS NOT NULL LIMIT 3;
   `, { type: QueryTypes.SELECT })

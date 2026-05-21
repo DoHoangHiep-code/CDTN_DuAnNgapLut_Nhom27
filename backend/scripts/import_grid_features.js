@@ -30,7 +30,7 @@ const DELAY_MS     = 100    // Nghỉ giữa các batch (ms)
 const MAX_RETRIES  = 3      // Số lần thử lại khi batch lỗi
 const RETRY_BASE_MS = 1000  // Base delay cho exponential backoff (ms)
 
-const CSV_PATH = path.join(__dirname, '..', 'data', 'Hanoi_Grid_Features_Final_v2.csv')
+const CSV_PATH = path.join(__dirname, '../init-system/02_static_data/Hanoi_Grid_Features_Final_v2.csv')
 
 // ─── Helper: sleep ────────────────────────────────────────────────────────────
 

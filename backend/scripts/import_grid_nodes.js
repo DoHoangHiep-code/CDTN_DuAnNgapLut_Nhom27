@@ -31,7 +31,7 @@ const { sequelize } = require('../src/db/sequelize')
 const { GridNode }  = require('../src/models')
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const DEFAULT_CSV = path.resolve(__dirname, '../data/Hanoi_Grid_Features_Final_v2.csv')
+const DEFAULT_CSV = path.resolve(__dirname, '../init-system/02_static_data/Hanoi_Grid_Features_Final_v2.csv')
 const CHUNK_SIZE  = 5000   // rows per bulkCreate batch
 const UPDATE_COLS = [      // columns to overwrite on conflict (lat/lon unique)
   'grid_id',
@@ -53,7 +53,7 @@ function resolveCsvPath() {
   }
   if (!fs.existsSync(DEFAULT_CSV)) {
     console.error(`[Import] ❌ Không tìm thấy file mặc định:\n  ${DEFAULT_CSV}`)
-    console.error('[Import] Hãy đặt file CSV vào: backend/data/Hanoi_Grid_Features_Final_v2.csv')
+    console.error('[Import] Hãy đặt file CSV vào: backend/init-system/02_static_data/Hanoi_Grid_Features_Final_v2.csv')
     console.error('[Import] Hoặc truyền tham số: node scripts/import_grid_nodes.js --file=<path>')
     process.exit(1)
   }

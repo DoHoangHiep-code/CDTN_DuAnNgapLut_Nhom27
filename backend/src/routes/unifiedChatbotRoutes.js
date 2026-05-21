@@ -28,7 +28,7 @@ const { formatCurrentStatus, formatTier1RiskExplanation, formatTier2ExpertAnalys
 
 let redis = null
 try {
-    redis = require('../services/redisClient')
+    redis = require('../common/services/redisClient')
 } catch (err) {
     console.warn('[UnifiedChatbot] redisClient không load được:', err.message, '– chạy không có cache.')
 }
@@ -36,7 +36,7 @@ try {
 let getFeatureByGridId = null
 let getFeatureByLatLng = null
 try {
-    const svc = require('../services/floodFeature.service')
+    const svc = require('../modules/flood/services/floodFeature.service')
     getFeatureByGridId = svc.getFeatureByGridId
     getFeatureByLatLng = svc.getFeatureByLatLng
 } catch (err) {

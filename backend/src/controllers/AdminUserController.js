@@ -61,10 +61,10 @@ class AdminUserController {
       const adminUserId = req.user.user_id
 
       // Target user id từ params
-      const targetUserId = Number(req.params.id)
+      const targetUserId = req.params.id
 
-      // Validate id hợp lệ để tránh query sai
-      if (!Number.isFinite(targetUserId)) {
+      // Validate id hợp lệ (chuỗi số) để tránh query sai
+      if (!/^\d+$/.test(targetUserId)) {
         return res.status(400).json({ success: false, error: { message: 'ID không hợp lệ' } })
       }
 
@@ -93,10 +93,10 @@ class AdminUserController {
       const adminUserId = req.user.user_id
 
       // Target id từ params
-      const targetUserId = Number(req.params.id)
+      const targetUserId = req.params.id
 
       // Validate
-      if (!Number.isFinite(targetUserId)) {
+      if (!/^\d+$/.test(targetUserId)) {
         return res.status(400).json({ success: false, error: { message: 'ID không hợp lệ' } })
       }
 

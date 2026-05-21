@@ -8,7 +8,7 @@
 require('dotenv').config()
 
 const bcrypt  = require('bcrypt')
-const { sequelize } = require('../src/db/sequelize')
+const { sequelize } = require('../../src/db/sequelize')
 const { QueryTypes } = require('sequelize')
 
 const SALT_ROUNDS = 12
@@ -41,6 +41,13 @@ const USERS = [
     full_name: 'Lê Minh Cường – Phân tích viên',
     password:  'Analyst@2026!',
     role:      'expert',
+  },
+  {
+    username:  'hiep',
+    email:     'hiep@aquaalert.vn',
+    full_name: 'Đỗ Hoàng Hiệp – Người dùng',
+    password:  'Hiep@2026!',
+    role:      'user',
   },
 ]
 

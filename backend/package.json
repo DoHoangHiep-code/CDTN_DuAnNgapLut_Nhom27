@@ -9,7 +9,9 @@
     "db:migrate:undo:all": "sequelize-cli db:migrate:undo:all",
     "seed": "node src/cli/seed.js",
     "start": "node --max-old-space-size=6144 src/server.js",
-    "predict": "node src/cli/runPrediction.js"
+    "dev": "nodemon --exec \"node --max-old-space-size=6144\" src/server.js",
+    "predict": "node src/cli/runPrediction.js",
+    "setup:db": "node init-system/redeploy.js"
   },
   "dependencies": {
     "axios": "^1.15.0",
@@ -25,12 +27,14 @@
     "multer": "^2.0.2",
     "node-cache": "^5.1.2",
     "node-cron": "^4.2.1",
+    "onnxruntime-node": "^1.26.0",
     "pg": "^8.13.1",
     "pg-hstore": "^2.3.4",
     "redis": "^5.12.1",
     "sequelize": "^6.37.7"
   },
   "devDependencies": {
+    "nodemon": "^3.1.14",
     "sequelize-cli": "^6.6.2"
   }
 }

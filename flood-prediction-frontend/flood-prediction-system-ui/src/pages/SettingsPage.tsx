@@ -4,7 +4,7 @@ import {
   Bell, BellOff, Moon, Palette, Settings2, Sun,
   Globe, Map, Layers, Thermometer, BarChart2, MapPin, Clock,
 } from 'lucide-react'
-import { Toggle } from '../components/Toggle'
+import { Toggle } from '../components/common/Toggle'
 import { useSettings, type MapStyle, type RefreshInterval, type Language } from '../context/SettingsContext'
 import { useTranslation } from 'react-i18next'
 import { updateUserSettings } from '../services/api'

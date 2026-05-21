@@ -17,11 +17,11 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') })
 
 const axios = require('axios')
-const { sequelize } = require('../src/db/sequelize')
+const { sequelize } = require('../../src/db/sequelize')
 
 // Nạp toàn bộ models (bao gồm GridNode với cột location_name mới)
-require('../src/models')
-const { GridNode } = require('../src/models')
+require('../../src/models')
+const { GridNode } = require('../../src/models')
 
 // ─── Danh sách 39 điểm ngập Hà Nội ──────────────────────────────────────────
 
@@ -238,16 +238,38 @@ async function main() {
   console.log(`[Seed] Bắt đầu upsert ${results.length} bản ghi vào grid_nodes…`)
 
   try {
-    // Upsert: nếu node_id đã tồn tại → cập nhật tọa độ + location_name
-    await GridNode.bulkCreate(results, {
-      updateOnDuplicate: [
-        'latitude', 'longitude', 'geom',
-        'location_name',
-        'elevation', 'slope', 'impervious_ratio',
-        'dist_to_drain_km', 'dist_to_river_km', 'dist_to_pump_km',
-        'dist_to_main_road_km', 'dist_to_park_km',
-      ],
-    })
+    // Upsert bằng raw SQL để CockroachDB xử lý đúng ON CONFLICT (node_id)
+    const { QueryTypes } = require('sequelize')
+    for (const r of results) {
+      const geomJson = JSON.stringify(r.geom).replace(/'/g, "''")
+      const locName  = (r.location_name || '').replace(/'/g, "''")
+      await sequelize.query(`
+        INSERT INTO grid_nodes (
+          node_id, latitude, longitude, geom,
+          location_name, elevation, slope, impervious_ratio,
+          dist_to_drain_km, dist_to_river_km, dist_to_pump_km,
+          dist_to_main_road_km, dist_to_park_km
+        ) VALUES (
+          ${r.node_id}, ${r.latitude}, ${r.longitude}, ST_SetSRID(ST_MakePoint(${r.longitude}, ${r.latitude}), 4326),
+          '${locName}', ${r.elevation}, ${r.slope}, ${r.impervious_ratio},
+          ${r.dist_to_drain_km}, ${r.dist_to_river_km}, ${r.dist_to_pump_km},
+          ${r.dist_to_main_road_km}, ${r.dist_to_park_km}
+        )
+        ON CONFLICT (node_id) DO UPDATE SET
+          latitude             = EXCLUDED.latitude,
+          longitude            = EXCLUDED.longitude,
+          geom                 = EXCLUDED.geom,
+          location_name        = EXCLUDED.location_name,
+          elevation            = EXCLUDED.elevation,
+          slope                = EXCLUDED.slope,
+          impervious_ratio     = EXCLUDED.impervious_ratio,
+          dist_to_drain_km     = EXCLUDED.dist_to_drain_km,
+          dist_to_river_km     = EXCLUDED.dist_to_river_km,
+          dist_to_pump_km      = EXCLUDED.dist_to_pump_km,
+          dist_to_main_road_km = EXCLUDED.dist_to_main_road_km,
+          dist_to_park_km      = EXCLUDED.dist_to_park_km;
+      `)
+    }
 
     console.log(`\n✅ THÀNH CÔNG! Đã upsert ${results.length} GridNode vào CockroachDB.`)
     console.log('   Bảng grid_nodes đã được điền đầy đủ 39 điểm ngập thực tế Hà Nội.')

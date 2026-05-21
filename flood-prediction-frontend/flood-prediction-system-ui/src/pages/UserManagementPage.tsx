@@ -6,9 +6,9 @@ import {
   X, RefreshCcw, Filter, Mail, Calendar,
 } from 'lucide-react'
 
-import { Input } from '../components/Input'
-import { Spinner } from '../components/Spinner'
-import { ErrorState } from '../components/ErrorState'
+import { Input } from '../components/common/Input'
+import { Spinner } from '../components/common/Spinner'
+import { ErrorState } from '../components/common/ErrorState'
 import { useAsync } from '../hooks/useAsync'
 import { adminCreateUser, adminDeleteUser, adminListUsers, adminUpdateUser } from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -17,7 +17,7 @@ import { cn } from '../utils/cn'
 type Role = 'admin' | 'expert' | 'user'
 
 type AdminUserRow = {
-  user_id: number
+  user_id: string | number
   username: string
   email: string
   full_name: string
@@ -85,7 +85,7 @@ function UserModal({ state, onClose, onSaved }: { state: ModalState; onClose: ()
   const [password, setPassword] = useState('')
   const [saving, setSaving]     = useState(false)
 
-  const isSelf = isEdit && user && Number(user.user_id) === Number((initial as any).user_id)
+  const isSelf = isEdit && user && String(user.user_id) === String((initial as any).user_id)
 
   async function handleSave() {
     if (!fullName.trim() || !username.trim() || !email.trim()) {
@@ -96,7 +96,7 @@ function UserModal({ state, onClose, onSaved }: { state: ModalState; onClose: ()
     setSaving(true)
     try {
       if (isEdit) {
-        await adminUpdateUser(Number((initial as any).user_id), {
+        await adminUpdateUser(String((initial as any).user_id), {
           full_name: fullName.trim(), username: username.trim(),
           email: email.trim(), role, password: password.trim() || undefined,
         })
@@ -390,7 +390,7 @@ export function UserManagementPage() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {rows.map((r, idx) => {
-                  const isSelf = user && Number(user.user_id) === Number(r.user_id)
+                  const isSelf = user && String(user.user_id) === String(r.user_id)
                   return (
                     <tr key={r.user_id} className="group transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/30">
                       {/* # */}
@@ -481,11 +481,13 @@ export function UserManagementPage() {
         </div>
       </div>
 
-      <UserModal
-        state={modal}
-        onClose={() => setModal({ open: false })}
-        onSaved={() => void users.reload()}
-      />
+      {modal.open && (
+        <UserModal
+          state={modal}
+          onClose={() => setModal({ open: false })}
+          onSaved={() => void users.reload()}
+        />
+      )}
     </div>
   )
 }

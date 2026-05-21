@@ -1,5 +1,5 @@
 const express = require('express') // Import express để tạo router
-const { verifyToken } = require('../middlewares/auth.middleware') // Middleware xác thực JWT
+const { verifyToken } = require('../common/middlewares/auth.middleware') // Middleware xác thực JWT
 const { ProfileController, uploadAvatarMiddleware } = require('../controllers/ProfileController') // Controller + multer middleware
 
 const router = express.Router() // Router cho /api/v1/users/profile
