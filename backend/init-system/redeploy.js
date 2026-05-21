@@ -17,13 +17,11 @@
  *   Step 6  – Tính IDW weights (st1/st2/st3) cho toàn bộ 53.330 nodes
  *   Step 7  – Gán station cho các node còn NULL (safety net)
  *   Step 8  – Geocoding location_name (chạy ngầm ~60 phút)
- *   Step 9  – Seed 425K điểm lưới sạt lở từ JSONL
  *   Step 10 – Seed dữ liệu sạt lở động (CSV + Open-Meteo API)
  *
  * Yêu cầu:
  *   - File .env đã cập nhật DATABASE_URL mới
  *   - File CSV: init-system/02_static_data/Hanoi_Grid_Features_Final_v2.csv
- *   - File JSONL: init-system/02_static_data/landslide_grid_nodes.jsonl
  *   - Node.js >= 18
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -165,16 +163,6 @@ async function main() {
   geocoder.unref()
   console.log(`  ✅ Geocoding chạy ngầm (PID: ${geocoder.pid}).`)
 
-  // ── Step 9: Seed Landslide Grid Nodes ───────────────────────────────────────
-  step(9, 'Seed 425K điểm lưới sạt lở từ JSONL (landslide_grid_nodes)')
-  const landslideJsonl = path.join(__dirname, '02_static_data', 'landslide_grid_nodes.jsonl')
-  if (!fs.existsSync(landslideJsonl)) {
-    console.warn(`  ⚠️  Không tìm thấy: ${landslideJsonl}`)
-    console.warn('  Bỏ qua step 9. Chạy export_old_db.js để tạo file nguồn.')
-  } else {
-    await runScript(path.join(SCRIPTS_DIR, 'seed_landslide_nodes.js'))
-    console.log('  ✅ Seed landslide_grid_nodes xong.')
-  }
 
   // ── Step 10: Seed Landslide Pipeline (Open-Meteo) ───────────────────────────
   step(10, 'Khởi tạo dữ liệu sạt lở động (CSV + Open-Meteo API)')
