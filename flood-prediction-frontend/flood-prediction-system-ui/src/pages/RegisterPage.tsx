@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { ShieldCheck } from 'lucide-react'
-import { Card } from '../components/Card'
-import { Button } from '../components/Button'
+import { Card } from '../components/common/Card'
+import { Button } from '../components/common/Button'
 import { authRegister } from '../services/api'
 
 export function RegisterPage() {

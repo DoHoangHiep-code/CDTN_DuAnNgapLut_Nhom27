@@ -3,7 +3,7 @@
 const express = require('express')
 const { QueryTypes } = require('sequelize')
 const { sequelize } = require('../db/sequelize')
-const redis = require('../services/redisClient')
+const redis = require('../common/services/redisClient')
 
 const router = express.Router()
 

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { Card } from '../components/Card'
-import { Button } from '../components/Button'
+import { Card } from '../components/common/Card'
+import { Button } from '../components/common/Button'
 import { authResetPassword } from '../services/api'
 
 export function ResetPasswordPage() {

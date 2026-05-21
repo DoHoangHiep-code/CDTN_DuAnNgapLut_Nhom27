@@ -24,3 +24,7 @@ npm-debug.log*
 # Python cache
 *.egg-info/
 .pytest_cache/
+
+# Data Engineering (Satellite files)
+data_engineering/*.tif
+

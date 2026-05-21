@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { Card } from '../components/Card'
-import { Button } from '../components/Button'
+import { Card } from '../components/common/Card'
+import { Button } from '../components/common/Button'
 import { authForgotPassword } from '../services/api'
 
 export function ForgotPasswordPage() {

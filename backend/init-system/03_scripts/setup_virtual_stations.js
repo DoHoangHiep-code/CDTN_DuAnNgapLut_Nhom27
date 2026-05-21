@@ -14,8 +14,8 @@
 
 require('dotenv').config()
 
-const { sequelize } = require('../src/db/sequelize')
-const { WeatherStation, GridNode } = require('../src/models')
+const { sequelize } = require('../../src/db/sequelize')
+const { WeatherStation, GridNode } = require('../../src/models')
 const { QueryTypes } = require('sequelize')
 
 // ─── Cấu hình lưới ────────────────────────────────────────────────────────────
@@ -145,9 +145,9 @@ async function main() {
   console.log(`[Bước 4]    Trạm rỗng bị loại (orphans):  ${orphanCount}`)
   console.log(`[Bước 4]    → Chỉ ${validStations.length} trạm được lưu vào DB.\n`)
 
-  // ── Bước 5: INSERT trạm vào DB (xóa cũ trước) ────────────────────────────
   console.log('[Bước 5] Đang xóa tất cả trạm cũ...')
-  await WeatherStation.destroy({ truncate: true, cascade: false })
+  await sequelize.query('UPDATE grid_nodes SET weather_station_id = NULL;')
+  await WeatherStation.destroy({ where: {}, truncate: false })
 
   console.log(`[Bước 5] Đang INSERT ${validStations.length} trạm hợp lệ...`)
   const BATCH = 100

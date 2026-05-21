@@ -16,10 +16,12 @@ from catboost import CatBoostRegressor
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from services.landslide_service import init_landslide_model, predict_landslide_risk
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = "../ai/catboost_flood_model_final_full_data.cbm"
+MODEL_PATH = "models/flood/catboost_flood_model_final_full_data.cbm"
 _model: CatBoostRegressor | None = None
 
 
@@ -30,6 +32,9 @@ async def lifespan(app: FastAPI):
     _model = CatBoostRegressor()
     _model.load_model(MODEL_PATH)
     logger.info("Model tải thành công. Features: %s", _model.feature_names_)
+
+    # Khởi tạo Landslide ONNX model
+    init_landslide_model()
 
     # ── Warm-up: chạy predict giả để JIT/nội bộ CatBoost khởi tạo đầy đủ ──────
     # Tránh độ trễ lớn ở request THỰC ĐẦU TIÊN do lazy initialization.
@@ -172,6 +177,22 @@ def predict_flood(data: WeatherData):
         raise HTTPException(status_code=422, detail=f"Feature '{e}' thiếu trong request.")
     except Exception as e:
         logger.error("Lỗi predict: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/predict/landslide")
+def predict_landslide(data: dict):
+    """
+    Nhận dictionary chứa các features (địa hình, mưa, độ ẩm...).
+    Chạy dự báo sạt lở qua ONNX model.
+    """
+    try:
+        result = predict_landslide_risk(data)
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error("Lỗi predict landslide: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -25,6 +25,8 @@ function cleanData(text) {
   return text;
 }
 
+const ADMIN_MAP_2025 = require('../../scripts/administrative_mapping_2025.json')
+
 // ─── Bóc tách địa chỉ chi tiết ───────────────────────────────────────────────
 function parseAddress(addr) {
   if (!addr) return { locationName: null, districtName: null }
@@ -35,11 +37,24 @@ function parseAddress(addr) {
 
   // Lấy Phường/Xã (Đã cover Xã Thư Lâm, Xã Liên Minh...)
   const wardRaw = addr.quarter || addr.suburb || addr.village || addr.neighbourhood || addr.hamlet
-  const ward = cleanData(wardRaw)
+  let ward = cleanData(wardRaw)
 
   // Lấy Quận/Huyện
   const districtRaw = addr.city_district || addr.county || addr.district || addr.town
-  const district = cleanData(districtRaw)
+  let district = cleanData(districtRaw)
+
+  // BẮT BUỘC chọc vào Mapping Dictionary
+  if (ward && ADMIN_MAP_2025[ward]) {
+    ward = ADMIN_MAP_2025[ward]
+    // Cập nhật cả district_name tương ứng nếu cần (Thường xã lên Phường thì quận cũng đổi hoặc giữ nguyên)
+    // Tạm thời nếu mapping có kết quả thì ta cho nó vẫn thuộc district cũ hoặc update district_name
+    // VD: Phường Hàng Bạc -> Phường Hoàn Kiếm, District = Quận Hoàn Kiếm
+    if (ward.includes('Hoàn Kiếm')) district = 'Quận Hoàn Kiếm'
+    else if (ward.includes('Hai Bà Trưng')) district = 'Quận Hai Bà Trưng'
+    else if (ward.includes('Đống Đa')) district = 'Quận Đống Đa'
+    else if (ward.includes('Ba Đình')) district = 'Quận Ba Đình'
+    // .. có thể tự động parse hoặc dựa vào district hiện tại
+  }
 
   let locationName = '';
   if (road && ward && district) locationName = `${road}, ${ward}, ${district}`;

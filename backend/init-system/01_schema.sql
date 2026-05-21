@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
   full_name     VARCHAR(256),
   password_hash TEXT         NOT NULL,
   role          VARCHAR(32)  NOT NULL DEFAULT 'user',
+  avatar_url    VARCHAR(255),
   created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
@@ -157,7 +158,7 @@ CREATE TABLE IF NOT EXISTS actual_flood_reports (
   description      TEXT,
   image_url        TEXT,
   verified         BOOLEAN DEFAULT FALSE,
-  location_name    VARCHAR(512)
+  node_id          BIGINT      REFERENCES grid_nodes(node_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_actual_flood_reports_geom_gist ON actual_flood_reports USING GIST (geom);
