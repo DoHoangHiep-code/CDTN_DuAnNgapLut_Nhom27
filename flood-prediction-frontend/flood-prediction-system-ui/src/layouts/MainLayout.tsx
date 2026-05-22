@@ -87,6 +87,16 @@ export function MainLayout() {
         ? buildTickerItems(alertsData)
         : []
 
+  const getAvatarUrl = (url?: string) => {
+    if (!url) return null
+    if (url.startsWith('http')) return url
+    const apiUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3002/api/v1'
+    const baseUrl = apiUrl.replace(/\/api\/v1\/?$/, '')
+    return `${baseUrl.replace(/\/+$/, '')}${url}`
+  }
+
+  const userAvatar = getAvatarUrl(user?.avatar_url)
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 dark:bg-slate-950">
       {/* Sidebar — đổi theme theo mode thiên tai */}
@@ -210,8 +220,8 @@ export function MainLayout() {
               style={{ background: mode === 'landslide' ? 'rgba(217,119,6,0.1)' : 'rgba(255,255,255,0.1)' }}
             >
               <div className="flex items-center gap-2 min-w-0">
-                {user?.avatar_url ? (
-                  <img src={user.avatar_url} alt="avatar" className="h-8 w-8 rounded-xl object-cover ring-1 ring-white/30" />
+                {userAvatar ? (
+                  <img src={userAvatar} alt="avatar" className="h-8 w-8 rounded-xl object-cover ring-1 ring-white/30" />
                 ) : (
                   <div className="grid h-8 w-8 place-items-center rounded-xl bg-white/20 ring-1 ring-white/20">
                     <UserCircle2 className="h-4 w-4 text-white" />
