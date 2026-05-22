@@ -115,7 +115,7 @@ const AREA_KEYWORDS = [
     'bắc từ liêm', 'nam từ liêm', 'tây hồ', 'long biên', 'hoàng mai', 'hai bà trưng',
     'ba đình', 'gia lâm', 'sóc sơn', 'đông anh', 'mê linh', 'thường tín',
     'phú xuyên', 'ứng hòa', 'mỹ đức', 'thanh oai', 'chương mỹ', 'quốc oai',
-    'thạch thất', 'phúc thọ', 'đan phượng', 'hoài đức', 'nguyễn tuân'
+    'thạch thất', 'phúc thọ', 'đan phượng', 'hoài đức', 'nguyễn tuân', 'nguyễn trãi'
 ]
 
 function extractArea(msg) {
@@ -137,9 +137,6 @@ function detectIntent(msg) {
         return { intent: 'SAFE_ADVICE', area: extractArea(m), timeOffset: 0 }
     if (/(đường vòng|đi tránh|tránh ngập|ngõ nào|đường nào|chỉ đường|tuyến đường|lối đi|lộ trình|tìm đường)/.test(m))
         return { intent: 'FIND_SAFE_ROUTE', area: extractArea(m), timeOffset: 0 }
-    if (/(hiện tại|bây giờ|đang ngập|lúc này|ngay bây giờ|hiện giờ)/.test(m))
-        return { intent: 'CURRENT_STATUS', area: extractArea(m), timeOffset: 0 }
-
     if (/(\d{1,2}h|\d{1,2}:\d{2}|sáng|chiều|tối|trưa|ngày mai|hôm nay|ngày kia)/.test(m) &&
         /(ngập|mưa|lũ|dự báo|nguy cơ)/.test(m)) {
         let offset = 0
@@ -149,6 +146,9 @@ function detectIntent(msg) {
         else if (/tối/.test(m)) offset = 10
         return { intent: 'SPECIFIC_TIME', area: extractArea(m), timeOffset: offset }
     }
+
+    if (/(hiện tại|bây giờ|đang ngập|lúc này|ngay bây giờ|hiện giờ|ngập không|có ngập|tình trạng ngập)/.test(m))
+        return { intent: 'CURRENT_STATUS', area: extractArea(m), timeOffset: 0 }
 
     const area = extractArea(m)
     if (area) return { intent: 'SPECIFIC_AREA', area, timeOffset: 0 }
@@ -510,12 +510,6 @@ function replyForecast(rows) {
 }
 
 function replyCurrentStatus(rows, areaName) {
-    if (!rows.length) {
-        return {
-            text: `✅ Hiện tại (**${formatVN(new Date())}**) không có điểm đo nào vượt ngưỡng nguy hiểm.`,
-            suggestAreas: false, expertNodes: [],
-        }
-    }
     const expertNodes = rows
         .filter(r => r.node_id && ['high', 'severe'].includes(r.risk_level))
         .slice(0, 3)
