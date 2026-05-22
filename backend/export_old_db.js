@@ -29,32 +29,6 @@ async function main() {
   `)
   for (const c of cols.rows) console.log(`  ${c.column_name}: ${c.data_type}`)
 
-  // 3. Export landslide_grid_nodes ra JSONL (batch từng 10K rows)
-  const BATCH = 10000
-  const countRes = await client.query('SELECT COUNT(*) FROM landslide_grid_nodes')
-  const total = parseInt(countRes.rows[0].count)
-  console.log(`\n[Export] Tổng landslide_grid_nodes: ${total.toLocaleString('vi-VN')} rows`)
-
-  const outPath = path.join(__dirname, 'init-system', '02_static_data', 'landslide_grid_nodes.jsonl')
-  const out = fs.createWriteStream(outPath)
-
-  let exported = 0
-  let offset = 0
-  while (offset < total) {
-    const res = await client.query(
-      `SELECT * FROM landslide_grid_nodes ORDER BY node_id LIMIT $1 OFFSET $2`,
-      [BATCH, offset]
-    )
-    for (const row of res.rows) {
-      out.write(JSON.stringify(row) + '\n')
-    }
-    exported += res.rows.length
-    offset += BATCH
-    process.stdout.write(`\r  Exported: ${exported.toLocaleString('vi-VN')}/${total.toLocaleString('vi-VN')}`)
-  }
-  out.end()
-  console.log('\n✅ Export xong! File:', outPath)
-
   // 4. Kiểm tra actual_flood_reports
   console.log('\n--- ACTUAL_FLOOD_REPORTS (OLD, sample) ---')
   const afr = await client.query('SELECT * FROM actual_flood_reports LIMIT 5')

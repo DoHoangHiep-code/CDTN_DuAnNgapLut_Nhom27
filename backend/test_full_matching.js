@@ -18,7 +18,7 @@ async function checkMatch() {
 
     console.log('Reading full CSV into a Map...')
     const csvMap = new Map()
-    const csvFilePath = path.join(__dirname, 'data', 'grid_prediction_datv2.csv')
+    const csvFilePath = path.join(__dirname, 'data', 'grid_prediction_datv3_full_location.csv')
 
     await new Promise((resolve, reject) => {
       fs.createReadStream(csvFilePath)
@@ -51,3 +51,4 @@ async function checkMatch() {
 }
 
 checkMatch()
+

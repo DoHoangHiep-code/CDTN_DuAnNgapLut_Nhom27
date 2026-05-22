@@ -295,6 +295,7 @@ export type LandslideNode = {
   lat: number
   lon: number
   province: string
+  location_name?: string
   slope: number | null
   twi: number | null
   elevation: number | null
@@ -339,6 +340,16 @@ export async function getLandslideBbox(bbox: {
  */
 export async function getLandslideHotspots(limit = 10) {
   const res = await apiV1.get<any>('/landslide/hotspots', { params: { limit } })
+  return (res.data?.data ?? res.data?.nodes ?? []) as LandslideNode[]
+}
+
+/**
+ * Tìm kiếm các điểm sạt lở theo tên địa danh.
+ * Endpoint: GET /api/v1/landslide/search?q=...
+ */
+export async function searchLandslideLocations(query: string, limit = 10) {
+  if (!query) return []
+  const res = await apiV1.get<any>('/landslide/search', { params: { q: query, limit } })
   return (res.data?.data ?? res.data?.nodes ?? []) as LandslideNode[]
 }
 

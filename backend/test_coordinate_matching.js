@@ -17,7 +17,7 @@ async function checkMatch() {
     const dbNodes = dbRes.rows
 
     console.log('Reading CSV rows...')
-    const csvFilePath = path.join(__dirname, 'data', 'grid_prediction_datv2.csv')
+    const csvFilePath = path.join(__dirname, 'data', 'grid_prediction_datv3_full_location.csv')
     const csvNodes = []
 
     await new Promise((resolve, reject) => {
@@ -54,3 +54,4 @@ async function checkMatch() {
 }
 
 checkMatch()
+

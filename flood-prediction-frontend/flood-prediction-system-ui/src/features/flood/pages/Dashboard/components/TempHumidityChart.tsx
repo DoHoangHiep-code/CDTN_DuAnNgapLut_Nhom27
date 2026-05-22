@@ -1,47 +1,17 @@
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Filler,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
   Tooltip,
   Legend,
-} from 'chart.js'
-import { Line } from 'react-chartjs-2'
-import type { DashboardTempHumPoint } from '../../../../../utils/types'
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend)
+  ResponsiveContainer
+} from 'recharts';
+import type { DashboardTempHumPoint } from '../../../../../utils/types';
 
 export function TempHumidityChart({ points }: { points: DashboardTempHumPoint[] }) {
-  const hasData = points && points.length > 0
-  const labels = hasData ? points.map((p) => p.time) : []
-
-  const data = {
-    labels,
-    datasets: [
-      {
-        label: 'Nhiệt độ (°C)',
-        data: hasData ? points.map((p) => p.temp) : [],
-        borderColor: '#f97316',
-        backgroundColor: 'rgba(249,115,22,0.08)',
-        pointRadius: 2,
-        tension: 0.35,
-        fill: false,
-        yAxisID: 'yTemp',
-      },
-      {
-        label: 'Độ ẩm (%)',
-        data: hasData ? points.map((p) => p.rhum) : [],
-        borderColor: '#0ea5e9',
-        backgroundColor: 'rgba(14,165,233,0.1)',
-        pointRadius: 2,
-        tension: 0.35,
-        fill: true,
-        yAxisID: 'yRhum',
-      },
-    ],
-  }
+  const hasData = points && points.length > 0;
 
   return (
     <div className="relative h-full w-full">
@@ -50,48 +20,26 @@ export function TempHumidityChart({ points }: { points: DashboardTempHumPoint[] 
           chưa có dữ liệu
         </span>
       )}
-      <Line
-        data={data}
-        options={{
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
-            tooltip: {
-              callbacks: {
-                label: (ctx: any) => {
-                  if (ctx.dataset.label?.includes('Nhiệt')) return `Nhiệt độ: ${Number(ctx.raw).toFixed(1)}°C`
-                  return `Độ ẩm: ${Number(ctx.raw).toFixed(0)}%`
-                },
-              },
-              backgroundColor: 'rgba(15,23,42,0.92)',
-              titleColor: '#e2e8f0',
-              bodyColor: '#e2e8f0',
-              padding: 10,
-              cornerRadius: 8,
-            },
-          },
-          scales: {
-            yTemp: {
-              type: 'linear',
-              position: 'left',
-              title: { display: true, text: '°C', font: { size: 10 } },
-              ticks: { precision: 1, font: { size: 10 } },
-              grid: { color: 'rgba(148,163,184,0.15)' },
-            },
-            yRhum: {
-              type: 'linear',
-              position: 'right',
-              min: 0,
-              max: 100,
-              title: { display: true, text: '%', font: { size: 10 } },
-              ticks: { precision: 0, font: { size: 10 } },
-              grid: { drawOnChartArea: false },
-            },
-          },
-        }}
-      />
+      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+        <LineChart data={hasData ? points : []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
+          <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+          <Tooltip 
+            contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+            itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+            labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
+            formatter={(value: number, name: string) => {
+              if (name === 'Nhiệt độ (°C)') return [`${value.toFixed(1)} °C`, name];
+              return [`${value.toFixed(0)} %`, name];
+            }}
+          />
+          <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+          <Line yAxisId="left" type="monotone" dataKey="temp" name="Nhiệt độ (°C)" stroke="#f97316" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
+          <Line yAxisId="right" type="monotone" dataKey="rhum" name="Độ ẩm (%)" stroke="#0ea5e9" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
+        </LineChart>
+      </ResponsiveContainer>
     </div>
-  )
+  );
 }

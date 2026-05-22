@@ -19,12 +19,13 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 // ─────────────────────────────────────────────────────────────
 async function importStaticData() {
   console.log('--- BẮT ĐẦU PHASE 1: IMPORT DỮ LIỆU TĨNH ---')
-  const csvFilePath = path.join(__dirname, '..', '02_static_data', 'grid_prediction_datv2.csv')
+  const csvFilePath = path.join(__dirname, '..', '02_static_data', 'grid_prediction_datv3_full_location.csv')
 
   if (!fs.existsSync(csvFilePath)) {
     console.error(`Không tìm thấy file CSV tại: ${csvFilePath}`)
     return false
   }
+
 
   const batchSize = 2000 // 2000 * 19 = 38000 placeholders, an toàn trong giới hạn PG 65535
   let batch = []
@@ -36,6 +37,7 @@ async function importStaticData() {
       .on('data', async (row) => {
         batch.push({
           province: row.province || null,
+          location_name: row.location_name || null,
           lat: parseFloat(row.lat) || 0,
           lon: parseFloat(row.lon) || 0,
           elevation: parseFloat(row.elevation) || 0,
@@ -81,16 +83,16 @@ async function importStaticData() {
         const values = []
         const queryPlaceholders = []
         nodes.forEach((node, i) => {
-          const o = i * 20
-          queryPlaceholders.push(`($${o+1}, $${o+2}, $${o+3}, $${o+4}, $${o+5}, $${o+6}, $${o+7}, $${o+8}, $${o+9}, $${o+10}, $${o+11}, $${o+12}, $${o+13}, $${o+14}, $${o+15}, $${o+16}, $${o+17}, $${o+18}, $${o+19}, $${o+20})`)
-          values.push(node.province, node.lat, node.lon, node.elevation, node.slope, node.aspect,
+          const o = i * 21
+          queryPlaceholders.push(`($${o+1}, $${o+2}, $${o+3}, $${o+4}, $${o+5}, $${o+6}, $${o+7}, $${o+8}, $${o+9}, $${o+10}, $${o+11}, $${o+12}, $${o+13}, $${o+14}, $${o+15}, $${o+16}, $${o+17}, $${o+18}, $${o+19}, $${o+20}, $${o+21})`)
+          values.push(node.province, node.location_name, node.lat, node.lon, node.elevation, node.slope, node.aspect,
             node.hillshade, node.curvature_plan, node.curvature_profile,
             node.tpi, node.tri, node.roughness, node.twi, node.dist_to_river_m,
             node.ndvi, node.evi, node.ndwi, node.bsi, node.lulc_class, node.dist_to_road_m)
         })
         await pool.query(`
           INSERT INTO landslide_grid_nodes (
-            province, lat, lon, elevation, slope, aspect, hillshade, curvature_plan, curvature_profile,
+            province, location_name, lat, lon, elevation, slope, aspect, hillshade, curvature_plan, curvature_profile,
             tpi, tri, roughness, twi, dist_to_river_m, ndvi, evi, ndwi, bsi, lulc_class, dist_to_road_m
           ) VALUES ${queryPlaceholders.join(',')}
           ON CONFLICT DO NOTHING

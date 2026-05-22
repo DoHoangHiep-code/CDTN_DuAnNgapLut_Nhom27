@@ -19,7 +19,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 // ─────────────────────────────────────────────────────────────
 async function importStaticData() {
   console.log('--- BẮT ĐẦU PHASE 1: IMPORT DỮ LIỆU TĨNH ---')
-  const csvFilePath = path.join(__dirname, '../init-system/02_static_data/grid_prediction_datv2.csv')
+  const csvFilePath = path.join(__dirname, '../init-system/02_static_data/grid_prediction_datv3_full_location.csv')
 
   if (!fs.existsSync(csvFilePath)) {
     console.error(`Không tìm thấy file CSV tại: ${csvFilePath}`)
@@ -290,3 +290,4 @@ async function main() {
 }
 
 main()
+

@@ -15,9 +15,9 @@ async function main() {
 
   try {
     // 1. Đọc CSV vào map
-    console.log('1. Đang đọc file CSV grid_prediction_datv2.csv vào Map...')
+    console.log('1. Đang đọc file CSV grid_prediction_datv3_full_location.csv vào Map...')
     const csvMap = new Map()
-    const csvFilePath = path.join(__dirname, '../init-system/02_static_data/grid_prediction_datv2.csv')
+    const csvFilePath = path.join(__dirname, '../init-system/02_static_data/grid_prediction_datv3_full_location.csv')
 
     if (!fs.existsSync(csvFilePath)) {
       console.error(`Không tìm thấy file CSV tại: ${csvFilePath}`)
@@ -129,3 +129,4 @@ async function main() {
 }
 
 main()
+

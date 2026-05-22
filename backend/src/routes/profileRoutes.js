@@ -14,5 +14,8 @@ router.put('/users/profile', verifyToken, controller.updateProfile)
 // POST avatar: upload file an toàn bằng multer, yêu cầu đăng nhập
 router.post('/users/profile/avatar', verifyToken, uploadAvatarMiddleware, controller.uploadAvatar)
 
+// POST password: đổi mật khẩu, yêu cầu đăng nhập
+router.post('/users/profile/password', verifyToken, controller.changePassword)
+
 module.exports = { profileRouter: router } // Export để server mount
 

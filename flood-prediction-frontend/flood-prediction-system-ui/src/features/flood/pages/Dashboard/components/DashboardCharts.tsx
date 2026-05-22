@@ -5,6 +5,7 @@ import { RainForecastChart } from './RainForecastChart'
 import { TempHumidityChart } from './TempHumidityChart'
 import { RiskTrendChart } from './RiskTrendChart'
 import { useTranslation } from 'react-i18next'
+import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 type DashboardChartsProps = {
   forecast24h: any[]
@@ -55,25 +56,40 @@ export function DashboardCharts({
               {t('dashboard.overall')}: {t(`risk.${riskSummary.overall}`)}
             </div>
           </div>
-          <div className="mt-4 space-y-2">
-            {(['safe', 'medium', 'high', 'severe'] as const).map((level) => {
-              const count = riskSummary[level] ?? 0
-              const total = (riskSummary.safe ?? 0) + (riskSummary.medium ?? 0) + (riskSummary.high ?? 0) + (riskSummary.severe ?? 0)
-              const pct = total > 0 ? Math.round((count / total) * 100) : 0
-              const barColor = { safe: 'bg-green-500', medium: 'bg-amber-400', high: 'bg-orange-500', severe: 'bg-rose-600' }[level]
-              const label = { safe: 'An toàn', medium: 'Trung bình', high: 'Cao', severe: 'Nghiêm trọng' }[level]
-              return (
-                <div key={level} className="space-y-0.5">
-                  <div className="flex justify-between text-xs text-slate-600 dark:text-slate-300">
-                    <span>{label}</span>
-                    <span className="font-mono">{count.toLocaleString()} ({pct}%)</span>
-                  </div>
-                  <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800">
-                    <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              )
-            })}
+          <div className="h-48 mt-4">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+              <PieChart>
+                <Pie
+                  data={[
+                    { name: 'An toàn', value: riskSummary.safe ?? 0, color: '#10b981' },
+                    { name: 'Trung bình', value: riskSummary.medium ?? 0, color: '#fbbf24' },
+                    { name: 'Cao', value: riskSummary.high ?? 0, color: '#f97316' },
+                    { name: 'Nghiêm trọng', value: riskSummary.severe ?? 0, color: '#e11d48' }
+                  ].filter(d => d.value > 0)}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={70}
+                  paddingAngle={5}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {([
+                    { name: 'An toàn', value: riskSummary.safe ?? 0, color: '#10b981' },
+                    { name: 'Trung bình', value: riskSummary.medium ?? 0, color: '#fbbf24' },
+                    { name: 'Cao', value: riskSummary.high ?? 0, color: '#f97316' },
+                    { name: 'Nghiêm trọng', value: riskSummary.severe ?? 0, color: '#e11d48' }
+                  ].filter(d => d.value > 0)).map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+                  itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+                />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+              </PieChart>
+            </ResponsiveContainer>
           </div>
         </Card>
       </div>

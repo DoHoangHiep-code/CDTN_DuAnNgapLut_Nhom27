@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 # ── CẤU HÌNH ──────────────────────────────────────────────────────────────
 GEOTIFF_DIR = '/content/drive/MyDrive/DoAn_Landslide_PredMap'
-OUTPUT_CSV  = 'grid_prediction_datv2.csv'
+OUTPUT_CSV  = 'grid_prediction_datv3_full_location.csv'
 
 # 30 feature bands (thứ tự phải khớp với ee.Image.cat trong GEE pipeline)
 FEATURE_NAMES = [

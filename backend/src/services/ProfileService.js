@@ -1,4 +1,5 @@
 const path = require('path') // Dùng để xử lý đường dẫn file an toàn trên mọi OS
+const bcrypt = require('bcryptjs') // Dùng bcryptjs để hash/compare mật khẩu
 const { User } = require('../models') // Import model User để đọc/cập nhật profile
 const { sanitizeUser } = require('./AuthService') // Reuse hàm sanitize để tránh lộ password_hash
 
@@ -34,6 +35,25 @@ class ProfileService {
     if (!updated) return null
     // Trả avatar_url mới
     return { avatar_url }
+  }
+
+  // Đổi mật khẩu
+  async changePassword({ userId, currentPassword, newPassword }) {
+    const user = await User.findByPk(userId)
+    if (!user) {
+      const err = new Error('Tài khoản không tồn tại')
+      err.statusCode = 404
+      throw err
+    }
+    const ok = await bcrypt.compare(currentPassword, user.password_hash)
+    if (!ok) {
+      const err = new Error('Mật khẩu hiện tại không chính xác')
+      err.statusCode = 400
+      throw err
+    }
+    const password_hash = await bcrypt.hash(newPassword, 10)
+    await User.update({ password_hash }, { where: { user_id: userId } })
+    return { message: 'Đổi mật khẩu thành công' }
   }
 }
 

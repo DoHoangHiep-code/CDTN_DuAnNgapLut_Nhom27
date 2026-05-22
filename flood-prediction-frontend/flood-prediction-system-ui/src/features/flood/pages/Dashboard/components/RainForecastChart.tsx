@@ -1,55 +1,18 @@
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  BarElement,
-  Filler,
+  ComposedChart,
+  Line,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
   Tooltip,
   Legend,
-} from 'chart.js'
-import { Chart } from 'react-chartjs-2'
-import type { DashboardForecastPoint } from '../../../../../utils/types'
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Filler, Tooltip, Legend)
+  ResponsiveContainer
+} from 'recharts';
+import type { DashboardForecastPoint } from '../../../../../utils/types';
 
 export function RainForecastChart({ points }: { points: DashboardForecastPoint[] }) {
-  const hasData = points && points.length > 0
-
-  const labels = hasData ? points.map((p) => p.time) : []
-  const prcpData = hasData ? points.map((p) => p.prcp) : []
-  const depthData = hasData ? points.map((p) => p.flood_depth_cm) : []
-
-  const data = {
-    labels,
-    datasets: [
-      {
-        type: 'bar' as const,
-        label: 'Lượng mưa (mm)',
-        data: prcpData,
-        backgroundColor: 'rgba(2,132,199,0.55)',
-        borderColor: '#0284c7',
-        borderWidth: 1,
-        borderRadius: 3,
-        yAxisID: 'yRain',
-        order: 2,
-      },
-      {
-        type: 'line' as const,
-        label: 'Độ ngập (cm)',
-        data: depthData,
-        borderColor: '#e11d48',
-        backgroundColor: 'rgba(225,29,72,0.08)',
-        pointRadius: 2,
-        pointHoverRadius: 5,
-        tension: 0.35,
-        fill: true,
-        yAxisID: 'yDepth',
-        order: 1,
-      },
-    ],
-  }
+  const hasData = points && points.length > 0;
 
   return (
     <div className="relative h-full w-full">
@@ -58,55 +21,26 @@ export function RainForecastChart({ points }: { points: DashboardForecastPoint[]
           chưa có dữ liệu
         </span>
       )}
-      <Chart
-        type="bar"
-        data={data}
-        options={{
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: {
-              display: true,
-              position: 'top',
-              labels: { boxWidth: 12, font: { size: 11 } },
-            },
-            tooltip: {
-              callbacks: {
-                title: (items: any[]) => `Thời gian: ${items[0]?.label ?? '-'}`,
-                label: (ctx) => {
-                  if (ctx.dataset.label === 'Lượng mưa (mm)') return `Mưa: ${Number(ctx.raw ?? 0).toFixed(1)} mm`
-                  return `Ngập: ${Number(ctx.raw ?? 0).toFixed(0)} cm`
-                },
-              },
-              backgroundColor: 'rgba(15,23,42,0.92)',
-              titleColor: '#e2e8f0',
-              bodyColor: '#e2e8f0',
-              padding: 10,
-              cornerRadius: 8,
-              displayColors: true,
-            },
-          },
-          scales: {
-            yRain: {
-              type: 'linear',
-              position: 'left',
-              beginAtZero: true,
-              title: { display: true, text: 'Mưa (mm)', font: { size: 10 } },
-              ticks: { precision: 1, font: { size: 10 } },
-              grid: { color: 'rgba(148,163,184,0.15)' },
-            },
-            yDepth: {
-              type: 'linear',
-              position: 'right',
-              beginAtZero: true,
-              title: { display: true, text: 'Ngập (cm)', font: { size: 10 } },
-              ticks: { precision: 0, font: { size: 10 } },
-              grid: { drawOnChartArea: false },
-            },
-          },
-        }}
-      />
+      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+        <ComposedChart data={hasData ? points : []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
+          <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+          <Tooltip 
+            contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+            itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+            labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
+            formatter={(value: number, name: string) => {
+              if (name === 'Lượng mưa (mm)') return [`${value.toFixed(1)} mm`, name];
+              return [`${value.toFixed(0)} cm`, name];
+            }}
+          />
+          <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+          <Bar yAxisId="left" dataKey="prcp" name="Lượng mưa (mm)" fill="#0ea5e9" radius={[4, 4, 0, 0]} barSize={20} />
+          <Line yAxisId="right" type="monotone" dataKey="flood_depth_cm" name="Độ ngập (cm)" stroke="#e11d48" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
+        </ComposedChart>
+      </ResponsiveContainer>
     </div>
-  )
+  );
 }

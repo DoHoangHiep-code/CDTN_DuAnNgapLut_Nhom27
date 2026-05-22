@@ -4,6 +4,9 @@ import {
   MapPin, RefreshCcw, Sun, Wind, Thermometer, Eye, Activity,
   TrendingUp, Gauge, Cloud, Zap,
 } from 'lucide-react'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend
+} from 'recharts'
 import type { LatLngExpression } from 'leaflet'
 import { useTranslation } from 'react-i18next'
 import { Spinner } from '../../../components/common/Spinner'
@@ -13,6 +16,8 @@ import { LocationSearch } from '../components/LocationSearch'
 import type { NominatimResult } from '../components/LocationSearch'
 import { useAsync } from '../../../hooks/useAsync'
 import { getWeather, getWeather7Days, getWeatherForecast24h } from '../../../services/api'
+import { useDisasterMode } from '../../../context/DisasterContext'
+import { WeatherTerrainPage } from '../../../pages/WeatherTerrain'
 
 import { cn } from '../../../utils/cn'
 
@@ -307,37 +312,27 @@ function Rain24hChart({ forecast24h }: {
           <div className="text-[10px] text-slate-400">Tổng dự báo</div>
         </div>
       </div>
-      <div className="relative px-5 pb-4 pt-5">
-        {/* Y-axis guide lines */}
-        <div className="pointer-events-none absolute inset-x-5 top-5 bottom-8 flex flex-col justify-between">
-          {[100, 66, 33].map((pct) => (
-            <div key={pct} className="h-px w-full border-t border-dashed border-slate-100 dark:border-slate-800" />
-          ))}
-        </div>
-        <div className="relative flex items-end gap-0.5" style={{ height: 100 }}>
-          {forecast24h.map((p) => {
-            const pct = (p.rainfallMm / maxVal) * 100
-            const hour = toVNHour(p.timeIso)
-            const pTime = new Date(p.timeIso).getTime()
-            const now = Date.now()
-            const isNow = now >= pTime && now < pTime + 3600000
-            const barColor = pct > 60 ? 'bg-gradient-to-t from-rose-500 to-rose-400' : pct > 30 ? 'bg-gradient-to-t from-amber-500 to-amber-400' : 'bg-gradient-to-t from-sky-500 to-sky-400'
-            return (
-              <div key={p.timeIso} className="group relative flex flex-1 flex-col items-center justify-end" style={{ height: '100%' }}>
-                <div
-                  className={cn('w-full rounded-t transition-all', barColor, isNow && 'ring-2 ring-offset-1 ring-sky-500')}
-                  style={{ height: `${Math.max(pct, 3)}%` }}
-                />
-                <div className={cn('mt-1 text-[9px] tabular-nums', isNow ? 'font-black text-sky-600 dark:text-sky-400' : 'text-slate-400 dark:text-slate-500')}>
-                  {hour}h
-                </div>
-                <div className="pointer-events-none absolute bottom-full mb-2 hidden rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-bold text-white shadow-lg group-hover:block whitespace-nowrap">
-                  {String(hour).padStart(2, '0')}:00 — {p.rainfallMm}mm
-                </div>
-              </div>
-            )
-          })}
-        </div>
+      <div className="relative px-5 pb-4 pt-5 h-[160px]">
+        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+          <BarChart data={forecast24h} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
+            <XAxis dataKey={(d) => `${toVNHour(d.timeIso)}h`} tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+            <RechartsTooltip 
+              contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+              itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+              formatter={(val: number) => [`${val} mm`, 'Lượng mưa']}
+              labelFormatter={(label) => `Thời gian: ${label}`}
+            />
+            <Bar dataKey="rainfallMm" radius={[4, 4, 0, 0]}>
+              {forecast24h.map((entry, index) => {
+                const pct = (entry.rainfallMm / maxVal) * 100
+                const color = pct > 60 ? '#f43f5e' : pct > 30 ? '#f59e0b' : '#38bdf8'
+                return <Cell key={`cell-${index}`} fill={color} />
+              })}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
       </div>
       {/* Legend */}
       <div className="flex items-center gap-4 border-t border-slate-100 px-5 py-2.5 dark:border-slate-800">
@@ -378,6 +373,12 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
     { key: 'safe',   label: 'An toàn',    color: 'bg-emerald-400', text: 'text-emerald-600 dark:text-emerald-400', count: counts.safe, icon: '🟢' },
   ]
 
+  const pieData = items.filter(item => item.count > 0).map(item => ({
+    name: item.label,
+    value: item.count,
+    fill: item.key === 'severe' ? '#f43f5e' : item.key === 'high' ? '#fb923c' : item.key === 'medium' ? '#fbbf24' : '#34d399'
+  }))
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
@@ -398,36 +399,57 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
         </div>
       </div>
 
-      <div className="px-5 pt-4 pb-2">
-        <div className="flex h-4 w-full overflow-hidden rounded-full gap-0.5">
-          {items.map((item) => item.count > 0 && (
-            <div
-              key={item.key}
-              className={cn('flex items-center justify-center rounded-sm transition-all', item.color)}
-              style={{ width: `${(item.count / total) * 100}%` }}
-              title={`${item.label}: ${item.count}`}
-            />
-          ))}
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-2.5">
-          {items.map((item) => (
-            <div key={item.key} className={cn(
-              'flex items-center justify-between rounded-xl border px-3 py-2.5 transition-all',
-              item.count > 0
-                ? 'border-slate-100 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/40'
-                : 'border-slate-100/50 bg-slate-50/50 opacity-50 dark:border-slate-800/50 dark:bg-slate-800/20',
-            )}>
-              <div className="flex items-center gap-2">
-                <span className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0', item.color)} />
-                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">{item.label}</span>
-              </div>
-              <div className="text-right">
-                <div className={cn('text-xl font-extrabold tabular-nums leading-none', item.text)}>{item.count}</div>
-                <div className="text-[9px] text-slate-400 tabular-nums">{Math.round((item.count / total) * 100)}%</div>
-              </div>
+      <div className="px-5 pt-4 pb-4">
+        <div className="flex flex-col sm:flex-row items-center gap-6">
+          {/* Doughnut Chart */}
+          <div className="relative h-32 w-32 flex-shrink-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+              <PieChart>
+                <Pie 
+                  data={pieData} 
+                  dataKey="value" 
+                  nameKey="name" 
+                  cx="50%" 
+                  cy="50%" 
+                  innerRadius={35} 
+                  outerRadius={55} 
+                  stroke="none"
+                >
+                  {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.fill} />)}
+                </Pie>
+                <RechartsTooltip 
+                  contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+                  itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+                  formatter={(val: number) => [`${val} điểm`, 'Số lượng']}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <span className="text-xs text-slate-500">Tổng</span>
+              <span className="text-lg font-bold text-slate-800 dark:text-slate-100 leading-none">{total}</span>
             </div>
-          ))}
+          </div>
+
+          {/* Legend / Cards */}
+          <div className="flex-1 w-full grid grid-cols-2 gap-2.5">
+            {items.map((item) => (
+              <div key={item.key} className={cn(
+                'flex items-center justify-between rounded-xl border px-3 py-2.5 transition-all',
+                item.count > 0
+                  ? 'border-slate-100 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/40'
+                  : 'border-slate-100/50 bg-slate-50/50 opacity-50 dark:border-slate-800/50 dark:bg-slate-800/20',
+              )}>
+                <div className="flex items-center gap-2">
+                  <span className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0', item.color)} />
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">{item.label}</span>
+                </div>
+                <div className="text-right">
+                  <div className={cn('text-xl font-extrabold tabular-nums leading-none', item.text)}>{item.count}</div>
+                  <div className="text-[9px] text-slate-400 tabular-nums mt-0.5">{Math.round((item.count / total) * 100)}%</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -454,8 +476,8 @@ type FloodDistrict = {
   updatedAtIso: string
 }
 
-// ── WeatherPage ───────────────────────────────────────────────────────
-export function WeatherPage() {
+// ── FloodWeatherPage ───────────────────────────────────────────────────────
+function FloodWeatherPage() {
   const { t } = useTranslation()
 
   // ── Location state ──
@@ -810,4 +832,15 @@ export function WeatherPage() {
       </div>
     </div>
   )
+}
+
+// ── WeatherPage Wrapper (Hazard Switcher) ───────────────────────────────────────────────────────
+export function WeatherPage() {
+  const { mode } = useDisasterMode()
+
+  if (mode === 'landslide') {
+    return <WeatherTerrainPage />
+  }
+
+  return <FloodWeatherPage />
 }
