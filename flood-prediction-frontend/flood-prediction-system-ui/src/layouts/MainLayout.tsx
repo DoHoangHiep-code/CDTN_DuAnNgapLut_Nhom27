@@ -89,79 +89,129 @@ export function MainLayout() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 dark:bg-slate-950">
-      {/* Sidebar — gradient xanh chủ đề nước */}
+      {/* Sidebar — đổi theme theo mode thiên tai */}
       <aside className="relative flex w-64 flex-shrink-0 flex-col overflow-hidden">
-        {/* Nền gradient */}
-        <div className="absolute inset-0 bg-gradient-to-b from-sky-700 via-sky-800 to-blue-900" />
-        {/* Decoration sóng nước phía dưới */}
-        <svg className="absolute bottom-0 left-0 w-full opacity-10" viewBox="0 0 256 80" preserveAspectRatio="none">
-          <path d="M0 40 Q32 10 64 40 Q96 70 128 40 Q160 10 192 40 Q224 70 256 40 L256 80 L0 80 Z" fill="white" />
-          <path d="M0 55 Q32 30 64 55 Q96 80 128 55 Q160 30 192 55 Q224 80 256 55 L256 80 L0 80 Z" fill="white" />
-        </svg>
+        {/* Nền gradient: xanh nước (flood) hoặc nâu đất (landslide) */}
+        <div
+          className="absolute inset-0 transition-all duration-700"
+          style={mode === 'landslide'
+            ? { background: 'linear-gradient(180deg, #1c1208 0%, #251808 45%, #1a1006 100%)' }
+            : { background: 'linear-gradient(180deg, #0369a1 0%, #075985 50%, #1e3a5f 100%)' }
+          }
+        />
+
+        {/* Decoration: núi (landslide) hoặc sóng nước (flood) */}
+        {mode === 'landslide' ? (
+          <svg className="absolute bottom-0 left-0 w-full opacity-10" viewBox="0 0 256 80" preserveAspectRatio="none">
+            <path d="M0 80 L40 35 L80 58 L130 18 L180 50 L220 28 L256 45 L256 80 Z" fill="#d97706" />
+            <path d="M0 80 L60 50 L110 65 L160 38 L210 60 L256 42 L256 80 Z" fill="#92400e" />
+          </svg>
+        ) : (
+          <svg className="absolute bottom-0 left-0 w-full opacity-10" viewBox="0 0 256 80" preserveAspectRatio="none">
+            <path d="M0 40 Q32 10 64 40 Q96 70 128 40 Q160 10 192 40 Q224 70 256 40 L256 80 L0 80 Z" fill="white" />
+            <path d="M0 55 Q32 30 64 55 Q96 80 128 55 Q160 30 192 55 Q224 80 256 55 L256 80 L0 80 Z" fill="white" />
+          </svg>
+        )}
 
         <div className="relative flex flex-1 flex-col overflow-y-auto p-4">
           {/* Brand */}
           <div className="mb-6 flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-white/20 backdrop-blur ring-1 ring-white/30">
+            <div
+              className="grid h-10 w-10 place-items-center rounded-2xl backdrop-blur ring-1 ring-white/30"
+              style={{ background: mode === 'landslide' ? 'rgba(217,119,6,0.2)' : 'rgba(255,255,255,0.2)' }}
+            >
               <BrandIcon className="h-5 w-5 text-white" />
             </div>
             <div>
               <div className="text-sm font-extrabold tracking-tight text-white">
-                {t('sidebar.brand')}
+                {mode === 'landslide' ? 'Landslide Alert' : t('sidebar.brand')}
               </div>
-              <div className="text-xs text-sky-200/70">{t('sidebar.systemUi')}</div>
+              <div
+                className="text-xs transition-colors duration-500"
+                style={{ color: mode === 'landslide' ? 'rgba(251,191,36,0.6)' : 'rgba(186,230,253,0.7)' }}
+              >
+                {mode === 'landslide' ? 'Cảnh báo Sạt lở' : t('sidebar.systemUi')}
+              </div>
             </div>
           </div>
 
           {/* Divider */}
-          <div className="mb-3 h-px bg-white/10" />
+          <div
+            className="mb-3 h-px transition-colors duration-500"
+            style={{ background: mode === 'landslide' ? 'rgba(217,119,6,0.2)' : 'rgba(255,255,255,0.1)' }}
+          />
+
+          {/* Mode badge */}
+          {mode === 'landslide' && (
+            <div
+              className="mb-3 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest"
+              style={{ background: 'rgba(217,119,6,0.15)', border: '1px solid rgba(217,119,6,0.25)', color: '#fbbf24' }}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+              Chế độ: Sạt lở
+            </div>
+          )}
 
           {/* Nav */}
           <nav className="space-y-1">
-            {NAV_ITEMS.filter((i) => (user ? i.roles.includes(user.role) : false)).map((item) => {
-              const Icon = item.icon
-              return (
-                <NavLink
-                  key={item.key}
-                  to={item.to}
-                  end={item.to === '/dashboard'}
-                  className={({ isActive }) =>
-                    cn(
-                      'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-150',
-                      isActive
-                        ? 'bg-white/20 text-white shadow-sm ring-1 ring-white/20'
-                        : 'text-sky-100/80 hover:bg-white/10 hover:text-white',
-                    )
-                  }
-                >
-                  {({ isActive }) => (
-                    <>
-                      <span className={cn(
-                        'grid h-7 w-7 place-items-center rounded-lg transition-all',
-                        isActive ? 'bg-white/20' : 'bg-transparent',
-                      )}>
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      {t(item.labelKey)}
-                    </>
-                  )}
-                </NavLink>
-              )
-            })}
+            {NAV_ITEMS
+              .filter((i) => (user ? i.roles.includes(user.role) : false))
+              .map((item) => {
+                const Icon = item.icon
+                // Đổi label theo mode sạt lở
+                const label = mode === 'landslide'
+                  ? item.key === 'map'     ? 'Bản đồ sạt lở'
+                  : item.key === 'weather' ? 'Thời tiết'
+                  : item.key === 'reports' ? 'Báo cáo'
+                  : t(item.labelKey)
+                  : t(item.labelKey)
+
+                return (
+                  <NavLink
+                    key={item.key}
+                    to={item.to}
+                    end={item.to === '/dashboard'}
+                    className={({ isActive }) =>
+                      cn(
+                        'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-150',
+                        isActive ? 'text-white shadow-sm ring-1 ring-white/20' : 'hover:text-white',
+                      )
+                    }
+                    style={({ isActive }) => isActive
+                      ? { background: mode === 'landslide' ? 'rgba(217,119,6,0.25)' : 'rgba(255,255,255,0.18)' }
+                      : { color: mode === 'landslide' ? 'rgba(253,230,138,0.7)' : 'rgba(224,242,254,0.75)' }
+                    }
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <span
+                          className="grid h-7 w-7 place-items-center rounded-lg transition-all"
+                          style={{ background: isActive ? 'rgba(255,255,255,0.15)' : 'transparent' }}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        {label}
+                      </>
+                    )}
+                  </NavLink>
+                )
+              })}
           </nav>
 
           <div className="mt-auto pt-4">
-            <div className="h-px bg-white/10 mb-4" />
+            <div
+              className="h-px mb-4 transition-colors duration-500"
+              style={{ background: mode === 'landslide' ? 'rgba(217,119,6,0.18)' : 'rgba(255,255,255,0.1)' }}
+            />
 
             {/* User info */}
-            <div className="flex items-center justify-between gap-2 rounded-xl bg-white/10 px-3 py-2.5 ring-1 ring-white/10">
+            <div
+              className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 ring-1 ring-white/10"
+              style={{ background: mode === 'landslide' ? 'rgba(217,119,6,0.1)' : 'rgba(255,255,255,0.1)' }}
+            >
               <div className="flex items-center gap-2 min-w-0">
                 {user?.avatar_url ? (
-                  <img
-                    src={user.avatar_url}
-                    alt="avatar"
-                    className="h-8 w-8 rounded-xl object-cover ring-1 ring-white/30"
-                  />
+                  <img src={user.avatar_url} alt="avatar" className="h-8 w-8 rounded-xl object-cover ring-1 ring-white/30" />
                 ) : (
                   <div className="grid h-8 w-8 place-items-center rounded-xl bg-white/20 ring-1 ring-white/20">
                     <UserCircle2 className="h-4 w-4 text-white" />
@@ -169,7 +219,10 @@ export function MainLayout() {
                 )}
                 <div className="min-w-0">
                   <div className="truncate text-xs font-bold text-white">{user?.full_name ?? '-'}</div>
-                  <div className="flex items-center gap-1 text-[11px] text-sky-200/70">
+                  <div
+                    className="flex items-center gap-1 text-[11px] transition-colors duration-500"
+                    style={{ color: mode === 'landslide' ? 'rgba(251,191,36,0.6)' : 'rgba(186,230,253,0.7)' }}
+                  >
                     <ShieldCheck className="h-3 w-3" />
                     {user?.role ?? 'guest'}
                   </div>
@@ -187,8 +240,16 @@ export function MainLayout() {
             </div>
 
             {/* Theme toggle */}
-            <div className="mt-2 flex items-center justify-between rounded-xl bg-white/10 px-3 py-2 ring-1 ring-white/10">
-              <span className="text-xs font-semibold text-sky-100/80">{t('sidebar.theme')}</span>
+            <div
+              className="mt-2 flex items-center justify-between rounded-xl px-3 py-2 ring-1 ring-white/10"
+              style={{ background: mode === 'landslide' ? 'rgba(217,119,6,0.1)' : 'rgba(255,255,255,0.1)' }}
+            >
+              <span
+                className="text-xs font-semibold transition-colors duration-500"
+                style={{ color: mode === 'landslide' ? 'rgba(253,230,138,0.7)' : 'rgba(224,242,254,0.8)' }}
+              >
+                {t('sidebar.theme')}
+              </span>
               <button
                 type="button"
                 onClick={toggleTheme}
@@ -205,15 +266,29 @@ export function MainLayout() {
 
       <main className="flex w-full min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="flex flex-1 flex-col space-y-5 p-4 sm:p-5">
-          <header className="fps-card flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <header className="fps-card relative flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+            {/* Left: title đổi theo mode */}
             <div>
-              <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{t('app.brand')}</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">{t('app.subtitle')}</div>
+              <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                {mode === 'landslide' ? 'Hệ thống Cảnh báo Sạt lở' : t('app.brand')}
+              </div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {mode === 'landslide'
+                  ? 'Dự báo sạt lở real-time · Miền Bắc Việt Nam'
+                  : t('app.subtitle')}
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              {/* Multi-hazard switcher */}
-              <HazardSwitcher />
 
+            {/* Center: HazardSwitcher */}
+            <div className="absolute left-1/2 -translate-x-1/2 hidden sm:block">
+              <HazardSwitcher />
+            </div>
+            {/* Mobile: show inline */}
+            <div className="sm:hidden">
+              <HazardSwitcher />
+            </div>
+
+            <div className="flex items-center gap-2">
               <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-slate-700" />
 
               <button

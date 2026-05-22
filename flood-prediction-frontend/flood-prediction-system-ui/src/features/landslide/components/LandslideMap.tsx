@@ -366,7 +366,7 @@ interface LandslideMapProps {
   /** Tile style — inherited from SettingsContext if passed */
   tileStyle?: 'terrain' | 'satellite' | 'streets'
   /** Optional ref to expose flyToWard imperatively */
-  mapRef?: React.MutableRefObject<LandslideMapRef | null>
+  mapRef?: React.RefObject<LandslideMapRef | null>
 }
 
 export function LandslideMap({ tileStyle = 'terrain', mapRef }: LandslideMapProps) {
@@ -475,17 +475,20 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef }: LandslideMapProp
 
       {/* ── HUD: Loading indicator ─────────────────────────────────────────── */}
       {isFetching && (
-        <div className="absolute top-3 left-1/2 z-[1000] -translate-x-1/2 flex items-center gap-2 rounded-full bg-slate-900/90 px-4 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur">
-          <span className="h-3 w-3 animate-spin rounded-full border-2 border-orange-400 border-t-transparent" />
+        <div className="absolute top-3 left-1/2 z-[1000] -translate-x-1/2 flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold text-amber-100 shadow-lg backdrop-blur" style={{ background: 'rgba(40,28,16,0.92)', border: '1px solid rgba(217,119,6,0.3)' }}>
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
           Đang tải dữ liệu sạt lở…
         </div>
       )}
 
       {/* ── HUD: Stats overlay top-left ───────────────────────────────────── */}
       <div className="absolute top-3 left-3 z-[1000] flex flex-col gap-1.5">
-        <div className="flex items-center gap-2 rounded-xl bg-slate-900/85 px-3 py-1.5 text-xs font-bold text-white shadow-lg backdrop-blur">
+        <div
+          className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-bold text-amber-100 shadow-lg backdrop-blur"
+          style={{ background: 'rgba(40,28,16,0.90)', border: '1px solid rgba(217,119,6,0.25)' }}
+        >
           <span className="text-base">🏔</span>
-          <span>Bản đồ Sạt lở Miền Bắc</span>
+          <span>Sạt lở Miền Bắc</span>
         </div>
 
         <div className="flex gap-1.5">
@@ -504,11 +507,18 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef }: LandslideMapProp
             className={cn(
               'rounded-xl px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all shadow',
               riskFilter === f
-                ? f === 'DANGER'  ? 'bg-red-600 text-white shadow-red-600/40'
-                  : f === 'WARNING' ? 'bg-orange-500 text-white shadow-orange-500/40'
-                  : 'bg-slate-700 text-white'
-                : 'bg-slate-900/80 text-slate-300 hover:bg-slate-800/90 backdrop-blur'
+                ? f === 'DANGER'  ? 'bg-red-700 text-white shadow-red-900/40'
+                  : f === 'WARNING' ? 'bg-amber-700 text-white shadow-amber-900/40'
+                  : 'text-amber-100'
+                : 'text-stone-300 backdrop-blur hover:text-amber-200',
             )}
+            style={
+              riskFilter === f && f === 'ALL'
+                ? { background: 'rgba(40,28,16,0.92)', border: '1px solid rgba(217,119,6,0.4)' }
+                : riskFilter !== f
+                ? { background: 'rgba(28,22,14,0.82)', border: '1px solid rgba(120,113,108,0.25)' }
+                : undefined
+            }
           >
             {f === 'ALL' ? '🗺 Tất cả' : f === 'DANGER' ? '🔴 Nguy hiểm' : '🟠 Cảnh báo'}
           </button>
@@ -516,19 +526,22 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef }: LandslideMapProp
       </div>
 
       {/* ── Legend ───────────────────────────────────────────────────────── */}
-      <div className="absolute bottom-8 left-3 z-[1000] rounded-2xl bg-slate-900/90 p-3 text-[10px] text-white shadow-xl backdrop-blur space-y-1.5">
-        <div className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Mức độ nguy cơ</div>
+      <div
+        className="absolute bottom-8 left-3 z-[1000] rounded-2xl p-3 text-[10px] text-stone-200 shadow-xl backdrop-blur space-y-1.5"
+        style={{ background: 'rgba(28,22,14,0.92)', border: '1px solid rgba(120,113,108,0.25)' }}
+      >
+        <div className="text-[9px] font-black uppercase tracking-widest text-stone-500 mb-1.5">Mức độ nguy cơ</div>
         {(Object.entries(RISK_PALETTE) as [RiskKey, typeof RISK_PALETTE[RiskKey]][]).map(([key, pal]) => (
           <div key={key} className="flex items-center gap-2">
             <span
-              className="h-3 w-3 rounded-full flex-shrink-0"
+              className="h-2.5 w-2.5 rounded-full flex-shrink-0"
               style={{ background: pal.stroke, boxShadow: `0 0 6px ${pal.stroke}80` }}
             />
-            <span className="font-semibold">{pal.emoji} {pal.text}</span>
+            <span className="font-semibold text-stone-300">{pal.emoji} {pal.text}</span>
           </div>
         ))}
-        <div className="mt-2 border-t border-slate-700 pt-1.5 text-[9px] text-slate-500">
-          Radius ~ xác suất | Click node để xem chi tiết
+        <div className="mt-1.5 border-t pt-1.5 text-[9px] text-stone-600" style={{ borderColor: 'rgba(120,113,108,0.3)' }}>
+          Radius ~ xác suất · Click node để xem chi tiết
         </div>
       </div>
     </div>
