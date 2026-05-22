@@ -10,7 +10,7 @@ import type { DashboardResponse } from '../../../../utils/types'
 import { useTranslation } from 'react-i18next'
 import { useAutoRefresh } from '../../../../hooks/useAutoRefresh'
 import { useDisasterMode } from '../../../../context/DisasterContext'
-import { LandslideHotspotCards } from '../../../landslide/components/LandslideHotspotCards'
+import { LandslideDashboardPage } from '../../../../pages/LandslideDashboard'
 
 const HOUR_OPTIONS = [
   { label: '6h',  value: 6  },
@@ -93,6 +93,10 @@ export function DashboardPage() {
   useAutoRefresh(fetchDashboard)
 
   // ── Render ────────────────────────────────────────────────────
+  if (mode === 'landslide') {
+    return <LandslideDashboardPage />
+  }
+
   if (loading && !data) return <Spinner label="Loading dashboard…" />
   if (error && !data)   return <ErrorState error={error} onRetry={fetchDashboard} />
   if (!data)            return null
@@ -112,12 +116,10 @@ export function DashboardPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-            {mode === 'landslide' ? '⛰️ Tổng quan Sạt lở Đất — Miền Bắc' : t('dashboard.title')}
+            {t('dashboard.title')}
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            {mode === 'landslide'
-              ? 'Dữ liệu thời gian thực các điểm nóng sạt lở khu vực Tây Bắc Bộ'
-              : t('dashboard.subtitle')}
+            {t('dashboard.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -256,33 +258,16 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* Cards: Flood or Landslide depending on mode */}
-      {mode === 'landslide' ? (
-        <div className="space-y-3">
-          {/* Landslide overview info */}
-          <div className="flex items-center gap-2 rounded-xl border border-orange-500/20 bg-orange-950/20 px-4 py-2">
-            <span className="text-sm">⛰️</span>
-            <span className="text-xs font-semibold text-orange-300">
-              Hiển thị 4 điểm nóng sạt lở trọng điểm — dữ liệu giả lập (mock). Hệ thống thực đang phát triển.
-            </span>
-          </div>
-          <LandslideHotspotCards />
-        </div>
-      ) : (
-        <DashboardCards cw={cw} tempHumData={data.tempHumidity24h ?? []} />
-      )}
+      <DashboardCards cw={cw} tempHumData={data.tempHumidity24h ?? []} />
 
-      {/* Charts only for flood mode */}
-      {mode === 'flood' && (
-        <DashboardCharts
-          forecast24h={forecast24h}
-          tempHum={tempHum}
-          riskTrend={riskTrend}
-          riskSummary={riskSummary}
-          riskLabel={riskLabel}
-          hours={hours}
-        />
-      )}
+      <DashboardCharts
+        forecast24h={forecast24h}
+        tempHum={tempHum}
+        riskTrend={riskTrend}
+        riskSummary={riskSummary}
+        riskLabel={riskLabel}
+        hours={hours}
+      />
     </div>
   )
 }

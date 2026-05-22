@@ -164,8 +164,7 @@ async function processChunk(chunk, nodeIds, chunkIndex, totalChunks) {
   try {
     const predictTime = new Date();
     
-    // Áp dụng logic No-Rain Override: nếu không có mưa và độ ẩm < 90% thì độ ngập = 0
-    const NO_RAIN_HUMIDITY_THRESHOLD = 90;
+    // Áp dụng logic No-Rain Override: nếu không có mưa thì độ ngập = 0
     for (let j = 0; j < predictions.length; j++) {
       const features = chunk[j];
       if (
@@ -174,8 +173,7 @@ async function processChunk(chunk, nodeIds, chunkIndex, totalChunks) {
         features.prcp_3h === 0 && 
         features.prcp_6h === 0 && 
         features.prcp_12h === 0 && 
-        features.prcp_24h === 0 && 
-        features.rhum < NO_RAIN_HUMIDITY_THRESHOLD
+        features.prcp_24h === 0
       ) {
          predictions[j].flood_depth_cm = 0;
          predictions[j].risk_level = 'safe';

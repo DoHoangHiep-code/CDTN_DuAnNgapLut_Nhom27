@@ -1,68 +1,44 @@
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
+  BarChart,
+  Bar,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
   Tooltip,
-  Legend,
-} from 'chart.js'
-import { Bar } from 'react-chartjs-2'
-import type { DashboardRiskTrendDay } from '../../../../../utils/types'
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
+  ResponsiveContainer
+} from 'recharts';
+import type { DashboardRiskTrendDay } from '../../../../../utils/types';
 
 const RISK_COLORS = {
-  safe:   { bg: 'rgba(22,163,74,0.75)',  border: '#16a34a' },
-  medium: { bg: 'rgba(245,158,11,0.75)', border: '#f59e0b' },
-  high:   { bg: 'rgba(249,115,22,0.75)', border: '#f97316' },
-  severe: { bg: 'rgba(225,29,72,0.75)',  border: '#e11d48' },
-}
+  safe: '#16a34a', // green-600
+  medium: '#f59e0b', // amber-500
+  high: '#f97316', // orange-500
+  severe: '#e11d48', // rose-600
+};
 
 export function RiskTrendChart({ days }: { days: DashboardRiskTrendDay[] }) {
-  const hasData = days && days.length > 0
-  const labels = hasData ? days.map((d) => d.date) : []
+  const hasData = days && days.length > 0;
 
-  // Tìm mức độ nguy cơ cao nhất cho mỗi khoảng thời gian
-  // safe -> 0, medium -> 1, high -> 2, severe -> 3
   const chartData = hasData ? days.map(d => {
-    if ((d.severe ?? 0) > 0) return 3;
-    if ((d.high ?? 0) > 0) return 2;
-    if ((d.medium ?? 0) > 0) return 1;
-    return 0; // safe
-  }) : []
+    let value = 0;
+    let color = RISK_COLORS.safe;
+    let levelStr = 'safe';
+    
+    if ((d.severe ?? 0) > 0) { value = 3; color = RISK_COLORS.severe; levelStr = 'severe'; }
+    else if ((d.high ?? 0) > 0) { value = 2; color = RISK_COLORS.high; levelStr = 'high'; }
+    else if ((d.medium ?? 0) > 0) { value = 1; color = RISK_COLORS.medium; levelStr = 'medium'; }
 
-  // Kiểm tra xem tất cả đều an toàn không
-  const allSafe = chartData.length > 0 && chartData.every(v => v === 0)
+    return {
+      date: d.date,
+      value,
+      color,
+      levelStr
+    };
+  }) : [];
 
-  // Đổi màu thanh bar tùy theo giá trị
-  const backgroundColors = chartData.map(val => {
-    if (val === 3) return RISK_COLORS.severe.bg;
-    if (val === 2) return RISK_COLORS.high.bg;
-    if (val === 1) return RISK_COLORS.medium.bg;
-    return RISK_COLORS.safe.bg;
-  })
-  const borderColors = chartData.map(val => {
-    if (val === 3) return RISK_COLORS.severe.border;
-    if (val === 2) return RISK_COLORS.high.border;
-    if (val === 1) return RISK_COLORS.medium.border;
-    return RISK_COLORS.safe.border;
-  })
-
+  const allSafe = chartData.length > 0 && chartData.every(v => v.value === 0);
   const riskLabels = ['An toàn', 'Trung bình', 'Cao', 'Nghiêm trọng'];
-
-  const data = {
-    labels,
-    datasets: [
-      {
-        label: 'Mức nguy cơ ngập',
-        data: chartData,
-        backgroundColor: backgroundColors,
-        borderColor: borderColors,
-        borderWidth: 1,
-        borderRadius: 3,
-      }
-    ],
-  }
 
   return (
     <div className="relative h-full w-full">
@@ -72,49 +48,39 @@ export function RiskTrendChart({ days }: { days: DashboardRiskTrendDay[] }) {
         </span>
       )}
       {hasData && allSafe && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 bg-white/50 dark:bg-slate-900/50 backdrop-blur-[2px] rounded-xl">
           <span className="text-2xl">✅</span>
           <span className="text-sm font-semibold text-green-600 dark:text-green-400">Toàn bộ khu vực ở mức An toàn</span>
           <span className="text-xs text-slate-400">Không có cảnh báo ngập lụt</span>
         </div>
       )}
-      <Bar
-        data={data}
-        options={{
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                title: (items: any[]) => `Ngày: ${items[0]?.label ?? '-'}`,
-                label: (ctx: any) => `Nguy cơ: ${riskLabels[ctx.raw]}`,
-              },
-              backgroundColor: 'rgba(15,23,42,0.92)',
-              titleColor: '#e2e8f0',
-              bodyColor: '#e2e8f0',
-              padding: 10,
-              cornerRadius: 8,
-            },
-          },
-          scales: {
-            x: { ticks: { font: { size: 10 } } },
-            y: {
-              min: 0,
-              max: 3,
-              ticks: { 
-                stepSize: 1,
-                font: { size: 10 },
-                callback: function(value) {
-                  return riskLabels[Number(value)] || value;
-                }
-              },
-              grid: { color: 'rgba(148,163,184,0.15)' },
-            },
-          },
-        }}
-      />
+      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+        <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
+          <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+          <YAxis 
+            domain={[0, 3]} 
+            tick={{ fontSize: 11, fill: '#64748b' }} 
+            tickFormatter={(val) => riskLabels[val] || ''}
+            axisLine={false} 
+            tickLine={false} 
+            tickCount={4}
+          />
+          <Tooltip 
+            contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+            itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+            labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
+            formatter={(value: number) => {
+              return [riskLabels[value], 'Mức nguy cơ ngập'];
+            }}
+          />
+          <Bar dataKey="value" radius={[4, 4, 0, 0]} barSize={30}>
+            {chartData.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={entry.color} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
-  )
+  );
 }

@@ -15,7 +15,7 @@ Quy trình ETL bao gồm 3 bước tuần tự như sau:
 ```mermaid
 graph TD
     A[Google Earth Engine GEE] -- "Bước 1: tif.py (Tải TIF)" --> B(GeoTIFF Images)
-    B -- "Bước 2: tif_to_csv.py (Băm coordinates)" --> C[grid_prediction_datv2.csv]
+    B -- "Bước 2: tif_to_csv.py (Băm coordinates)" --> C[grid_prediction_datv3_full_location.csv]
     C -- "Bước 3: Node.js Seed Script" --> D[(CockroachDB: landslide_grid_nodes)]
 ```
 
@@ -30,10 +30,10 @@ graph TD
 
 #### **Bước 2: Băm ảnh vệ tinh thành tọa độ lưới (`tif_to_csv.py`)**
 - **Nhiệm vụ**: Đọc các file ảnh vệ tinh GeoTIFF tải từ Bước 1, băm nhỏ từng pixel thành tọa độ các điểm lưới (Grid Nodes - kinh độ `lon` và vĩ độ `lat`) cùng các đặc trưng địa hình/thời tiết tại điểm đó.
-- **Đầu ra**: File CSV thành phẩm `grid_prediction_datv2.csv` chứa hàng triệu bản ghi tương ứng với lưới dự báo sạt lở đất.
+- **Đầu ra**: File CSV thành phẩm `grid_prediction_datv3_full_location.csv` chứa hàng triệu bản ghi tương ứng với lưới dự báo sạt lở đất.
 
 #### **Bước 3: Nạp dữ liệu vào Database (`backend/init-system`)**
-- **Nhiệm vụ**: File CSV thành phẩm (`grid_prediction_datv2.csv`) sẽ được Web Backend Node.js sử dụng để nạp (seed) dữ liệu ban đầu vào bảng `landslide_grid_nodes` của CockroachDB thông qua các công cụ migration/seed hệ thống.
+- **Nhiệm vụ**: File CSV thành phẩm (`grid_prediction_datv3_full_location.csv`) sẽ được Web Backend Node.js sử dụng để nạp (seed) dữ liệu ban đầu vào bảng `landslide_grid_nodes` của CockroachDB thông qua các công cụ migration/seed hệ thống.
 
 ---
 
@@ -64,10 +64,11 @@ Tải các file `.tif` từ Google Drive về thư mục máy tính của bạn,
 ```bash
 python tif_to_csv.py
 ```
-Kết quả thu được sẽ là file `grid_prediction_datv2.csv` nằm cùng thư mục `data_engineering`.
+Kết quả thu được sẽ là file `grid_prediction_datv3_full_location.csv` nằm cùng thư mục `data_engineering`.
 
 ---
 
 ## ⚠️ Lưu Ý Quan Trọng
 - **Bảo mật**: Tuyệt đối không commit các file `.env` chứa thông tin tài khoản GEE hoặc CockroachDB lên Git.
 - **Dung lượng lớn**: Các file `.tif` ảnh vệ tinh có dung lượng cực kỳ lớn (lên tới hàng GBs). Dự án đã cấu hình quy tắc bỏ qua trong `.gitignore` (`data_engineering/*.tif`) để tránh đẩy các file khổng lồ này lên Github làm đơ repository.
+

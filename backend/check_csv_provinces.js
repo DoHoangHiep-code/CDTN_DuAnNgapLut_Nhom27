@@ -3,7 +3,7 @@ const path = require('path')
 const csv = require('csv-parser')
 
 async function checkCsvProvinces() {
-  const csvFilePath = path.join(__dirname, 'data', 'grid_prediction_datv2.csv')
+  const csvFilePath = path.join(__dirname, 'data', 'grid_prediction_datv3_full_location.csv')
   if (!fs.existsSync(csvFilePath)) {
     console.error('CSV not found')
     return
@@ -37,3 +37,4 @@ async function checkCsvProvinces() {
 }
 
 checkCsvProvinces()
+

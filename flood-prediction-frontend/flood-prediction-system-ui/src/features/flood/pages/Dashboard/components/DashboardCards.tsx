@@ -1,5 +1,5 @@
 import { Droplets, Thermometer, Wind } from 'lucide-react'
-import { Card, CardHeader, CardMeta, CardTitle } from '../../../../../components/common/Card'
+import { Card } from '../../../../../components/common/Card'
 import { useTranslation } from 'react-i18next'
 import type { DashboardResponse, DashboardTempHumPoint } from '../../../../../utils/types'
 
@@ -11,54 +11,51 @@ type DashboardCardsProps = {
 export function DashboardCards({ cw, tempHumData }: DashboardCardsProps) {
   const { t } = useTranslation()
 
-  // Sử dụng dữ liệu trung bình trực tiếp từ backend
   const displayTemp = cw.temperature
   const displayHum  = cw.humidity
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
       <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>{t('dashboard.temperature')}</CardTitle>
-            <CardMeta>Trung bình theo thời gian đã chọn</CardMeta>
+        <div className="flex items-center gap-4 p-4">
+          <div className="rounded-xl bg-orange-100 p-3 dark:bg-orange-900/30">
+            <Thermometer className="h-6 w-6 text-orange-600 dark:text-orange-400" />
           </div>
-          <Thermometer className="fps-3d-icon h-9 w-9 text-orange-500 drop-shadow-sm dark:text-orange-400" />
-        </CardHeader>
-        <div className="text-3xl font-extrabold text-orange-600 dark:text-orange-400">
-          {displayTemp.toFixed(1)}°C
-        </div>
-        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-          Dữ liệu trung bình khu vực
+          <div>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{t('dashboard.temperature')}</p>
+            <h4 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+              {displayTemp.toFixed(1)} <span className="text-sm font-normal text-slate-500">°C</span>
+            </h4>
+          </div>
         </div>
       </Card>
 
       <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>{t('dashboard.humidity')}</CardTitle>
-            <CardMeta>Trung bình theo thời gian đã chọn</CardMeta>
+        <div className="flex items-center gap-4 p-4">
+          <div className="rounded-xl bg-sky-100 p-3 dark:bg-sky-900/30">
+            <Droplets className="h-6 w-6 text-sky-600 dark:text-sky-400" />
           </div>
-          <Droplets className="fps-3d-icon h-9 w-9 text-sky-600 drop-shadow-sm dark:text-sky-400" />
-        </CardHeader>
-        <div className="text-3xl font-extrabold text-sky-600 dark:text-sky-400">
-          {displayHum.toFixed(0)}%
+          <div>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{t('dashboard.humidity')}</p>
+            <h4 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+              {displayHum.toFixed(0)} <span className="text-sm font-normal text-slate-500">%</span>
+            </h4>
+          </div>
         </div>
-        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">{t('dashboard.comfortHint')}</div>
       </Card>
 
       <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>{t('dashboard.wind')}</CardTitle>
-            <CardMeta>Trung bình theo thời gian đã chọn</CardMeta>
+        <div className="flex items-center gap-4 p-4">
+          <div className="rounded-xl bg-cyan-100 p-3 dark:bg-cyan-900/30">
+            <Wind className="h-6 w-6 text-cyan-600 dark:text-cyan-400" />
           </div>
-          <Wind className="fps-3d-icon h-9 w-9 text-cyan-600 drop-shadow-sm dark:text-cyan-400" />
-        </CardHeader>
-        <div className="text-3xl font-extrabold text-cyan-700 dark:text-cyan-300">
-          {cw.windSpeed.toFixed(1)} m/s
+          <div>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{t('dashboard.wind')}</p>
+            <h4 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+              {cw.windSpeed.toFixed(1)} <span className="text-sm font-normal text-slate-500">m/s</span>
+            </h4>
+          </div>
         </div>
-        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">{t('dashboard.windHint')}</div>
       </Card>
     </div>
   )

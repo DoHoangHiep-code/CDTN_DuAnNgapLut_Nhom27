@@ -12,6 +12,8 @@ import Supercluster from 'supercluster'
 import { getLandslideBbox } from '../../../services/api'
 import type { LandslideNode } from '../../../services/api'
 import { cn } from '../../../utils/cn'
+import { Home } from 'lucide-react'
+import { LandslideNodeSearch } from './LandslideNodeSearch'
 
 // ── Design tokens — khớp 100% với AQUAALERT dashboard ────────────────────────
 const RISK_PALETTE = {
@@ -114,15 +116,19 @@ function LandslideClustersLayer({
           const count = p.properties.point_count
           const size = clamp(32 + Math.log2(Math.max(2, count)) * 9, 32, 60)
           const icon = L.divIcon({
-            className: '',
-            html: `<div style="
-              width:${size}px;height:${size}px;border-radius:50%;
-              background:rgba(249,115,22,0.85);border:2.5px solid #f97316;
-              color:#fff;font-size:12px;font-weight:900;
-              display:flex;align-items:center;justify-content:center;
-              box-shadow:0 0 16px rgba(249,115,22,0.5);
-              backdrop-filter:blur(2px)
-            ">${count}</div>`,
+            className: 'bg-transparent border-none',
+            html: `
+              <div style="width:${size}px; height:${size}px;" class="relative flex items-center justify-center">
+                <!-- Vòng ngoài cùng toả ra (ping) -->
+                <div class="absolute inset-0 rounded-full bg-orange-500 opacity-30 animate-ping" style="animation-duration: 2s;"></div>
+                <!-- Vòng viền giữa mờ mờ -->
+                <div class="absolute inset-1 rounded-full bg-orange-500/20 border-2 border-orange-400/30"></div>
+                <!-- Khối cầu trung tâm -->
+                <div class="relative z-10 w-[75%] h-[75%] rounded-full bg-gradient-to-br from-orange-400 to-orange-600 border border-white/40 shadow-[0_0_12px_rgba(249,115,22,0.8)] flex items-center justify-center text-white font-black" style="font-size: ${size > 40 ? '13px' : '11px'};">
+                  ${count}
+                </div>
+              </div>
+            `,
             iconSize: [size, size],
             iconAnchor: [size / 2, size / 2],
           })
@@ -170,7 +176,7 @@ function LandslideClustersLayer({
             {view.zoom >= 10 && (
               <Tooltip direction="top" className="fps-map-tooltip" opacity={1}>
                 <div className="space-y-0.5">
-                  <div className="text-[11px] font-extrabold">{n.province}</div>
+                  <div className="text-xs font-bold text-slate-800 dark:text-slate-100">{n.location_name || n.province || 'Khu vực chưa xác định'}</div>
                   <div className="text-[10px] text-slate-600 dark:text-slate-300">
                     {palette.emoji} {palette.text} · {Math.round(prob * 100)}%
                   </div>
@@ -243,8 +249,8 @@ function NodePopup({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
           <div>
-            <div className="text-xs font-extrabold uppercase tracking-wide text-slate-700">
-              {node.province}
+            <div className="text-sm font-bold text-slate-800 leading-snug pr-2">
+              {node.location_name || node.province || 'Khu vực chưa xác định'}
             </div>
             <div className="text-[10px] text-slate-400 font-mono">
               {node.lat.toFixed(4)}, {node.lon.toFixed(4)}
@@ -367,13 +373,16 @@ interface LandslideMapProps {
   tileStyle?: 'terrain' | 'satellite' | 'streets'
   /** Optional ref to expose flyToWard imperatively */
   mapRef?: React.RefObject<LandslideMapRef | null>
+  /** Ẩn các HUD (thống kê, bộ lọc, chú giải) khi dùng làm mini map */
+  hideHUD?: boolean
 }
 
-export function LandslideMap({ tileStyle = 'terrain', mapRef }: LandslideMapProps) {
+export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false }: LandslideMapProps) {
   const [map, setMap] = useState<L.Map | null>(null)
   const [nodes, setNodes] = useState<LandslideNode[]>([])
   const [isFetching, setIsFetching] = useState(false)
   const [selectedNode, setSelectedNode] = useState<LandslideNode | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
   const [flyTarget, setFlyTarget] = useState<{ lat: number; lng: number; zoom?: number } | null>(null)
   const [riskFilter, setRiskFilter] = useState<'ALL' | 'WARNING' | 'DANGER'>('ALL')
   const abortRef = useRef<AbortController | null>(null)
@@ -481,9 +490,31 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef }: LandslideMapProp
         </div>
       )}
 
-      {/* ── HUD: Stats overlay top-left ───────────────────────────────────── */}
-      <div className="absolute top-3 left-3 z-[1000] flex flex-col gap-1.5">
-        <div
+      {/* ── HUD: Stats overlay top-left ──────────────────────────────────────────────────────────── */}
+        {!hideHUD && (
+          <div className="absolute top-3 left-3 z-[1000] flex flex-col gap-1.5 w-[300px]">
+            {/* Thanh tìm kiếm */}
+            <LandslideNodeSearch
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onSelectNode={(node) => {
+                setSearchQuery(node.location_name || node.province || '')
+                setFlyTarget({ lat: node.lat, lng: node.lon, zoom: 15 })
+                setSelectedNode(node)
+              }}
+              className="mb-1"
+            />
+            
+            {/* Nút Quay về vị trí ban đầu */}
+            <button
+              onClick={() => map?.setView([21.5, 105.0], 7)}
+              className="flex items-center gap-2 rounded-xl bg-white/95 px-3 py-2 text-sm font-semibold text-slate-700 shadow-lg backdrop-blur hover:bg-slate-50 dark:bg-slate-900/95 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors mb-2 border border-slate-200 dark:border-slate-800"
+              title="Quay về vị trí ban đầu"
+            >
+              <Home className="h-4 w-4 text-orange-500" />
+              <span>Quay về ban đầu</span>
+            </button>
+            <div
           className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-bold text-amber-100 shadow-lg backdrop-blur"
           style={{ background: 'rgba(40,28,16,0.90)', border: '1px solid rgba(217,119,6,0.25)' }}
         >
@@ -495,10 +526,12 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef }: LandslideMapProp
           <StatChip color="red" label="Nguy hiểm" count={dangerCount} />
           <StatChip color="orange" label="Cảnh báo" count={warningCount} />
         </div>
-      </div>
+        </div>
+      )}
 
       {/* ── HUD: Risk filter buttons ─────────────────────────────────────── */}
-      <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-1.5">
+      {!hideHUD && (
+        <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-1.5">
         {(['ALL', 'DANGER', 'WARNING'] as const).map(f => (
           <button
             key={f}
@@ -523,10 +556,12 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef }: LandslideMapProp
             {f === 'ALL' ? '🗺 Tất cả' : f === 'DANGER' ? '🔴 Nguy hiểm' : '🟠 Cảnh báo'}
           </button>
         ))}
-      </div>
+        </div>
+      )}
 
       {/* ── Legend ───────────────────────────────────────────────────────── */}
-      <div
+      {!hideHUD && (
+        <div
         className="absolute bottom-8 left-3 z-[1000] rounded-2xl p-3 text-[10px] text-stone-200 shadow-xl backdrop-blur space-y-1.5"
         style={{ background: 'rgba(28,22,14,0.92)', border: '1px solid rgba(120,113,108,0.25)' }}
       >
@@ -543,7 +578,8 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef }: LandslideMapProp
         <div className="mt-1.5 border-t pt-1.5 text-[9px] text-stone-600" style={{ borderColor: 'rgba(120,113,108,0.3)' }}>
           Radius ~ xác suất · Click node để xem chi tiết
         </div>
-      </div>
+        </div>
+      )}
     </div>
   )
 }

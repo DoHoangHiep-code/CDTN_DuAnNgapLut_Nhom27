@@ -3,7 +3,7 @@ const path = require('path')
 const csv = require('csv-parser')
 
 async function inspect() {
-  const filePath = path.join(__dirname, 'data', 'grid_prediction_datv2.csv')
+  const filePath = path.join(__dirname, 'data', 'grid_prediction_datv3_full_location.csv')
   console.log('Inspecting file:', filePath)
 
   if (!fs.existsSync(filePath)) {
@@ -40,3 +40,4 @@ async function inspect() {
 }
 
 inspect()
+

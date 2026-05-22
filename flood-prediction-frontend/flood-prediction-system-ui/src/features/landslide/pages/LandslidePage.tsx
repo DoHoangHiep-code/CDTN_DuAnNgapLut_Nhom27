@@ -135,8 +135,8 @@ export function LandslidePage() {
         if (data && data.length > 0) {
           setHotspots(data.map(node => ({
             id: node.node_id,
-            name: `${node.province} – Node ${node.node_id.slice(0, 6)}`,
-            province: node.province,
+            name: node.location_name || node.province || `Node ${node.node_id.slice(0, 6)}`,
+            province: node.province || '',
             risk: node.risk_level === 'DANGER' ? ('critical' as const) : ('warning' as const),
             soilMoisture: node.soil_moisture_1d ? Math.round(node.soil_moisture_1d * 100) : 0,
             rain7d: node.rain_7d_accum ? Math.round(node.rain_7d_accum) : 0,

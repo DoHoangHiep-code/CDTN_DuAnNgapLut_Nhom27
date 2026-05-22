@@ -8,6 +8,8 @@ import { DashboardCharts } from './components/DashboardCharts'
 import { getDashboard } from '../../services/api'
 import type { DashboardResponse } from '../../utils/types'
 import { useTranslation } from 'react-i18next'
+import { useDisasterMode } from '../../context/DisasterContext'
+import { LandslideDashboardPage } from '../LandslideDashboard'
 
 const HOUR_OPTIONS = [
   { label: '6h',  value: 6  },
@@ -19,6 +21,7 @@ const HOUR_OPTIONS = [
 
 export function DashboardPage() {
   const { t } = useTranslation()
+  const { mode } = useDisasterMode()
 
   // ── Filter state ──────────────────────────────────────────────
   const [hours, setHours]   = useState(72)
@@ -80,6 +83,10 @@ export function DashboardPage() {
   useEffect(() => { void fetchDashboard() }, [fetchDashboard])
 
   // ── Render ────────────────────────────────────────────────────
+  if (mode === 'landslide') {
+    return <LandslideDashboardPage />
+  }
+
   if (loading && !data) return <Spinner label="Loading dashboard…" />
   if (error && !data)   return <ErrorState error={error} onRetry={fetchDashboard} />
   if (!data)            return null

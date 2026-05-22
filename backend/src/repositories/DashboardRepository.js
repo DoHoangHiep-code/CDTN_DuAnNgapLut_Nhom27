@@ -147,10 +147,15 @@ class DashboardRepository {
       timeMap.set(r.time, { time: r.time, real_time: new Date(r.real_time).getTime(), prcp: Number(r.prcp) || 0, flood_depth_cm: 0 })
     }
     for (const r of fpRows) {
+      let depth = Number(r.flood_depth_cm || r.avg_depth_cm) || 0
+      
       if (timeMap.has(r.time)) {
-        timeMap.get(r.time).flood_depth_cm = Number(r.flood_depth_cm || r.avg_depth_cm) || 0
+        const prcp = timeMap.get(r.time).prcp
+        if (prcp === 0 && depth < 1.0) depth = 0 // Lọc nhiễu hồi quy CatBoost
+        timeMap.get(r.time).flood_depth_cm = depth
       } else {
-        timeMap.set(r.time, { time: r.time, real_time: new Date(r.real_time).getTime(), prcp: 0, flood_depth_cm: Number(r.flood_depth_cm || r.avg_depth_cm) || 0 })
+        if (depth < 1.0) depth = 0
+        timeMap.set(r.time, { time: r.time, real_time: new Date(r.real_time).getTime(), prcp: 0, flood_depth_cm: depth })
       }
     }
 
@@ -295,10 +300,15 @@ class DashboardRepository {
       timeMap.set(r.time, { time: r.time, temp: r.temp, rhum: r.rhum, prcp: r.prcp, wspd: r.wspd, flood_depth_cm: 0 })
     }
     for (const r of fpRows) {
+      let depth = Number(r.flood_depth_cm) || 0
+      
       if (timeMap.has(r.time)) {
-        timeMap.get(r.time).flood_depth_cm = r.flood_depth_cm
+        const prcp = timeMap.get(r.time).prcp
+        if (prcp === 0 && depth < 1.0) depth = 0 // Lọc nhiễu hồi quy CatBoost
+        timeMap.get(r.time).flood_depth_cm = depth
       } else {
-        timeMap.set(r.time, { time: r.time, temp: 0, rhum: 0, prcp: 0, wspd: 0, flood_depth_cm: r.flood_depth_cm })
+        if (depth < 1.0) depth = 0
+        timeMap.set(r.time, { time: r.time, temp: 0, rhum: 0, prcp: 0, wspd: 0, flood_depth_cm: depth })
       }
     }
 

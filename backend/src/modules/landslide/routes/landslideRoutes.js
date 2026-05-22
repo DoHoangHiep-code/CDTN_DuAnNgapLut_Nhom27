@@ -96,7 +96,7 @@ router.get('/nodes', async (req, res, next) => {
       // Bước 1: Lấy nodes trong bbox từ landslide_grid_nodes (chỉ cột địa hình)
       // Query này rất nhanh — chỉ cần lat/lon range scan, không join predictions
       const [gridNodes] = await sequelize.query(
-        `SELECT node_id, lat, lon, province, slope, twi, elevation, ndvi
+        `SELECT node_id, lat, lon, province, location_name, slope, twi, elevation, ndvi
          FROM landslide_grid_nodes
          WHERE lat BETWEEN :min_lat AND :max_lat
            AND lon BETWEEN :min_lng AND :max_lng
@@ -125,6 +125,7 @@ router.get('/nodes', async (req, res, next) => {
           lat:              parseFloat(n.lat),
           lon:              parseFloat(n.lon),
           province:         n.province,
+          location_name:    n.location_name,
           slope:            n.slope    != null ? parseFloat(n.slope)    : null,
           twi:              n.twi      != null ? parseFloat(n.twi)      : null,
           elevation:        n.elevation!= null ? parseFloat(n.elevation): null,
@@ -162,7 +163,7 @@ router.get('/nodes', async (req, res, next) => {
         FROM landslide_predictions
       )
       SELECT
-        n.node_id, n.lat, n.lon, n.province, n.slope, n.twi, n.elevation, n.ndvi,
+        n.node_id, n.lat, n.lon, n.province, n.location_name, n.slope, n.twi, n.elevation, n.ndvi,
         p.prob_landslide, p.risk_level, p.rain_7d_accum, p.api_7d, p.soil_moisture_1d, p.prediction_time
       FROM landslide_grid_nodes n
       JOIN LatestPreds p ON n.node_id = p.node_id AND p.rn = 1
@@ -212,7 +213,7 @@ router.get('/hotspots', async (req, res, next) => {
         topNodeIds.forEach((id, i) => { replacements[`id${i}`] = id })
 
         const [gridNodes] = await sequelize.query(
-          `SELECT node_id, lat, lon, province, slope, twi, elevation, ndvi
+          `SELECT node_id, lat, lon, province, location_name, slope, twi, elevation, ndvi
            FROM landslide_grid_nodes
            WHERE node_id IN (${placeholders})`,
           { replacements }
@@ -223,7 +224,7 @@ router.get('/hotspots', async (req, res, next) => {
           if (!pred || !['DANGER', 'WARNING'].includes(pred.risk_level)) continue
           candidates.push({
             node_id: n.node_id, lat: parseFloat(n.lat), lon: parseFloat(n.lon),
-            province: n.province, slope: n.slope, twi: n.twi, elevation: n.elevation, ndvi: n.ndvi,
+            province: n.province, location_name: n.location_name, slope: n.slope, twi: n.twi, elevation: n.elevation, ndvi: n.ndvi,
             prob_landslide: pred.prob_landslide, risk_level: pred.risk_level,
             rain_7d_accum: pred.rain_7d_accum, api_7d: pred.api_7d,
             soil_moisture_1d: pred.soil_moisture_1d, prediction_time: pred.prediction_time,
@@ -246,7 +247,7 @@ router.get('/hotspots', async (req, res, next) => {
         FROM landslide_predictions
       )
       SELECT
-        n.node_id, n.lat, n.lon, n.province, n.slope, n.twi, n.elevation, n.ndvi,
+        n.node_id, n.lat, n.lon, n.province, n.location_name, n.slope, n.twi, n.elevation, n.ndvi,
         p.prob_landslide, p.risk_level, p.rain_7d_accum, p.api_7d, p.soil_moisture_1d, p.prediction_time
       FROM landslide_grid_nodes n
       JOIN LatestPreds p ON n.node_id = p.node_id AND p.rn = 1
@@ -284,5 +285,52 @@ function getTopNodeIdsFromCache(n) {
   }
   return []
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/v1/landslide/search
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Tìm kiếm các điểm sạt lở theo tên địa danh (location_name) hoặc tỉnh (province).
+ */
+router.get('/search', async (req, res, next) => {
+  try {
+    const q = req.query.q || ''
+    if (!q || q.length < 2) {
+      return res.status(200).json({ success: true, nodes: [] })
+    }
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50)
+    
+    // Tìm kiếm trong grid_nodes
+    const [gridNodes] = await sequelize.query(
+      `SELECT node_id, lat, lon, province, location_name
+       FROM landslide_grid_nodes
+       WHERE location_name ILIKE :query OR province ILIKE :query
+       LIMIT :limit`,
+      {
+        replacements: { query: `%${q}%`, limit }
+      }
+    )
+
+    // Lấy thông tin dự báo từ cache
+    const results = gridNodes.map(n => {
+      const pred = landslideCache.getForNode(n.node_id) || {}
+      return {
+        node_id: n.node_id,
+        lat: parseFloat(n.lat),
+        lon: parseFloat(n.lon),
+        province: n.province,
+        location_name: n.location_name,
+        prob_landslide: pred.prob_landslide || null,
+        risk_level: pred.risk_level || 'UNKNOWN'
+      }
+    })
+
+    return res.status(200).json({ success: true, nodes: results })
+  } catch (err) {
+    console.error('[LandslideRoutes] Lỗi /search:', err.message)
+    return next(err)
+  }
+})
 
 module.exports = { landslideRouter: router }

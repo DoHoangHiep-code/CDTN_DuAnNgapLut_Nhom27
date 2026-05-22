@@ -166,10 +166,10 @@ async function main() {
 
   // ── Step 10: Seed Landslide Pipeline (Open-Meteo) ───────────────────────────
   step(10, 'Khởi tạo dữ liệu sạt lở động (CSV + Open-Meteo API)')
-  const landslideCSV = path.join(__dirname, '02_static_data', 'grid_prediction_datv2.csv')
+  const landslideCSV = path.join(__dirname, '02_static_data', 'grid_prediction_datv3_full_location.csv')
   if (!fs.existsSync(landslideCSV)) {
     console.warn(`  ⚠️  Không tìm thấy: ${landslideCSV}`)
-    console.warn('  Bỏ qua step 10. Đặt grid_prediction_datv2.csv vào 02_static_data/')
+    console.warn('  Bỏ qua step 10. Đặt grid_prediction_datv3_full_location.csv vào 02_static_data/')
   } else {
     console.log('  (Quá trình này mất thời gian do fetch API Open-Meteo)')
     await runScript(path.join(SCRIPTS_DIR, 'seed_landslide_pipeline.js'))
@@ -187,3 +187,4 @@ main().catch(err => {
   console.error('\n❌ Redeploy thất bại:', err.message)
   process.exit(1)
 })
+

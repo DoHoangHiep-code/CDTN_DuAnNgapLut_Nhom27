@@ -10,6 +10,7 @@ import {
   Droplets, Loader2,
   CloudRain, Sun, ShieldCheck
 } from 'lucide-react'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts'
 
 import { ErrorState } from '../../../components/common/ErrorState'
 import { Spinner } from '../../../components/common/Spinner'
@@ -21,6 +22,8 @@ import { useTranslation } from 'react-i18next'
 import { cn } from '../../../utils/cn'
 import { useSettings } from '../../../context/SettingsContext'
 import { useAutoRefresh } from '../../../hooks/useAutoRefresh'
+import { useDisasterMode } from '../../../context/DisasterContext'
+import { LandslideReportPage } from '../../../pages/LandslideReport'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 function toVNDate(iso: string) {
@@ -160,7 +163,7 @@ function HotspotsCards() {
 
           return (
             <div key={item.name} className={cn(
-              'relative flex h-full w-full flex-col overflow-hidden rounded-2xl border transition-all duration-300',
+              'relative flex flex-col overflow-hidden rounded-2xl border transition-all duration-300 p-4',
               'hover:-translate-y-1.5 hover:shadow-xl',
               cardBg
             )}>
@@ -170,44 +173,28 @@ function HotspotsCards() {
                   LIVE
                 </div>
               )}
-              <div className="p-4 space-y-3">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-0.5">
-                    <div className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                      {item.name}
-                    </div>
-                    <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', statusBadge)}>
-                      <StatusIcon className="h-3 w-3" />
-                      {statusText}
-                    </span>
-                  </div>
-                  <div className={cn('grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl ring-2', ringColor, iconBg)}>
-                    <WeatherIcon className={cn('h-6 w-6 stroke-[2.5]', iconColor)} />
-                  </div>
+              <div className="flex justify-between items-start mb-2">
+                <div>
+                  <div className="text-sm font-bold text-slate-800 dark:text-slate-100">{item.name}</div>
+                  <div className="text-xs text-slate-500">Giám sát điểm ngập</div>
                 </div>
-                {showWeatherStats && (
-                  <div className="text-center">
-                    <div className="text-2xl font-black text-slate-800 dark:text-slate-100 tabular-nums">
-                      {item.temp}°C
-                    </div>
-                  </div>
-                )}
-                {(showWeatherStats || showFloodDepth) && (
-                  <div className="space-y-1.5 rounded-xl bg-white/60 p-3 dark:bg-slate-800/60 shadow-sm border border-white/50">
-                    {showWeatherStats && (
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="flex items-center gap-1.5 text-slate-500"><CloudRain className="h-3 w-3 text-sky-500" /> Mưa</span>
-                        <span className="font-bold text-sky-600 dark:text-sky-400 tabular-nums">{item.rain} mm</span>
-                      </div>
-                    )}
-                    {showFloodDepth && (
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="flex items-center gap-1.5 text-slate-500"><Droplets className="h-3 w-3 text-indigo-500" /> Độ ngập</span>
-                        <span className={cn("font-bold tabular-nums", isFlood ? "text-rose-600 dark:text-rose-400" : "text-indigo-600 dark:text-indigo-400")}>{item.floodDepth} cm</span>
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div className={cn('px-2 py-0.5 rounded-full text-[10px] font-bold uppercase flex items-center gap-1', statusBadge)}>
+                  <StatusIcon className="h-3 w-3" />
+                  {statusText}
+                </div>
+              </div>
+              
+              <div className="mt-2 flex items-end justify-between">
+                <div className={cn('text-3xl font-black tabular-nums', isFlood ? 'text-rose-600 dark:text-rose-400' : isRain ? 'text-sky-600 dark:text-sky-400' : 'text-emerald-600 dark:text-emerald-400')}>
+                  {isFlood ? `${item.floodDepth}` : isRain ? `${item.rain}` : `${item.temp}`}
+                  <span className="text-sm font-semibold ml-1">
+                    {isFlood ? 'cm' : isRain ? 'mm' : '°C'}
+                  </span>
+                </div>
+                
+                <div className={cn('grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl ring-2', ringColor, iconBg)}>
+                  <WeatherIcon className={cn('h-6 w-6 stroke-[2.5]', iconColor)} />
+                </div>
               </div>
             </div>
           )
@@ -312,8 +299,8 @@ function ClassicLocationSearch({
   )
 }
 
-// ── ReportsPage ───────────────────────────────────────────────────────
-export function ReportsPage() {
+// ── FloodReportsPage ───────────────────────────────────────────────────────
+function FloodReportsPage() {
   const { t } = useTranslation()
 
   // ── Filter state (Classic: chỉ apply khi commit) ──
@@ -583,7 +570,6 @@ export function ReportsPage() {
               </div>
               <div>
                 <div className="text-sm font-extrabold text-slate-800 dark:text-slate-100">{t('reports.filters')}</div>
-                <div className="text-[11px] text-slate-400">Nhấn Enter hoặc "Áp dụng" để tìm kiếm</div>
               </div>
               {hasFilters && (
                 <button type="button" onClick={clearFilters}
@@ -605,7 +591,7 @@ export function ReportsPage() {
                   onCommit={(v) => { setCommittedLocation(v); setPage(1) }}
                   onClear={() => { setCommittedLocation(''); setPage(1) }}
                 />
-                <p className="mt-1 text-[10px] text-slate-400">Nhấn Enter để tìm — không lọc tức thì</p>
+                <p className="mt-1 text-[10px] text-slate-400">Nhấn Enter hoặc chọn gợi ý để lọc tức thì</p>
               </div>
 
               {/* Date range */}
@@ -613,22 +599,16 @@ export function ReportsPage() {
                 <label className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400">
                   <Calendar className="h-3.5 w-3.5" />Từ ngày
                 </label>
-                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setCommittedDateFrom(e.target.value); setPage(1); }}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:ring-indigo-900/40" />
               </div>
               <div>
                 <label className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400">
                   <Calendar className="h-3.5 w-3.5" />Đến ngày
                 </label>
-                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setCommittedDateTo(e.target.value); setPage(1); }}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:ring-indigo-900/40" />
               </div>
-
-              {/* Apply button */}
-              <button type="button" onClick={applyFilters}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-95">
-                <Search className="h-4 w-4" /> Áp dụng bộ lọc
-              </button>
 
               {/* Active filter badges */}
               {hasFilters && (
@@ -658,28 +638,56 @@ export function ReportsPage() {
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <div className="border-b border-slate-100 px-4 py-3.5 dark:border-slate-800">
               <div className="text-sm font-extrabold text-slate-800 dark:text-slate-100">Phân bổ mức ngập</div>
-              <div className="text-[11px] text-slate-400">{rows.length} báo cáo trong trang này</div>
+              <div className="text-[11px] text-slate-400">{rows.length} báo cáo trong danh sách</div>
             </div>
-            <div className="space-y-2 p-4">
-              {Object.entries(LEVEL_CONFIG).map(([key, cfg]) => {
-                const count = stats[key] ?? 0
-                const pct = rows.length ? Math.round((count / rows.length) * 100) : 0
-                return (
-                  <div key={key}>
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className={cn('flex items-center gap-1.5 text-xs font-semibold', cfg.text)}>
-                        <span className={cn('h-2 w-2 rounded-full', cfg.dot)} />{cfg.label}
+            <div className="p-4 space-y-4">
+              <div className="relative h-40 w-full">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                  <PieChart>
+                    <Pie 
+                      data={Object.entries(LEVEL_CONFIG).map(([key, cfg]) => ({ name: cfg.label, value: stats[key] ?? 0, fill: key === '>30cm' ? '#f43f5e' : key === '15-30cm' ? '#f97316' : key === '<15cm' ? '#fbbf24' : '#10b981' }))} 
+                      dataKey="value" 
+                      nameKey="name" 
+                      cx="50%" 
+                      cy="50%" 
+                      innerRadius={45} 
+                      outerRadius={65} 
+                      stroke="none"
+                    >
+                      {Object.entries(LEVEL_CONFIG).map(([key, cfg], index) => {
+                        const count = stats[key] ?? 0;
+                        const fill = key === '>30cm' ? '#f43f5e' : key === '15-30cm' ? '#f97316' : key === '<15cm' ? '#fbbf24' : '#10b981';
+                        return <Cell key={`cell-${index}`} fill={fill} />;
+                      })}
+                    </Pie>
+                    <RechartsTooltip 
+                      contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+                      itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+                      formatter={(val: number) => [`${val} báo cáo`, 'Số lượng']}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-xl font-black text-slate-800 dark:text-slate-100 leading-none">{rows.length}</span>
+                  <span className="text-[10px] text-slate-500 mt-1">Tổng cộng</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(LEVEL_CONFIG).map(([key, cfg]) => {
+                  const count = stats[key] ?? 0
+                  const pct = rows.length ? Math.round((count / rows.length) * 100) : 0
+                  return (
+                    <div key={key} className="flex items-center justify-between rounded-lg bg-slate-50 px-2 py-2 border border-slate-100 dark:bg-slate-800/50 dark:border-slate-800">
+                      <span className={cn('flex items-center gap-1.5 text-[10px] font-semibold', cfg.text)}>
+                        <span className={cn('h-2 w-2 rounded-full flex-shrink-0', cfg.dot)} />{cfg.label}
                       </span>
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                        {count} <span className="text-[10px] font-normal">({pct}%)</span>
+                      <span className="text-xs font-bold tabular-nums text-slate-600 dark:text-slate-300">
+                        {count} <span className="text-[9px] font-normal text-slate-400">({pct}%)</span>
                       </span>
                     </div>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                      <div className={cn('h-full rounded-full transition-all duration-500', cfg.dot)} style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
           </div>
 
@@ -687,4 +695,15 @@ export function ReportsPage() {
       </div>
     </div>
   )
+}
+
+// ── ReportsPage Wrapper (Hazard Switcher) ───────────────────────────────────────────────────────
+export function ReportsPage() {
+  const { mode } = useDisasterMode()
+
+  if (mode === 'landslide') {
+    return <LandslideReportPage />
+  }
+
+  return <FloodReportsPage />
 }
