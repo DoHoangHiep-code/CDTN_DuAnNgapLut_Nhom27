@@ -7,7 +7,7 @@ import {
   Download, FileText, FileSpreadsheet, Filter,
   Calendar, MapPin, AlertTriangle, CheckCircle,
   RefreshCcw, X, TrendingUp, BarChart3, Search,
-  Droplets, Loader2,
+  Loader2,
   CloudRain, Sun, ShieldCheck
 } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts'
@@ -95,7 +95,7 @@ import { getHotspots } from '../../../services/api'
 
 // ── Hotspots Cards ────────────────────────────────────────────
 function HotspotsCards() {
-  const { showFloodDepth, showWeatherStats } = useSettings()
+  useSettings()
   const hotspotsAsync = useAsync(getHotspots, [])
   useAutoRefresh(hotspotsAsync.reload)
   const data = hotspotsAsync.data || []
@@ -352,12 +352,6 @@ function FloodReportsPage() {
   }, [rows])
 
   // ── Apply filter (commit) ──
-  function applyFilters() {
-    setCommittedLocation(locationInput)
-    setCommittedDateFrom(dateFrom)
-    setCommittedDateTo(dateTo)
-    setPage(1)
-  }
 
   function clearFilters() {
     setLocationInput(''); setCommittedLocation('')
@@ -654,8 +648,7 @@ function FloodReportsPage() {
                       outerRadius={65} 
                       stroke="none"
                     >
-                      {Object.entries(LEVEL_CONFIG).map(([key, cfg], index) => {
-                        const count = stats[key] ?? 0;
+                      {Object.keys(LEVEL_CONFIG).map((key, index) => {
                         const fill = key === '>30cm' ? '#f43f5e' : key === '15-30cm' ? '#f97316' : key === '<15cm' ? '#fbbf24' : '#10b981';
                         return <Cell key={`cell-${index}`} fill={fill} />;
                       })}
@@ -663,7 +656,7 @@ function FloodReportsPage() {
                     <RechartsTooltip 
                       contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
                       itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
-                      formatter={(val: number) => [`${val} báo cáo`, 'Số lượng']}
+                      formatter={(val) => [`${Number(val ?? 0)} báo cáo`, 'Số lượng']}
                     />
                   </PieChart>
                 </ResponsiveContainer>

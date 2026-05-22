@@ -1,14 +1,13 @@
 import { Droplets, Thermometer, Wind } from 'lucide-react'
 import { Card } from '../../../../../components/common/Card'
 import { useTranslation } from 'react-i18next'
-import type { DashboardResponse, DashboardTempHumPoint } from '../../../../../utils/types'
+import type { DashboardResponse } from '../../../../../utils/types'
 
 type DashboardCardsProps = {
   cw: DashboardResponse['currentWeather']
-  tempHumData?: DashboardTempHumPoint[]
 }
 
-export function DashboardCards({ cw, tempHumData }: DashboardCardsProps) {
+export function DashboardCards({ cw }: DashboardCardsProps) {
   const { t } = useTranslation()
 
   const displayTemp = cw.temperature

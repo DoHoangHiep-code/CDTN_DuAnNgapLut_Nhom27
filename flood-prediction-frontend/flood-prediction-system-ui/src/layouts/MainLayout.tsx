@@ -95,7 +95,7 @@ export function MainLayout() {
     return `${baseUrl.replace(/\/+$/, '')}${url}`
   }
 
-  const userAvatar = getAvatarUrl(user?.avatar_url)
+  const userAvatar = getAvatarUrl(user?.avatar_url ?? undefined)
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 dark:bg-slate-950">

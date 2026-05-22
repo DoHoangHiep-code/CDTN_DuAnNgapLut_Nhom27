@@ -319,15 +319,26 @@ function ReverseGeocodeLayer({ onOpenReport }: { onOpenReport: () => void }) {
 // Sub-component: Cầu nối để lấy instance Leaflet Map ra ngoài
 // MapContainer (useMap chỉ hoạt động được bên trong MapContainer)
 // ───────────────────────────────────────────────────────────────
-function MapBridge({ onMap, onCenter }: { onMap: (m: L.Map) => void; onCenter: (lat: number, lon: number) => void }) {
+function MapBridge({
+  onMap,
+  onCenter,
+  onMoveEnd,
+}: {
+  onMap: (m: L.Map) => void
+  onCenter: (lat: number, lon: number) => void
+  onMoveEnd: () => void
+}) {
   const m = useMap()
   useEffect(() => { onMap(m) }, [m, onMap])
 
-  // Cập nhật center khi map di chuyển hoặc zoom
   useMapEvents({
     moveend: () => {
       const c = m.getCenter()
       onCenter(c.lat, c.lng)
+      onMoveEnd()           // báo hiệu BBox cần re-fetch
+    },
+    zoomend: () => {
+      onMoveEnd()           // zoom cũng thay đổi bounds
     },
   })
   return null
@@ -373,6 +384,10 @@ function FloodMapContent() {
   const handleMapCenter = useCallback((lat: number, lon: number) => {
     setMapCenter({ lat, lon })
   }, [])
+
+  // Counter tăng mỗi khi map moveend/zoomend → trigger BBox re-fetch mà không tạo object mới
+  const [bboxTick, setBboxTick] = useState(0)
+  const handleMoveEnd = useCallback(() => setBboxTick((n) => n + 1), [])
 
   const [map, setMap] = useState<L.Map | null>(null)
   const [searchParams] = useSearchParams()
@@ -475,7 +490,7 @@ function FloodMapContent() {
         bboxAbortRef.current = null
       }
     }
-  }, [map, mapCenter])  // re-run khi mapCenter thay đổi (MapBridge cập nhật sau moveend)
+  }, [map, bboxTick])  // bboxTick tăng mỗi moveend/zoomend → không tạo object mới, tránh loop
 
   // Xử lý chọn kết quả từ Nominatim geocoding
   const handleGeoResult = useCallback((result: NominatimResult) => {
@@ -595,6 +610,7 @@ function FloodMapContent() {
               <MapBridge
                 onMap={setMap}
                 onCenter={handleMapCenter}
+                onMoveEnd={handleMoveEnd}
               />
 
               {/* Fly đến vị trí đã chọn (cả quận nội bộ lẫn Nominatim) */}

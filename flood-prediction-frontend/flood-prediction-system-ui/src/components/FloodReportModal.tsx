@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, MapPin, Loader2, Navigation, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { cn } from '../utils/cn'
-import { Button } from './Button'
+import { Button } from './common/Button'
 import { Input } from './Input'
 
 // ───────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import {
   TrendingUp, Gauge, Cloud, Zap,
 } from 'lucide-react'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie
 } from 'recharts'
 import type { LatLngExpression } from 'leaflet'
 import { useTranslation } from 'react-i18next'
@@ -321,7 +321,7 @@ function Rain24hChart({ forecast24h }: {
             <RechartsTooltip 
               contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
               itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
-              formatter={(val: number) => [`${val} mm`, 'Lượng mưa']}
+              formatter={(val) => [`${Number(val ?? 0)} mm`, 'Lượng mưa']}
               labelFormatter={(label) => `Thời gian: ${label}`}
             />
             <Bar dataKey="rainfallMm" radius={[4, 4, 0, 0]}>
@@ -420,7 +420,7 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
                 <RechartsTooltip 
                   contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
                   itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
-                  formatter={(val: number) => [`${val} điểm`, 'Số lượng']}
+                  formatter={(val) => [`${Number(val ?? 0)} điểm`, 'Số lượng']}
                 />
               </PieChart>
             </ResponsiveContainer>

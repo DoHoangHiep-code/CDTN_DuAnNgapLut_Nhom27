@@ -44,8 +44,8 @@ export async function getFloodPredictionByLocation(lat: number, lon: number) {
 //   usingLiveWeather: boolean
 //   source: 'database' | 'realtime'
 // }
-export async function getForecastLatest(lat: number, lon: number) {
-  const res = await apiV1.get<any>('/forecasts/latest', { params: { lat, lon } })
+export async function getForecastLatest(lat: number, lon: number, signal?: AbortSignal) {
+  const res = await apiV1.get<any>('/forecasts/latest', { params: { lat, lon }, signal })
   return res.data ?? null
 }
 
