@@ -32,9 +32,9 @@ export function clearToken() {
 
 export const apiV1 = axios.create({
   // Backend baseURL:
-  // - Ưu tiên lấy từ env để bạn dễ đổi port (3000/3001) mà không phải sửa code.
-  // - Fallback về localhost:3001 vì backend hiện tại đang chạy mặc định trên 3001.
-  baseURL: (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3001/api/v1',
+  // - Ưu tiên lấy từ env để bản dev có thể đổi port mà không phải sửa code.
+  // - Fallback về localhost:3002 vì backend hiện tại đang chạy mặc định trên 3002.
+  baseURL: (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3002/api/v1',
   // Nới lỏng timeout: BBox query sau tối ưu index vẫn cần đủ thời gian đáp ứng
   // trên mạng yếu. 30s đủ an toàn mà không ảnh hưởng UX (sẽ giảm lại sau khi
   // xác nhận query < 1s).
