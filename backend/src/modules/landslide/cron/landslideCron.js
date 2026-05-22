@@ -343,7 +343,7 @@ async function runLandslideJob() {
 
         // Throttle nhẹ giữa các nodes để không spam Open-Meteo
         // Cache 13h đảm bảo hầu hết calls đã hit cache, sleep này chủ yếu cho cache miss đầu tiên
-        if (i < nodes.length - 1) {
+        if (i < nodes.length - 1 && (!weather || !weather._cached)) {
           await sleep(SLEEP_BETWEEN_NODES)
         }
       }
@@ -504,7 +504,9 @@ async function runFirstBatchTest() {
       errorCount++
     }
 
-    await sleep(SLEEP_BETWEEN_NODES)
+    if (!weather || !weather._cached) {
+      await sleep(SLEEP_BETWEEN_NODES)
+    }
   }
 
   console.log(`\n[LandslideCron TEST] Sample kết quả: ${successCount} thành công / ${errorCount} lỗi`)

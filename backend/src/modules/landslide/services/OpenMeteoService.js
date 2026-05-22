@@ -144,11 +144,14 @@ function calcAPI(dailyRain, nDays, k = 0.9) {
 async function fetchWeatherForNode(lat, lon) {
   // ── Cache check ──────────────────────────────────────────────────────────
   const today = dateStr(0)
-  const cacheKey = `${lat.toFixed(3)}_${lon.toFixed(3)}_${today}`
+  // Nhóm tọa độ theo lưới 0.1 độ (~11km) để tối ưu số lần gọi API (ERA5 độ phân giải gốc cũng chỉ ~30km)
+  const gridLat = Math.round(lat * 10) / 10
+  const gridLon = Math.round(lon * 10) / 10
+  const cacheKey = `${gridLat.toFixed(1)}_${gridLon.toFixed(1)}_${today}`
 
   const cached = _cache.get(cacheKey)
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-    return cached.data
+    return { ...cached.data, _cached: true }
   }
 
   // ── Build Archive API URL (30 ngày lịch sử) ──────────────────────────────
@@ -158,7 +161,7 @@ async function fetchWeatherForNode(lat, lon) {
 
   const archiveUrl = [
     `${OPEN_METEO_ARCHIVE_BASE}?`,
-    `latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}`,
+    `latitude=${gridLat.toFixed(1)}&longitude=${gridLon.toFixed(1)}`,
     `&start_date=${startDate}&end_date=${endDate}`,
     `&daily=precipitation_sum,soil_moisture_0_to_7cm_mean`,
     `&timezone=Asia/Ho_Chi_Minh`,
@@ -221,6 +224,7 @@ async function fetchWeatherForNode(lat, lon) {
     api_14d:         Math.round(api_14d         * 100) / 100,
     soil_moisture_1d: Math.round(soil_moisture_1d * 10000) / 10000,
     soil_moisture_7d: Math.round(soil_moisture_7d * 10000) / 10000,
+    _cached: false
   }
 
   // ── Lưu cache ────────────────────────────────────────────────────────────
