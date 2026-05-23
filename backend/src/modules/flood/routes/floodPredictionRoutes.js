@@ -7,6 +7,7 @@ const { PredictionService } = require('../services/PredictionService')
 const { FloodPredictionController } = require('../controllers/FloodPredictionController')
 const { getWeatherByCoords } = require('../../../common/services/OpenWeatherService')
 const { depthCmToWarning } = require('../../../utils/labelMapping')
+const { cacheResponse } = require('../../../middlewares/apiCache')
 
 const router = express.Router()
 
@@ -16,7 +17,7 @@ const predictionService = new PredictionService({ weatherRepository, sequelize }
 const controller = new FloodPredictionController({ predictionService, sequelize })
 
 // Route hiện có: batch prediction toàn bộ nodes
-router.get('/flood-prediction', controller.getFloodPrediction)
+router.get('/flood-prediction', cacheResponse(30 * 60, 'flood_api'), controller.getFloodPrediction)
 router.post('/flood-prediction/run', controller.triggerBatch)
 
 // Route mới: Chi tiết 1 Node (Gộp ngập + thời tiết thực)
@@ -237,7 +238,7 @@ router.get('/flood-prediction/by-location', async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const { inferWeatherForNode } = require('../services/idwInferenceService')
 
-router.get('/forecasts/latest', async (req, res, next) => {
+router.get('/forecasts/latest', cacheResponse(30 * 60, 'flood_api'), async (req, res, next) => {
   try {
     const lat = Number(req.query.lat)
     const lon = Number(req.query.lon)

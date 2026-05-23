@@ -85,22 +85,20 @@ export function FloatingChatBotIcon() {
   return (
     <>
       {/* Floating button */}
-      <button
-        ref={buttonRef}
-        type="button"
-        aria-label={isOpen ? 'Đóng chatbot' : 'Mở chatbot hỗ trợ'}
-        style={{ left: pos.x, top: pos.y, touchAction: 'none' }}
-        className="fixed z-[9999] flex h-16 w-16 items-center justify-center rounded-full bg-sky-600 shadow-xl ring-2 ring-white transition-transform hover:scale-105 active:scale-95 dark:ring-slate-800 select-none overflow-hidden p-0"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-      >
-        {isOpen ? (
-          <X className="h-6 w-6 text-white" />
-        ) : (
+      {!isOpen && (
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-label="Mở chatbot hỗ trợ"
+          style={{ left: pos.x, top: pos.y, touchAction: 'none' }}
+          className="fixed z-[9999] flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 shadow-xl shadow-cyan-500/30 ring-2 ring-white/50 transition-transform hover:scale-105 active:scale-95 dark:ring-slate-800 select-none overflow-hidden p-0 animate-bounce hover:animate-none"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+        >
           <img src="/okicon.png" alt="Chatbot" className="h-full w-full object-cover" draggable={false} />
-        )}
-      </button>
+        </button>
+      )}
 
       {/* Chat window */}
       {isOpen && (

@@ -23,13 +23,7 @@ export function HazardSwitcher() {
 
   return (
     <div
-      className="relative flex items-center gap-1 rounded-2xl p-1"
-      style={{
-        background: 'rgba(15, 23, 42, 0.6)',
-        backdropFilter: 'blur(12px)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
-      }}
+      className="relative flex items-center gap-1 rounded-2xl p-1 bg-slate-100/80 dark:bg-slate-900/60 backdrop-blur-md border border-slate-200/80 dark:border-white/10 shadow-inner dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)]"
       role="tablist"
       aria-label="Chọn chế độ thiên tai"
     >
@@ -49,34 +43,22 @@ export function HazardSwitcher() {
             }}
             className={cn(
               'relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all duration-300',
-              isActive ? 'text-white' : 'text-slate-400 hover:text-slate-200',
-            )}
-            style={
               isActive
-                ? {
-                    background: isFlood
-                      ? 'linear-gradient(135deg, rgba(14,165,233,0.25) 0%, rgba(99,102,241,0.25) 100%)'
-                      : 'linear-gradient(135deg, rgba(234,88,12,0.25) 0%, rgba(180,83,9,0.25) 100%)',
-                    boxShadow: isFlood
-                      ? '0 0 20px rgba(14,165,233,0.3), inset 0 0 10px rgba(14,165,233,0.1)'
-                      : '0 0 20px rgba(234,88,12,0.3), inset 0 0 10px rgba(234,88,12,0.1)',
-                    border: isFlood
-                      ? '1px solid rgba(14,165,233,0.5)'
-                      : '1px solid rgba(234,88,12,0.5)',
-                  }
-                : {}
-            }
+                ? isFlood
+                  ? 'bg-white text-sky-700 shadow-[0_4px_12px_rgba(14,165,233,0.15)] border border-sky-200 dark:bg-sky-500/10 dark:text-sky-300 dark:border-sky-500/30 dark:shadow-[0_0_20px_rgba(14,165,233,0.2)]'
+                  : 'bg-white text-amber-700 shadow-[0_4px_12px_rgba(245,158,11,0.15)] border border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30 dark:shadow-[0_0_20px_rgba(245,158,11,0.2)]'
+                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 border border-transparent',
+            )}
           >
             {/* Glowing dot indicator */}
             {isActive && (
               <span
-                className="absolute -top-1 -right-1 h-2 w-2 rounded-full animate-pulse"
-                style={{
-                  background: isFlood ? '#0ea5e9' : '#ea580c',
-                  boxShadow: isFlood
-                    ? '0 0 6px #0ea5e9'
-                    : '0 0 6px #ea580c',
-                }}
+                className={cn(
+                  'absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full animate-pulse border-2 border-white dark:border-slate-800',
+                  isFlood
+                    ? 'bg-sky-500 shadow-[0_0_6px_rgba(14,165,233,0.8)]'
+                    : 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.8)]'
+                )}
               />
             )}
 
@@ -85,14 +67,14 @@ export function HazardSwitcher() {
             <span className="flex flex-col items-start leading-tight">
               <span className="text-xs font-extrabold tracking-wide">{tab.label}</span>
               <span
-                className="text-[10px] font-medium"
-                style={{
-                  color: isActive
+                className={cn(
+                  'text-[10px] font-medium',
+                  isActive
                     ? isFlood
-                      ? '#7dd3fc'
-                      : '#fdba74'
-                    : 'rgba(148,163,184,0.7)',
-                }}
+                      ? 'text-sky-500/80 dark:text-sky-400/80'
+                      : 'text-amber-500/80 dark:text-amber-400/80'
+                    : 'text-slate-400 dark:text-slate-500',
+                )}
               >
                 {tab.region}
               </span>

@@ -42,6 +42,7 @@ axiosRetry(axios, {
 const { getWeatherByCoords, getOWMForecast5d, getOWMHourlyForecast4d } = require('../../../common/services/OpenWeatherService')
 const { GridNode, FloodPrediction, WeatherMeasurement, SystemLog } = require('../../../models')
 const { sequelize } = require('../../../db/sequelize')
+const { invalidateCacheNamespace } = require('../../../middlewares/apiCache')
 
 // ─── Cấu hình ────────────────────────────────────────────────────────────────
 
@@ -789,6 +790,9 @@ async function runWeatherCron() {
     } catch (logErr) {
       console.warn('[WeatherCron] Không ghi được SystemLog:', logErr.message)
     }
+
+    // Xóa cache HTTP API cho hệ thống Ngập lụt để lấy số liệu mới
+    invalidateCacheNamespace('flood_api')
 
   } catch (err) {
     console.error('[WeatherCron] ❌ Lỗi nghiêm trọng:', err)

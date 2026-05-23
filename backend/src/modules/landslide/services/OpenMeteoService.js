@@ -253,8 +253,135 @@ function getCacheStats() {
   return { size: _cache.size, ttlHours: CACHE_TTL_MS / 3_600_000 }
 }
 
+/**
+ * Fetch toàn bộ dữ liệu thời tiết cho một mảng các trạm (tối đa 50 trạm).
+ * @param {Array<{id: string, lat: number, lon: number}>} stations
+ * @returns {Promise<Map<string, object|null>>}
+ */
+async function fetchWeatherForMultipleNodes(stations) {
+  const resultDictionary = new Map()
+  if (!stations || stations.length === 0) return resultDictionary
+
+  const CHUNK_SIZE = 50;
+  for (let c = 0; c < stations.length; c += CHUNK_SIZE) {
+    const chunk = stations.slice(c, c + CHUNK_SIZE)
+    
+    // Open-Meteo Archive API yêu cầu mảng lats, lons cách nhau bằng dấu phẩy
+    const lats = chunk.map(s => s.lat.toFixed(1)).join(',')
+    const lons = chunk.map(s => s.lon.toFixed(1)).join(',')
+    
+    const endDate   = dateStr(1)    // hôm qua
+    const startDate = dateStr(31)   // 31 ngày trước
+
+    const archiveUrl = [
+      `${OPEN_METEO_ARCHIVE_BASE}?`,
+      `latitude=${lats}&longitude=${lons}`,
+      `&start_date=${startDate}&end_date=${endDate}`,
+      `&daily=precipitation_sum,soil_moisture_0_to_7cm_mean`,
+      `&timezone=Asia/Ho_Chi_Minh`,
+    ].join('')
+
+    let archiveData
+    try {
+      archiveData = await fetchWithRetry(archiveUrl)
+    } catch (err) {
+      console.warn(`[OpenMeteo] Batch fetch failed for chunk of ${chunk.length} locations: ${err.message}`)
+      // Gán null cho tất cả để chạy Imputer
+      for (const st of chunk) {
+        resultDictionary.set(st.id, null)
+      }
+      continue // Move to next chunk
+    }
+
+    // OpenMeteo trả về Array khi request nhiều tọa độ, Object nếu chỉ 1
+    const resultsArr = Array.isArray(archiveData) ? archiveData : [archiveData]
+
+    for (let i = 0; i < chunk.length; i++) {
+      const station = chunk[i]
+      const data = resultsArr[i]
+
+      if (!data || data.error) {
+        resultDictionary.set(station.id, null)
+        continue
+      }
+
+      const dailyRain     = data.daily?.precipitation_sum ?? []
+      const dailySoilMois = data.daily?.soil_moisture_0_to_7cm_mean ?? []
+
+      if (dailyRain.length === 0) {
+        resultDictionary.set(station.id, null)
+        continue
+      }
+
+      const rainDesc = [...dailyRain].reverse().map(v => v ?? 0)
+      const soilDesc = [...dailySoilMois].reverse().map(v => v ?? 0)
+
+      const sumN = (arr, n) => arr.slice(0, n).reduce((a, b) => a + b, 0)
+      const maxN = (arr, n) => Math.max(...arr.slice(0, n), 0)
+
+      const rain_1d_accum   = sumN(rainDesc,  1)
+      const rain_3d_accum   = sumN(rainDesc,  3)
+      const rain_7d_accum   = sumN(rainDesc,  7)
+      const rain_14d_accum  = sumN(rainDesc, 14)
+      const rain_30d_accum  = sumN(rainDesc, 30)
+
+      const max_rain_1d_in_7d = maxN(rainDesc, 7)
+      const max_rain_1d_in_3d = maxN(rainDesc, 3)
+
+      const api_7d  = calcAPI(rainDesc,  7)
+      const api_14d = calcAPI(rainDesc, 14)
+
+      const soil_moisture_1d = soilDesc[0] ?? 0
+      const soil_moisture_7d = soilDesc.slice(0, 7).reduce((a, b) => a + b, 0) / Math.max(soilDesc.slice(0, 7).filter(v => v > 0).length, 1)
+
+      const parsedResult = {
+        rain_1d_accum:   Math.round(rain_1d_accum  * 100) / 100,
+        rain_3d_accum:   Math.round(rain_3d_accum  * 100) / 100,
+        rain_7d_accum:   Math.round(rain_7d_accum  * 100) / 100,
+        rain_14d_accum:  Math.round(rain_14d_accum * 100) / 100,
+        rain_30d_accum:  Math.round(rain_30d_accum * 100) / 100,
+        max_rain_1d_in_7d: Math.round(max_rain_1d_in_7d * 100) / 100,
+        max_rain_1d_in_3d: Math.round(max_rain_1d_in_3d * 100) / 100,
+        api_7d:          Math.round(api_7d          * 100) / 100,
+        api_14d:         Math.round(api_14d         * 100) / 100,
+        soil_moisture_1d: Math.round(soil_moisture_1d * 10000) / 10000,
+        soil_moisture_7d: Math.round(soil_moisture_7d * 10000) / 10000,
+        _cached: false
+      }
+
+      resultDictionary.set(station.id, parsedResult)
+    }
+
+    // Update Cache luôn cho các trạm này để API lẻ tẻ cũng tận dụng được
+    const today = dateStr(0)
+    for (let i = 0; i < chunk.length; i++) {
+      const station = chunk[i]
+      const parsedResult = resultDictionary.get(station.id)
+      if (parsedResult) {
+        const cacheKey = `${station.lat.toFixed(1)}_${station.lon.toFixed(1)}_${today}`
+        _cache.set(cacheKey, { data: parsedResult, fetchedAt: Date.now() })
+      }
+    }
+
+    // Nghỉ 6 giây giữa các lô để không vượt quá rate limit của Open-Meteo (nhưng vẫn đủ nhanh)
+    if (c + CHUNK_SIZE < stations.length) {
+      console.log(`[OpenMeteo] Đã xử lý ${Math.min(c + CHUNK_SIZE, stations.length)}/${stations.length} trạm. Đang đợi 6s...`)
+      await sleep(6000)
+    }
+  }
+
+  // Dọn cache cũ nếu quá lớn
+  while (_cache.size > 5000) {
+    const firstKey = _cache.keys().next().value
+    _cache.delete(firstKey)
+  }
+
+  return resultDictionary
+}
+
 module.exports = {
   fetchWeatherForNode,
+  fetchWeatherForMultipleNodes,
   clearCache,
   getCacheStats,
   sleep,    // re-export để cronjob dùng throttle

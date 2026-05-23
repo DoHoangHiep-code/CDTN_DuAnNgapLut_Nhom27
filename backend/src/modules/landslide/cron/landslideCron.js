@@ -32,6 +32,7 @@ const { Pool } = require('pg')
 const { predictLandslide, getModelStatus } = require('../services/landslideInference')
 const { fetchWeatherForNode, clearCache, sleep } = require('../services/OpenMeteoService')
 const landslideCache = require('../../../utils/landslideCache')
+const { invalidateCacheNamespace } = require('../../../middlewares/apiCache')
 
 // ── Pool riêng cho cron (tách biệt với pool của server để không tranh connection) ──
 const pool = new Pool({
@@ -164,78 +165,88 @@ function buildRawFeatures(node, weather) {
 async function bulkUpsertPredictions(batchResults, predictionTime) {
   if (!batchResults.length) return 0
 
-  const valueClauses = []
-  const params = []
-  let idx = 1
-
-  for (const item of batchResults) {
-    const { node_id, rawFeatures, prediction } = item
-
-    valueClauses.push(
-      `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, ` +
-      `$${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, ` +
-      `$${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, ` +
-      `$${idx++}, $${idx++}, $${idx++})`
-    )
-
-    params.push(
-      node_id,
-      predictionTime,
-      rawFeatures.rain_1d_accum    ?? null,
-      rawFeatures.rain_3d_accum    ?? null,
-      rawFeatures.rain_7d_accum    ?? null,
-      rawFeatures.rain_14d_accum   ?? null,
-      rawFeatures.rain_30d_accum   ?? null,
-      rawFeatures.max_rain_1d_in_7d ?? null,
-      rawFeatures.max_rain_1d_in_3d ?? null,
-      rawFeatures.api_7d           ?? null,
-      rawFeatures.api_14d          ?? null,
-      rawFeatures.soil_moisture_1d ?? null,
-      rawFeatures.soil_moisture_7d ?? null,
-      rawFeatures.slope_x_deforestation ?? null,
-      rawFeatures.twi_x_rain7d    ?? null,
-      rawFeatures.rain_intensity_ratio ?? null,
-      prediction.probability,                  // → prob_landslide
-      prediction.risk_level                    // → risk_level
-    )
-  }
-
-  const sql = `
-    INSERT INTO landslide_predictions (
-      node_id, prediction_time,
-      rain_1d_accum, rain_3d_accum, rain_7d_accum, rain_14d_accum, rain_30d_accum,
-      max_rain_1d_in_7d, max_rain_1d_in_3d,
-      api_7d, api_14d,
-      soil_moisture_1d, soil_moisture_7d,
-      slope_x_deforestation, twi_x_rain7d, rain_intensity_ratio,
-      prob_landslide, risk_level
-    )
-    VALUES ${valueClauses.join(', ')}
-    ON CONFLICT (node_id, prediction_time) DO UPDATE SET
-      rain_1d_accum         = EXCLUDED.rain_1d_accum,
-      rain_3d_accum         = EXCLUDED.rain_3d_accum,
-      rain_7d_accum         = EXCLUDED.rain_7d_accum,
-      rain_14d_accum        = EXCLUDED.rain_14d_accum,
-      rain_30d_accum        = EXCLUDED.rain_30d_accum,
-      max_rain_1d_in_7d     = EXCLUDED.max_rain_1d_in_7d,
-      max_rain_1d_in_3d     = EXCLUDED.max_rain_1d_in_3d,
-      api_7d                = EXCLUDED.api_7d,
-      api_14d               = EXCLUDED.api_14d,
-      soil_moisture_1d      = EXCLUDED.soil_moisture_1d,
-      soil_moisture_7d      = EXCLUDED.soil_moisture_7d,
-      slope_x_deforestation = EXCLUDED.slope_x_deforestation,
-      twi_x_rain7d          = EXCLUDED.twi_x_rain7d,
-      rain_intensity_ratio  = EXCLUDED.rain_intensity_ratio,
-      prob_landslide        = EXCLUDED.prob_landslide,
-      risk_level            = EXCLUDED.risk_level
-  `
+  const CHUNK_SIZE = 3000
+  let totalUpserted = 0
 
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-    await client.query(sql, params)
+
+    for (let c = 0; c < batchResults.length; c += CHUNK_SIZE) {
+      const chunk = batchResults.slice(c, c + CHUNK_SIZE)
+
+      const valueClauses = []
+      const params = []
+      let idx = 1
+
+      for (const item of chunk) {
+        const { node_id, rawFeatures, prediction } = item
+
+        valueClauses.push(
+          `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, ` +
+          `$${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, ` +
+          `$${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, ` +
+          `$${idx++}, $${idx++}, $${idx++})`
+        )
+
+        params.push(
+          node_id,
+          predictionTime,
+          rawFeatures.rain_1d_accum    ?? null,
+          rawFeatures.rain_3d_accum    ?? null,
+          rawFeatures.rain_7d_accum    ?? null,
+          rawFeatures.rain_14d_accum   ?? null,
+          rawFeatures.rain_30d_accum   ?? null,
+          rawFeatures.max_rain_1d_in_7d ?? null,
+          rawFeatures.max_rain_1d_in_3d ?? null,
+          rawFeatures.api_7d           ?? null,
+          rawFeatures.api_14d          ?? null,
+          rawFeatures.soil_moisture_1d ?? null,
+          rawFeatures.soil_moisture_7d ?? null,
+          rawFeatures.slope_x_deforestation ?? null,
+          rawFeatures.twi_x_rain7d    ?? null,
+          rawFeatures.rain_intensity_ratio ?? null,
+          prediction.probability,                  // → prob_landslide
+          prediction.risk_level                    // → risk_level
+        )
+      }
+
+      const sql = `
+        INSERT INTO landslide_predictions (
+          node_id, prediction_time,
+          rain_1d_accum, rain_3d_accum, rain_7d_accum, rain_14d_accum, rain_30d_accum,
+          max_rain_1d_in_7d, max_rain_1d_in_3d,
+          api_7d, api_14d,
+          soil_moisture_1d, soil_moisture_7d,
+          slope_x_deforestation, twi_x_rain7d, rain_intensity_ratio,
+          prob_landslide, risk_level
+        )
+        VALUES ${valueClauses.join(', ')}
+        ON CONFLICT (node_id, prediction_time) DO UPDATE SET
+          rain_1d_accum         = EXCLUDED.rain_1d_accum,
+          rain_3d_accum         = EXCLUDED.rain_3d_accum,
+          rain_7d_accum         = EXCLUDED.rain_7d_accum,
+          rain_14d_accum        = EXCLUDED.rain_14d_accum,
+          rain_30d_accum        = EXCLUDED.rain_30d_accum,
+          max_rain_1d_in_7d     = EXCLUDED.max_rain_1d_in_7d,
+          max_rain_1d_in_3d     = EXCLUDED.max_rain_1d_in_3d,
+          api_7d                = EXCLUDED.api_7d,
+          api_14d               = EXCLUDED.api_14d,
+          soil_moisture_1d      = EXCLUDED.soil_moisture_1d,
+          soil_moisture_7d      = EXCLUDED.soil_moisture_7d,
+          slope_x_deforestation = EXCLUDED.slope_x_deforestation,
+          twi_x_rain7d          = EXCLUDED.twi_x_rain7d,
+          rain_intensity_ratio  = EXCLUDED.rain_intensity_ratio,
+          prob_landslide        = EXCLUDED.prob_landslide,
+          risk_level            = EXCLUDED.risk_level
+      `
+
+      await client.query(sql, params)
+      totalUpserted += chunk.length
+    }
+
     await client.query('COMMIT')
-    return batchResults.length
+    return totalUpserted
   } catch (err) {
     await client.query('ROLLBACK')
     throw err
@@ -256,10 +267,16 @@ async function runLandslideJob() {
   }
 
   // ── Kiểm tra model đã sẵn sàng ───────────────────────────────────────────
+  const { initLandslideModel } = require('../services/landslideInference')
   const modelStatus = getModelStatus()
   if (!modelStatus.loaded) {
-    console.warn('[LandslideCron] ⚠️  ONNX Model chưa load. Bỏ qua job cho đến khi model sẵn sàng.')
-    return
+    try {
+      console.log('[LandslideCron] 🔄 Đang load ONNX Model (Standalone Mode)...')
+      await initLandslideModel()
+    } catch (err) {
+      console.error('[LandslideCron] ❌ Không thể load ONNX Model:', err.message)
+      return
+    }
   }
 
   _isRunning = true
@@ -274,124 +291,117 @@ async function runLandslideJob() {
   let totalNodes = 0
   let totalSuccess = 0
   let totalError = 0
-  let weatherErrorCount = 0
   const predictionTime = new Date()
 
   try {
     // Bước 0: Đếm tổng
     totalNodes = await countTotalNodes()
-    const totalBatches = Math.ceil(totalNodes / BATCH_SIZE)
-    console.log(`[LandslideCron] Tổng: ${totalNodes.toLocaleString('vi-VN')} nodes | ${totalBatches} lô × ${BATCH_SIZE}`)
+    // Tăng BATCH_SIZE lên 50k cho Phase 1 và 3 vì không gọi HTTP
+    const READ_BATCH_SIZE = 50000 
+    const totalBatches = Math.ceil(totalNodes / READ_BATCH_SIZE)
+    console.log(`[LandslideCron] Tổng: ${totalNodes.toLocaleString('vi-VN')} nodes | ${totalBatches} lô đọc × ${READ_BATCH_SIZE}`)
 
-    // ── Vòng lặp Batch ────────────────────────────────────────────────────
+    // =========================================================================
+    // PHASE 1: Đọc dữ liệu tĩnh & Grid Snapping (RAM-based)
+    // =========================================================================
+    console.log(`[LandslideCron] 🔄 Phase 1: Grid Snapping & Lọc Trạm Ảo...`)
+    const virtualStationsMap = new Map() // Key: "lat_lon", Value: { id, lat, lon }
+    
+    // Đọc lô 50k một lần để không quá tải RAM
     for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
-      const offset = batchIdx * BATCH_SIZE
-      const batchStart = Date.now()
-
-      // Bước 1: Query lô nodes từ DB
-      let nodes
-      try {
-        nodes = await fetchNodeBatch(offset, BATCH_SIZE)
-      } catch (dbErr) {
-        console.error(`[LandslideCron] ❌ Batch ${batchIdx + 1}: DB query lỗi:`, dbErr.message)
-        totalError += BATCH_SIZE
-        continue
+      const offset = batchIdx * READ_BATCH_SIZE
+      const nodes = await fetchNodeBatch(offset, READ_BATCH_SIZE)
+      
+      for (const node of nodes) {
+        // Thuật toán Snapping: Làm tròn 1 chữ số thập phân (~11km)
+        const rLat = Math.round(parseFloat(node.lat) * 10) / 10
+        const rLon = Math.round(parseFloat(node.lon) * 10) / 10
+        const vsId = `${rLat.toFixed(1)}_${rLon.toFixed(1)}`
+        
+        if (!virtualStationsMap.has(vsId)) {
+          virtualStationsMap.set(vsId, { id: vsId, lat: rLat, lon: rLon })
+        }
       }
+    }
+    
+    const virtualStations = Array.from(virtualStationsMap.values())
+    console.log(`[LandslideCron] ✅ Phase 1 OK: Nén ${totalNodes.toLocaleString('vi-VN')} điểm thành ${virtualStations.length.toLocaleString('vi-VN')} Trạm Ảo.`)
 
-      if (!nodes.length) break
+    // =========================================================================
+    // PHASE 2: Fetch Weather (Multi-Location Batching)
+    // =========================================================================
+    console.log(`[LandslideCron] ☁️  Phase 2: Fetching Open-Meteo cho ${virtualStations.length} trạm...`)
+    const { fetchWeatherForMultipleNodes } = require('../services/OpenMeteoService')
+    const weatherDictionary = await fetchWeatherForMultipleNodes(virtualStations)
+    console.log(`[LandslideCron] ✅ Phase 2 OK: Cache Dictionary đã nạp xong (Size: ${weatherDictionary.size})`)
 
-      // Bước 2: Nhóm nodes theo tỉnh để tối ưu số lần gọi Open-Meteo
-      // Mỗi tỉnh chỉ gọi 1 lần → cache giúp tất cả nodes cùng tỉnh dùng chung
-      // Fetch weather 1 lần cho mỗi node (vì tọa độ khác nhau, nhưng cache theo rounded lat/lon)
+    // =========================================================================
+    // PHASE 3: Lấy lại DB & Ánh xạ & Dự báo & UPSERT
+    // =========================================================================
+    console.log(`[LandslideCron] ⚙️  Phase 3: Ánh xạ, Dự báo & Cập nhật DB...`)
+    const allPredictions = [] // Lưu vào RAM để cập nhật in-memory cache cuối cùng
+    
+    for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+      const offset = batchIdx * READ_BATCH_SIZE
+      const nodes = await fetchNodeBatch(offset, READ_BATCH_SIZE)
       const batchResults = []
 
-      for (let i = 0; i < nodes.length; i++) {
-        const node = nodes[i]
+      for (const node of nodes) {
+        // Ánh xạ lại Virtual Station ID
+        const rLat = Math.round(parseFloat(node.lat) * 10) / 10
+        const rLon = Math.round(parseFloat(node.lon) * 10) / 10
+        const vsId = `${rLat.toFixed(1)}_${rLon.toFixed(1)}`
+        
+        // Lookup weather dictionary O(1)
+        const weather = weatherDictionary.get(vsId) || null
 
-        // Dừng nếu quá nhiều lỗi weather liên tiếp
-        if (weatherErrorCount >= MAX_WEATHER_ERRORS) {
-          console.error(`[LandslideCron] ❌ Dừng: ${MAX_WEATHER_ERRORS} lỗi weather liên tiếp. Open-Meteo có thể bị down.`)
-          break
-        }
-
-        // Fetch weather (có cache 13h, nên node cùng tỉnh hầu như không gọi thêm)
-        let weather = null
-        try {
-          weather = await fetchWeatherForNode(
-            parseFloat(node.lat),
-            parseFloat(node.lon)
-          )
-          weatherErrorCount = 0  // Reset counter nếu fetch thành công
-        } catch (wErr) {
-          weatherErrorCount++
-          // Không log từng lỗi để tránh spam log (đã log trong service)
-        }
-
-        // Bước 3: Build rawFeatures
+        // Build rawFeatures (Imputer trong model sẽ tự xử lý weather=null)
         const rawFeatures = buildRawFeatures(node, weather)
 
-        // Bước 4: Gọi ONNX model trực tiếp (in-process, không HTTP)
+        // Gọi model dự báo
         let prediction
         try {
           prediction = await predictLandslide(rawFeatures)
+          batchResults.push({ node_id: node.node_id, province: node.province, rawFeatures, prediction })
         } catch (modelErr) {
           totalError++
           continue
         }
-
-        batchResults.push({ node_id: node.node_id, rawFeatures, prediction })
-
-        // Throttle nhẹ giữa các nodes để không spam Open-Meteo
-        // Cache 13h đảm bảo hầu hết calls đã hit cache, sleep này chủ yếu cho cache miss đầu tiên
-        if (i < nodes.length - 1 && (!weather || !weather._cached)) {
-          await sleep(SLEEP_BETWEEN_NODES)
-        }
       }
 
-      // Bước 5: Bulk UPSERT lô kết quả
+      // UPSERT cho từng lô 50k
       if (batchResults.length > 0) {
         try {
           await bulkUpsertPredictions(batchResults, predictionTime)
           totalSuccess += batchResults.length
-          
-          // Cập nhật cache in-memory để API phục vụ siêu tốc
-          landslideCache.updateCache(batchResults.map(r => ({
-            node_id: r.node_id,
-            prob_landslide: r.prediction.probability,
-            risk_level: r.prediction.risk_level,
-            rain_7d_accum: r.rawFeatures.rain_7d_accum,
-            api_7d: r.rawFeatures.api_7d,
-            soil_moisture_1d: r.rawFeatures.soil_moisture_1d,
-            prediction_time: predictionTime
-          })))
+          allPredictions.push(...batchResults)
         } catch (upsertErr) {
-          console.error(`[LandslideCron] ❌ Batch ${batchIdx + 1}: UPSERT lỗi:`, upsertErr.message)
+          console.error(`[LandslideCron] ❌ Lỗi UPSERT Phase 3 (lô ${batchIdx + 1}):`, upsertErr.message)
           totalError += batchResults.length
         }
       }
 
-      // Bước 6: Giải phóng RAM (GC sẽ thu hồi nodes và batchResults)
-      nodes.length = 0
-      batchResults.length = 0
-
-      // Log tiến độ mỗi lô
-      const processed = Math.min(offset + BATCH_SIZE, totalNodes)
-      const batchMs = Date.now() - batchStart
-      const pct = ((processed / totalNodes) * 100).toFixed(1)
-      console.log(
-        `[LandslideCron] Lô ${batchIdx + 1}/${totalBatches} | ` +
-        `${processed.toLocaleString('vi-VN')}/${totalNodes.toLocaleString('vi-VN')} nodes (${pct}%) | ` +
-        `${batchMs}ms`
-      )
-
-      // Dừng nếu weather errors vượt ngưỡng
-      if (weatherErrorCount >= MAX_WEATHER_ERRORS) break
-
-      // Nghỉ ngắn giữa các lô để tránh quá tải DB
-      if (batchIdx < totalBatches - 1) {
-        await sleep(SLEEP_BETWEEN_BATCH)
-      }
+      console.log(`[LandslideCron]   └ Phase 3: Lô ${batchIdx + 1}/${totalBatches} hoàn tất (${batchResults.length} điểm).`)
     }
+
+    // Gọi updateCache (in-memory) cho các nodes mới nhất (Phase 3)
+    const landslideCache = require('../../../utils/landslideCache')
+    landslideCache.updateCache(allPredictions.map(r => ({
+      node_id: r.node_id,
+      province: r.province,
+      prob_landslide: r.prediction.probability,
+      risk_level: r.prediction.risk_level,
+      rain_7d_accum: r.rawFeatures.rain_7d_accum,
+      api_7d: r.rawFeatures.api_7d,
+      soil_moisture_1d: r.rawFeatures.soil_moisture_1d,
+      prediction_time: predictionTime
+    })))
+
+    // Xóa cache API HTTP (node-cache) để bắt buộc tạo lại
+    invalidateCacheNamespace('landslide_api')
+
+    console.log(`\n[LandslideCron] 🎉 HOÀN TẤT DỰ BÁO LÚC ${new Date().toLocaleTimeString('vi-VN')}`)
+
   } catch (unexpectedErr) {
     console.error('[LandslideCron] ❌ Lỗi không xử lý được:', unexpectedErr.message)
   } finally {

@@ -258,6 +258,14 @@ def _run_pipeline(ordered_features_2d: list[list[float]]) -> list[dict]:
     raw1 = _stage1.predict(ordered_features_2d)  # type: ignore[union-attr]
     depths_s1 = [max(0.0, float(v)) for v in raw1]
 
+    # --- Physics-based Hard Rule: No rain = No flood ---
+    # Ép độ ngập về 0 nếu hoàn toàn không có mưa trong 24h (chống false positive của AI)
+    for i, row in enumerate(ordered_features_2d):
+        prcp = row[0]       # prcp
+        prcp_24h = row[4]   # prcp_24h
+        if prcp_24h <= 0.1 and prcp <= 0.1:
+            depths_s1[i] = 0.0
+
     # Tách index: ngập và không ngập
     flood_indices = [i for i, d in enumerate(depths_s1) if d >= FLOOD_THRESHOLD_CM]
     no_flood_indices = [i for i, d in enumerate(depths_s1) if d < FLOOD_THRESHOLD_CM]
