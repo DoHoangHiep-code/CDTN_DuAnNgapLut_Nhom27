@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RefreshCcw, CloudRain, Droplets, AlertTriangle, AlertCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardMeta } from '../components/common/Card';
 import { Button } from '../components/common/Button';
@@ -6,57 +6,64 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
-
-// --- Mock Data ---
-const mockRiskLocation = [
-  { name: 'Mường La', danger: 120, warning: 45 },
-  { name: 'Bát Xát', danger: 98, warning: 60 },
-  { name: 'Mù Cang Chải', danger: 86, warning: 50 },
-  { name: 'Hoàng Su Phì', danger: 75, warning: 30 },
-  { name: 'Mường Nhé', danger: 60, warning: 80 },
-];
-
-const mockRainTrend = [
-  { day: 'T2', mm: 120 },
-  { day: 'T3', mm: 150 },
-  { day: 'T4', mm: 200 },
-  { day: 'T5', mm: 180 },
-  { day: 'T6', mm: 90 },
-  { day: 'T7', mm: 220 },
-  { day: 'CN', mm: 250 },
-];
-
-const mockRiskRatio = [
-  { name: 'An toàn', value: 400000, color: '#10b981' }, // green-500
-  { name: 'Cảnh báo', value: 20000, color: '#f59e0b' }, // amber-500
-  { name: 'Nguy hiểm', value: 5676, color: '#e11d48' }, // rose-600
-];
+import { getLandslideDashboardStats } from '../services/api';
 
 export function LandslideDashboardPage() {
   const [loading, setLoading] = useState(false);
+  const [stats, setStats] = useState<any>(null);
+
+  const fetchStats = async () => {
+    setLoading(true);
+    try {
+      const data = await getLandslideDashboardStats();
+      setStats(data);
+    } catch (e) {
+      console.error('Failed to fetch landslide stats:', e);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchStats();
+  }, []);
 
   const handleRefresh = () => {
-    setLoading(true);
-    setTimeout(() => setLoading(false), 1000);
+    fetchStats();
   };
+
+  if (!stats) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <RefreshCcw className="h-8 w-8 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+
+  const riskRatioData = [
+    { name: 'An toàn', value: stats.safe_count, color: '#10b981' },
+    { name: 'Cảnh báo', value: stats.warning_count, color: '#f59e0b' },
+    { name: 'Nguy hiểm', value: stats.danger_count, color: '#e11d48' },
+  ].filter(d => d.value > 0);
 
   return (
     <div className="space-y-5">
-      {/* --- Top Banner Pulse --- */}
-      <div className="relative overflow-hidden rounded-xl bg-rose-600 px-6 py-4 shadow-lg">
-        <div className="absolute inset-0 animate-pulse bg-rose-500/50" />
-        <div className="relative flex items-center gap-4">
-          <div className="rounded-full bg-white/20 p-2">
-            <AlertTriangle className="h-6 w-6 text-white" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-white">CẢNH BÁO KHẨN CẤP</h3>
-            <p className="text-sm font-medium text-rose-100">
-              Phát hiện các khu vực có nguy cơ sạt lở RẤT CAO. Vui lòng kiểm tra chi tiết!
-            </p>
+      {/* --- Top Banner Pulse (Conditional) --- */}
+      {stats.danger_count > 0 && (
+        <div className="relative overflow-hidden rounded-xl bg-rose-600 px-6 py-4 shadow-lg">
+          <div className="absolute inset-0 animate-pulse bg-rose-500/50" />
+          <div className="relative flex items-center gap-4">
+            <div className="rounded-full bg-white/20 p-2">
+              <AlertTriangle className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">CẢNH BÁO KHẨN CẤP</h3>
+              <p className="text-sm font-medium text-rose-100">
+                Phát hiện {stats.danger_count.toLocaleString('vi-VN')} điểm có nguy cơ sạt lở RẤT CAO. Vui lòng kiểm tra chi tiết!
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* --- Header --- */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -90,7 +97,7 @@ export function LandslideDashboardPage() {
             </div>
             <div>
               <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Mưa tích lũy 7 ngày</p>
-              <h4 className="text-2xl font-bold text-slate-900 dark:text-slate-100">245.5 <span className="text-sm font-normal text-slate-500">mm</span></h4>
+              <h4 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{stats.rain_7d_accum_avg} <span className="text-sm font-normal text-slate-500">mm</span></h4>
             </div>
           </div>
         </Card>
@@ -102,7 +109,7 @@ export function LandslideDashboardPage() {
             </div>
             <div>
               <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Độ ẩm đất trung bình</p>
-              <h4 className="text-2xl font-bold text-slate-900 dark:text-slate-100">82.4 <span className="text-sm font-normal text-slate-500">%</span></h4>
+              <h4 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{stats.soil_moisture_avg} <span className="text-sm font-normal text-slate-500">%</span></h4>
             </div>
           </div>
         </Card>
@@ -114,7 +121,7 @@ export function LandslideDashboardPage() {
             </div>
             <div>
               <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Số điểm NGUY HIỂM</p>
-              <h4 className="text-2xl font-bold text-rose-600 dark:text-rose-400">5,676</h4>
+              <h4 className="text-2xl font-bold text-rose-600 dark:text-rose-400">{stats.danger_count.toLocaleString('vi-VN')}</h4>
             </div>
           </div>
         </Card>
@@ -126,7 +133,7 @@ export function LandslideDashboardPage() {
             </div>
             <div>
               <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Số điểm CẢNH BÁO</p>
-              <h4 className="text-2xl font-bold text-amber-600 dark:text-amber-400">20,000</h4>
+              <h4 className="text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.warning_count.toLocaleString('vi-VN')}</h4>
             </div>
           </div>
         </Card>
@@ -138,25 +145,31 @@ export function LandslideDashboardPage() {
         <Card>
           <CardHeader>
             <div>
-              <CardTitle>Top 5 Tỉnh/Huyện rủi ro cao nhất</CardTitle>
-              <CardMeta>Số lượng điểm có nguy cơ sạt lở (Mock Data)</CardMeta>
+              <CardTitle>Top Tỉnh/Huyện rủi ro cao nhất</CardTitle>
+              <CardMeta>Số lượng điểm có nguy cơ sạt lở</CardMeta>
             </div>
           </CardHeader>
           <div className="h-64 p-2">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <BarChart data={mockRiskLocation} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
-                  itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
-                />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
-                <Bar dataKey="danger" name="Nguy hiểm" fill="#e11d48" radius={[4, 4, 0, 0]} barSize={20} />
-                <Bar dataKey="warning" name="Cảnh báo" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={20} />
-              </BarChart>
-            </ResponsiveContainer>
+            {stats.top_provinces && stats.top_provinces.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                <BarChart data={stats.top_provinces} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+                    itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+                  />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+                  <Bar dataKey="danger" name="Nguy hiểm" fill="#e11d48" radius={[4, 4, 0, 0]} barSize={20} />
+                  <Bar dataKey="warning" name="Cảnh báo" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={20} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                Chưa có dữ liệu rủi ro
+              </div>
+            )}
           </div>
         </Card>
 
@@ -169,18 +182,24 @@ export function LandslideDashboardPage() {
             </div>
           </CardHeader>
           <div className="h-64 p-2">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <LineChart data={mockRainTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
-                  itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
-                />
-                <Line type="monotone" dataKey="mm" name="Lượng mưa (mm)" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4, fill: '#0ea5e9', strokeWidth: 2 }} activeDot={{ r: 6 }} />
-              </LineChart>
-            </ResponsiveContainer>
+            {stats.rain_trend && stats.rain_trend.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                <LineChart data={stats.rain_trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
+                  <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+                    itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+                  />
+                  <Line type="monotone" dataKey="mm" name="Lượng mưa (mm)" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4, fill: '#0ea5e9', strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                Chưa có dữ liệu lượng mưa
+              </div>
+            )}
           </div>
         </Card>
 
@@ -193,29 +212,35 @@ export function LandslideDashboardPage() {
             </div>
           </CardHeader>
           <div className="h-64 p-2">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <PieChart>
-                <Pie
-                  data={mockRiskRatio}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {mockRiskRatio.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
-                  itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
-                />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
-              </PieChart>
-            </ResponsiveContainer>
+            {riskRatioData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                <PieChart>
+                  <Pie
+                    data={riskRatioData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                    stroke="none"
+                  >
+                    {riskRatioData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+                    itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+                  />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                Chưa có dữ liệu
+              </div>
+            )}
           </div>
         </Card>
       </div>

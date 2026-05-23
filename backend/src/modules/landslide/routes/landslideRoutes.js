@@ -23,6 +23,7 @@ const express = require('express')
 const { predictLandslide, getModelStatus } = require('../services/landslideInference')
 const { sequelize } = require('../../../db/sequelize')
 const landslideCache = require('../../../utils/landslideCache')
+const { cacheResponse } = require('../../../middlewares/apiCache')
 
 const router = express.Router()
 
@@ -69,6 +70,44 @@ router.get('/status', (_req, res) => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /api/v1/landslide/dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/dashboard', cacheResponse(1 * 3600, 'landslide_api'), async (_req, res, next) => {
+  try {
+    const cacheStats = landslideCache.getStats()
+    if (!cacheStats.ready) {
+      return res.status(503).json({
+        success: false,
+        error: { message: 'Đang tải dữ liệu sạt lở vào bộ nhớ đệm, vui lòng thử lại sau giây lát...' }
+      })
+    }
+
+    const stats = landslideCache.getDashboardStats()
+    
+    // SQL cho xu hướng API7d 7 ngày qua
+    const [trendRows] = await sequelize.query(`
+      SELECT DATE_TRUNC('day', prediction_time) as day, AVG(api_7d) as mm
+      FROM landslide_predictions
+      WHERE prediction_time >= NOW() - INTERVAL '7 days'
+      GROUP BY 1 ORDER BY 1
+    `)
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...stats,
+        rain_trend: trendRows.map(r => ({
+          day: new Date(r.day).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }),
+          mm: parseFloat(r.mm).toFixed(1)
+        }))
+      }
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /api/v1/landslide/nodes
 // ─────────────────────────────────────────────────────────────────────────────
 /**
@@ -80,7 +119,7 @@ router.get('/status', (_req, res) => {
  * 🐢 SLOW PATH (cache chưa sẵn sàng):
  *   Fallback về CTE query cũ (vẫn chạy được, chỉ chậm hơn)
  */
-router.get('/nodes', async (req, res, next) => {
+router.get('/nodes', cacheResponse(12 * 3600, 'landslide_api'), async (req, res, next) => {
   try {
     const min_lat     = parseFloat(req.query.min_lat)  || 0
     const max_lat     = parseFloat(req.query.max_lat)  || 90
@@ -191,7 +230,7 @@ router.get('/nodes', async (req, res, next) => {
  * Trả về top-N điểm nóng DANGER/WARNING có xác suất cao nhất.
  * ⚡ Fast path: quét cache Map, lấy top-N theo prob_landslide.
  */
-router.get('/hotspots', async (req, res, next) => {
+router.get('/hotspots', cacheResponse(12 * 3600, 'landslide_api'), async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50)
     const cacheStats = landslideCache.getStats()

@@ -4,8 +4,9 @@ import { RiskBadge } from '../../../../../components/common/Badge'
 import { RainForecastChart } from './RainForecastChart'
 import { TempHumidityChart } from './TempHumidityChart'
 import { RiskTrendChart } from './RiskTrendChart'
+import { ChartWrapper } from './ChartWrapper'
 import { useTranslation } from 'react-i18next'
-import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { PieChart, Pie, Cell, Tooltip, Legend } from 'recharts'
 
 type DashboardChartsProps = {
   forecast24h: any[]
@@ -16,6 +17,13 @@ type DashboardChartsProps = {
   hours: number
 }
 
+const PIE_DATA = (riskSummary: any) => [
+  { name: 'An toàn',      value: riskSummary.safe    ?? 0, color: '#10b981' },
+  { name: 'Trung bình',   value: riskSummary.medium  ?? 0, color: '#fbbf24' },
+  { name: 'Cao',          value: riskSummary.high    ?? 0, color: '#f97316' },
+  { name: 'Nghiêm trọng', value: riskSummary.severe  ?? 0, color: '#e11d48' },
+].filter(d => d.value > 0)
+
 export function DashboardCharts({
   forecast24h,
   tempHum,
@@ -25,6 +33,7 @@ export function DashboardCharts({
   hours
 }: DashboardChartsProps) {
   const { t } = useTranslation()
+  const pieData = PIE_DATA(riskSummary)
 
   return (
     <>
@@ -56,40 +65,32 @@ export function DashboardCharts({
               {t('dashboard.overall')}: {t(`risk.${riskSummary.overall}`)}
             </div>
           </div>
-          <div className="h-48 mt-4">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <PieChart>
-                <Pie
-                  data={[
-                    { name: 'An toàn', value: riskSummary.safe ?? 0, color: '#10b981' },
-                    { name: 'Trung bình', value: riskSummary.medium ?? 0, color: '#fbbf24' },
-                    { name: 'Cao', value: riskSummary.high ?? 0, color: '#f97316' },
-                    { name: 'Nghiêm trọng', value: riskSummary.severe ?? 0, color: '#e11d48' }
-                  ].filter(d => d.value > 0)}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={70}
-                  paddingAngle={5}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {([
-                    { name: 'An toàn', value: riskSummary.safe ?? 0, color: '#10b981' },
-                    { name: 'Trung bình', value: riskSummary.medium ?? 0, color: '#fbbf24' },
-                    { name: 'Cao', value: riskSummary.high ?? 0, color: '#f97316' },
-                    { name: 'Nghiêm trọng', value: riskSummary.severe ?? 0, color: '#e11d48' }
-                  ].filter(d => d.value > 0)).map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
-                  itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
-                />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
-              </PieChart>
-            </ResponsiveContainer>
+          <div className="mt-4 h-48">
+            <ChartWrapper className="h-full w-full">
+              {({ width, height }) => (
+                <PieChart width={width} height={height}>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={70}
+                    paddingAngle={5}
+                    dataKey="value"
+                    stroke="none"
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
+                    itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
+                  />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+                </PieChart>
+              )}
+            </ChartWrapper>
           </div>
         </Card>
       </div>

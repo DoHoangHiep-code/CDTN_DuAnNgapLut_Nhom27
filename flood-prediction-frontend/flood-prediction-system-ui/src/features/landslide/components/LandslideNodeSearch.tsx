@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Search, X, Loader2, MapPin } from 'lucide-react'
 import { useDebounce } from '../../../hooks/useDebounce'
 import { cn } from '../../../utils/cn'
@@ -28,8 +28,6 @@ export function LandslideNodeSearch({
   const [error, setError] = useState(false)
 
   const debounced = useDebounce(value, 500)
-  const abortRef = useRef<AbortController | null>(null)
-
   useEffect(() => {
     const query = debounced.trim()
 
@@ -46,7 +44,7 @@ export function LandslideNodeSearch({
         setResults(nodes)
         setLoading(false)
       })
-      .catch((err) => {
+      .catch(() => {
         setLoading(false)
         setError(true)
       })

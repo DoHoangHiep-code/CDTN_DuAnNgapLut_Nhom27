@@ -57,13 +57,33 @@ function RolePill({ role }: { role: Role }) {
   )
 }
 
+const getFullAvatarUrl = (url?: string | null) => {
+  if (!url) return null
+  if (url.startsWith('http')) return url
+  const apiUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3002/api/v1'
+  const baseUrl = apiUrl.replace(/\/api\/v1\/?$/, '')
+  return `${baseUrl.replace(/\/+$/, '')}${url}`
+}
+
 function UserAvatar({ name, avatarUrl, size = 'md' }: { name: string; avatarUrl?: string | null; size?: 'sm' | 'md' | 'lg' }) {
+  const [imgError, setImgError] = useState(false)
   const initials = name.split(' ').map((w) => w[0]).slice(-2).join('').toUpperCase() || 'U'
   const grad = AVATAR_COLORS[name.length % AVATAR_COLORS.length]
   const sizeClass = size === 'sm' ? 'h-8 w-8 text-[10px]' : size === 'lg' ? 'h-14 w-14 text-lg' : 'h-10 w-10 text-xs'
 
-  if (avatarUrl) {
-    return <img src={avatarUrl} alt={name} className={cn('flex-shrink-0 rounded-xl object-cover ring-2 ring-white dark:ring-slate-800', sizeClass)} />
+  const fullUrl = getFullAvatarUrl(avatarUrl)
+
+  useEffect(() => { setImgError(false) }, [fullUrl])
+
+  if (fullUrl && !imgError) {
+    return (
+      <img
+        src={fullUrl}
+        alt={name}
+        onError={() => setImgError(true)}
+        className={cn('flex-shrink-0 rounded-xl object-cover ring-2 ring-white shadow-sm dark:ring-slate-800', sizeClass)}
+      />
+    )
   }
   return (
     <div className={cn('flex-shrink-0 grid place-items-center rounded-xl bg-gradient-to-br font-extrabold text-white shadow-sm', sizeClass, grad)}>
@@ -239,38 +259,38 @@ export function UserManagementPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 shadow-lg shadow-violet-200 dark:shadow-violet-900/40">
-            <Users className="h-6 w-6 text-white" />
+          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 shadow-[0_8px_16px_-6px_rgba(6,182,212,0.5)] dark:shadow-[0_8px_16px_-6px_rgba(6,182,212,0.3)]">
+            <Users className="h-7 w-7 text-white" />
           </div>
           <div>
-            <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">Quản lý người dùng</h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Tìm kiếm, lọc theo role và quản lý tài khoản.</p>
+            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">Quản lý người dùng</h2>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Tìm kiếm, phân quyền và quản trị hệ thống AquaAlert.</p>
           </div>
         </div>
         <button
           type="button"
           onClick={() => setModal({ open: true, mode: 'create' })}
-          className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-200 transition hover:from-violet-700 hover:to-indigo-700 active:scale-95 dark:shadow-violet-900/40"
+          className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-cyan-500/30 transition-all hover:scale-105 hover:from-cyan-500 hover:to-blue-500 active:scale-95"
         >
-          <Plus className="h-4 w-4" /> Thêm người dùng
+          <Plus className="h-5 w-5" /> Thêm người dùng
         </button>
       </div>
 
       {/* ── Stats row ── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {[
-          { label: 'Tổng tài khoản', value: rows.length, icon: Users, grad: 'from-violet-500 to-indigo-600', shadow: 'shadow-violet-100 dark:shadow-violet-900/20' },
+          { label: 'Tổng tài khoản', value: rows.length, icon: Users, grad: 'from-cyan-500 to-blue-600', shadow: 'shadow-cyan-100 dark:shadow-cyan-900/20' },
           { label: 'Admin', value: roleCounts.admin, icon: ShieldCheck, grad: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-100 dark:shadow-rose-900/20' },
           { label: 'Expert', value: roleCounts.expert, icon: Star, grad: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-100 dark:shadow-amber-900/20' },
           { label: 'User', value: roleCounts.user, icon: UserIcon, grad: 'from-sky-500 to-blue-600', shadow: 'shadow-sky-100 dark:shadow-sky-900/20' },
         ].map((s) => (
-          <div key={s.label} className={cn('flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900', s.shadow)}>
-            <div className={cn('grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl bg-gradient-to-br text-white shadow-sm', s.grad)}>
-              <s.icon className="h-5 w-5" />
+          <div key={s.label} className={cn('group flex items-center gap-4 rounded-2xl border border-slate-200/60 bg-white/60 p-5 shadow-sm backdrop-blur-md transition-all hover:-translate-y-1 hover:shadow-lg dark:border-slate-800/60 dark:bg-slate-900/60', s.shadow)}>
+            <div className={cn('grid h-12 w-12 flex-shrink-0 place-items-center rounded-2xl bg-gradient-to-br text-white shadow-md transition-transform group-hover:scale-110 group-hover:rotate-3', s.grad)}>
+              <s.icon className="h-6 w-6" />
             </div>
             <div>
-              <div className="text-xs text-slate-400 dark:text-slate-500">{s.label}</div>
-              <div className="text-2xl font-extrabold text-slate-800 dark:text-slate-100">{s.value}</div>
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">{s.label}</div>
+              <div className="text-3xl font-black text-slate-800 dark:text-slate-100">{s.value}</div>
             </div>
           </div>
         ))}
@@ -281,17 +301,17 @@ export function UserManagementPage() {
 
         {/* Filter panel */}
         <div className="lg:col-span-3 space-y-4">
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3.5 dark:border-slate-800">
-              <div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-100 dark:bg-violet-900/40">
-                <Filter className="h-4 w-4 text-violet-500" />
+          <div className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white/60 shadow-lg backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-900/60">
+            <div className="flex items-center gap-3 border-b border-slate-200/50 px-5 py-4 dark:border-slate-800/50">
+              <div className="grid h-9 w-9 place-items-center rounded-xl bg-cyan-100/50 dark:bg-cyan-900/30">
+                <Filter className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
               </div>
-              <div className="flex-1 text-sm font-extrabold text-slate-800 dark:text-slate-100">Bộ lọc</div>
+              <div className="flex-1 text-sm font-extrabold text-slate-800 dark:text-slate-100">Bộ lọc tìm kiếm</div>
               {hasFilter && (
                 <button
                   type="button"
                   onClick={() => { setQ(''); setRole('all') }}
-                  className="flex items-center gap-1 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-500 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400"
+                  className="flex items-center gap-1 rounded-lg bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-500 transition-colors hover:bg-rose-100 dark:bg-rose-950/30 dark:text-rose-400"
                 >
                   <X className="h-3 w-3" /> Xóa
                 </button>
@@ -310,7 +330,7 @@ export function UserManagementPage() {
                     placeholder="Tên hoặc email..."
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                    className="w-full rounded-xl border border-slate-200/80 bg-white py-2.5 pl-10 pr-4 text-sm font-medium text-slate-800 outline-none transition-all focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100 dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/30"
                   />
                 </div>
               </div>
@@ -357,15 +377,15 @@ export function UserManagementPage() {
         </div>
 
         {/* Table */}
-        <div className="lg:col-span-9 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+        <div className="lg:col-span-9 overflow-hidden rounded-3xl border border-slate-200/60 bg-white/60 shadow-lg backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-900/60">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-200/50 px-6 py-5 dark:border-slate-800/50">
             <div>
-              <div className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
-                Danh sách người dùng
+              <div className="text-base font-extrabold text-slate-900 dark:text-slate-100">
+                Danh sách tài khoản
               </div>
-              <div className="text-xs text-slate-400 dark:text-slate-500">
-                {rows.length} tài khoản
-                {hasFilter && <span className="ml-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400">đang lọc</span>}
+              <div className="mt-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                Hiển thị {rows.length} kết quả
+                {hasFilter && <span className="ml-1.5 rounded-full bg-cyan-100 px-2 py-0.5 font-bold text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-400">Đang lọc</span>}
               </div>
             </div>
           </div>
@@ -404,10 +424,10 @@ export function UserManagementPage() {
                         <div className="flex items-center gap-3">
                           <UserAvatar name={r.full_name} avatarUrl={r.avatar_url} size="sm" />
                           <div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-2">
                               <span className="text-sm font-extrabold text-slate-900 dark:text-slate-100">{r.full_name}</span>
                               {isSelf && (
-                                <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-600 dark:bg-violet-900/40 dark:text-violet-400">Bạn</span>
+                                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">Bạn</span>
                               )}
                             </div>
                             <div className="text-[11px] text-slate-400">@{r.username}</div>

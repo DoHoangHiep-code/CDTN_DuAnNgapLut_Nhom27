@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { updateUserSettings } from '../services/api'
 import { cn } from '../utils/cn'
 
-// ── Toggle row: icon + text on left, toggle on right ────────────────
+// ── ToggleRow ────────────────────────────────────────────────────────
 function ToggleRow({
   icon, iconBg, title, description, checked, onChange, active,
 }: {
@@ -24,17 +24,17 @@ function ToggleRow({
 }) {
   return (
     <div className={cn(
-      'flex items-center gap-4 p-4 transition-all',
+      'flex items-center gap-4 p-5 transition-all duration-300',
       active
-        ? 'bg-sky-50/60 dark:bg-sky-950/20'
-        : 'hover:bg-slate-50/50 dark:hover:bg-slate-800/50',
+        ? 'bg-cyan-50/40 dark:bg-cyan-900/10'
+        : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/50',
     )}>
-      <div className={cn('grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl', iconBg)}>
+      <div className={cn('grid h-12 w-12 flex-shrink-0 place-items-center rounded-2xl shadow-sm', iconBg)}>
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{title}</div>
-        <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 leading-snug">{description}</div>
+        <div className="text-sm font-extrabold text-slate-800 dark:text-slate-100">{title}</div>
+        <div className="mt-0.5 text-xs font-medium text-slate-500 dark:text-slate-400 leading-snug">{description}</div>
       </div>
       <div className="flex-shrink-0">
         <Toggle label="" checked={checked} onChange={onChange} />
@@ -43,7 +43,7 @@ function ToggleRow({
   )
 }
 
-// ── Select row: icon + text on top, pills below (full width) ─────────
+// ── SelectRow ────────────────────────────────────────────────────────
 function SelectRow<T extends string | number>({
   icon, iconBg, title, description, options, value, onChange,
 }: {
@@ -56,27 +56,27 @@ function SelectRow<T extends string | number>({
   onChange: (v: T) => void
 }) {
   return (
-    <div className="p-4 space-y-3">
+    <div className="p-5 space-y-4">
       <div className="flex items-center gap-4">
-        <div className={cn('grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl', iconBg)}>
+        <div className={cn('grid h-12 w-12 flex-shrink-0 place-items-center rounded-2xl shadow-sm', iconBg)}>
           {icon}
         </div>
         <div>
-          <div className="text-sm font-bold text-slate-900 dark:text-slate-100">{title}</div>
-          <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{description}</div>
+          <div className="text-sm font-extrabold text-slate-800 dark:text-slate-100">{title}</div>
+          <div className="mt-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">{description}</div>
         </div>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 pt-1">
         {options.map((opt) => (
           <button
             key={String(opt.value)}
             type="button"
             onClick={() => onChange(opt.value)}
             className={cn(
-              'rounded-xl px-4 py-2 text-xs font-semibold transition-all border',
+              'rounded-xl px-4 py-2.5 text-xs font-bold transition-all border',
               value === opt.value
-                ? 'bg-sky-500 text-white border-sky-500 shadow-sm'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-sky-300 hover:text-sky-600 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600',
+                ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white border-transparent shadow-md shadow-cyan-500/30'
+                : 'bg-white/80 text-slate-600 border-slate-200/80 hover:border-cyan-400 hover:text-cyan-600 hover:shadow-sm dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:border-cyan-500 dark:hover:text-cyan-400',
             )}
           >
             {opt.label}
@@ -161,15 +161,15 @@ export function SettingsPage() {
     <div className="mx-auto w-full max-w-5xl pb-10">
 
       {/* Page header */}
-      <div className="flex items-center gap-4 mb-6 px-1">
-        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 shadow-lg shadow-sky-200 dark:shadow-sky-900/40">
-          <Settings2 className="h-6 w-6 text-white" />
+      <div className="flex items-center gap-4 mb-8 px-1">
+        <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 shadow-[0_8px_16px_-6px_rgba(6,182,212,0.5)] dark:shadow-[0_8px_16px_-6px_rgba(6,182,212,0.3)]">
+          <Settings2 className="h-7 w-7 text-white" />
         </div>
         <div>
-          <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+          <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-slate-100">
             {t('settings.title')}
           </h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400">{t('settings.hint')}</p>
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{t('settings.hint')}</p>
         </div>
       </div>
 
@@ -180,11 +180,11 @@ export function SettingsPage() {
           {/* --- CỘT TRÁI --- */}
           <div className="space-y-8">
             {/* ── Giao diện ── */}
-            <div className="space-y-3">
-              <SectionHeader icon={<Palette className="h-4 w-4" />} title={t('settings.appearance')} />
-              <div className="overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 shadow-sm dark:border-slate-800 dark:bg-slate-950 divide-y divide-slate-200/50 dark:divide-slate-800/80">
+            <div className="space-y-4">
+              <SectionHeader icon={<Palette className="h-4 w-4 text-cyan-500" />} title={t('settings.appearance')} />
+              <div className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white/60 shadow-lg backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-900/60 divide-y divide-slate-200/50 dark:divide-slate-800/50">
                 <ToggleRow
-                  icon={theme === 'dark' ? <Moon className="h-5 w-5 text-indigo-400" /> : <Sun className="h-5 w-5 text-amber-500" />}
+                  icon={theme === 'dark' ? <Moon className="h-6 w-6 text-indigo-500" /> : <Sun className="h-6 w-6 text-amber-500" />}
                   iconBg={theme === 'dark' ? 'bg-indigo-100 dark:bg-indigo-900/40' : 'bg-amber-100 dark:bg-amber-900/40'}
                   title={t('settings.darkMode')}
                   description={t('settings.darkModeHint')}
@@ -196,12 +196,12 @@ export function SettingsPage() {
             </div>
 
             {/* ── Bản đồ ── */}
-            <div className="space-y-3">
-              <SectionHeader icon={<Map className="h-4 w-4" />} title={t('settings.sectionMap')} />
-              <div className="overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 shadow-sm dark:border-slate-800 dark:bg-slate-950 divide-y divide-slate-200/50 dark:divide-slate-800/80">
+            <div className="space-y-4">
+              <SectionHeader icon={<Map className="h-4 w-4 text-emerald-500" />} title={t('settings.sectionMap')} />
+              <div className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white/60 shadow-lg backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-900/60 divide-y divide-slate-200/50 dark:divide-slate-800/50">
                 <ToggleRow
-                  icon={<Layers className="h-5 w-5 text-emerald-500" />}
-                  iconBg="bg-emerald-100 dark:bg-emerald-900/40"
+                  icon={<Layers className="h-6 w-6 text-emerald-500" />}
+                  iconBg="bg-emerald-100/80 dark:bg-emerald-900/40"
                   title={t('settings.showRiskOverlay')}
                   description={t('settings.showRiskOverlayHint')}
                   checked={showRiskOverlay}
@@ -209,8 +209,8 @@ export function SettingsPage() {
                   active={showRiskOverlay}
                 />
                 <ToggleRow
-                  icon={<MapPin className="h-5 w-5 text-rose-500" />}
-                  iconBg="bg-rose-100 dark:bg-rose-900/40"
+                  icon={<MapPin className="h-6 w-6 text-rose-500" />}
+                  iconBg="bg-rose-100/80 dark:bg-rose-900/40"
                   title={t('settings.showFloodMarkers')}
                   description={t('settings.showFloodMarkersHint')}
                   checked={showFloodMarkers}
@@ -218,8 +218,8 @@ export function SettingsPage() {
                   active={showFloodMarkers}
                 />
                 <SelectRow<MapStyle>
-                  icon={<Map className="h-5 w-5 text-teal-500" />}
-                  iconBg="bg-teal-100 dark:bg-teal-900/40"
+                  icon={<Map className="h-6 w-6 text-teal-500" />}
+                  iconBg="bg-teal-100/80 dark:bg-teal-900/40"
                   title={t('settings.mapStyle')}
                   description={t('settings.mapStyleHint')}
                   options={mapStyleOptions}
@@ -230,14 +230,14 @@ export function SettingsPage() {
             </div>
 
             {/* ── Thông báo ── */}
-            <div className="space-y-3">
-              <SectionHeader icon={<Bell className="h-4 w-4" />} title={t('settings.notifications')} />
-              <div className={cn("overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 shadow-sm dark:border-slate-800 dark:bg-slate-950 divide-y divide-slate-200/50 dark:divide-slate-800/80", alertsLoading && 'pointer-events-none opacity-50')}>
+            <div className="space-y-4">
+              <SectionHeader icon={<Bell className="h-4 w-4 text-amber-500" />} title={t('settings.notifications')} />
+              <div className={cn("overflow-hidden rounded-3xl border border-slate-200/60 bg-white/60 shadow-lg backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-900/60 divide-y divide-slate-200/50 dark:divide-slate-800/50", alertsLoading && 'pointer-events-none opacity-50')}>
                 <ToggleRow
                   icon={floodAlertsEnabled
-                    ? <Bell className="h-5 w-5 text-sky-500" />
-                    : <BellOff className="h-5 w-5 text-slate-400" />}
-                  iconBg={floodAlertsEnabled ? 'bg-sky-100 dark:bg-sky-900/40' : 'bg-slate-100 dark:bg-slate-800'}
+                    ? <Bell className="h-6 w-6 text-sky-500" />
+                    : <BellOff className="h-6 w-6 text-slate-400" />}
+                  iconBg={floodAlertsEnabled ? 'bg-sky-100/80 dark:bg-sky-900/40' : 'bg-slate-100 dark:bg-slate-800/50'}
                   title={t('settings.floodAlerts')}
                   description={alertsLoading ? 'Đang cập nhật...' : t('settings.floodAlertsHint')}
                   checked={floodAlertsEnabled}
@@ -251,12 +251,12 @@ export function SettingsPage() {
           {/* --- CỘT PHẢI --- */}
           <div className="space-y-8">
             {/* ── Ngôn ngữ ── */}
-            <div className="space-y-3">
-              <SectionHeader icon={<Globe className="h-4 w-4" />} title={t('settings.language')} />
-              <div className="overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 shadow-sm dark:border-slate-800 dark:bg-slate-950 divide-y divide-slate-200/50 dark:divide-slate-800/80">
+            <div className="space-y-4">
+              <SectionHeader icon={<Globe className="h-4 w-4 text-violet-500" />} title={t('settings.language')} />
+              <div className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white/60 shadow-lg backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-900/60 divide-y divide-slate-200/50 dark:divide-slate-800/50">
                 <SelectRow<Language>
-                  icon={<Globe className="h-5 w-5 text-violet-500" />}
-                  iconBg="bg-violet-100 dark:bg-violet-900/40"
+                  icon={<Globe className="h-6 w-6 text-violet-500" />}
+                  iconBg="bg-violet-100/80 dark:bg-violet-900/40"
                   title={t('settings.language')}
                   description={t('settings.languageHint')}
                   options={langOptions}
@@ -267,12 +267,12 @@ export function SettingsPage() {
             </div>
 
             {/* ── Dự báo ── */}
-            <div className="space-y-3">
-              <SectionHeader icon={<BarChart2 className="h-4 w-4" />} title={t('settings.sectionForecast')} />
-              <div className="overflow-hidden rounded-2xl border border-slate-100 bg-slate-50 shadow-sm dark:border-slate-800 dark:bg-slate-950 divide-y divide-slate-200/50 dark:divide-slate-800/80">
+            <div className="space-y-4">
+              <SectionHeader icon={<BarChart2 className="h-4 w-4 text-blue-500" />} title={t('settings.sectionForecast')} />
+              <div className="overflow-hidden rounded-3xl border border-slate-200/60 bg-white/60 shadow-lg backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-900/60 divide-y divide-slate-200/50 dark:divide-slate-800/50">
                 <ToggleRow
-                  icon={<Thermometer className="h-5 w-5 text-orange-500" />}
-                  iconBg="bg-orange-100 dark:bg-orange-900/40"
+                  icon={<Thermometer className="h-6 w-6 text-orange-500" />}
+                  iconBg="bg-orange-100/80 dark:bg-orange-900/40"
                   title={t('settings.showFloodDepth')}
                   description={t('settings.showFloodDepthHint')}
                   checked={showFloodDepth}
@@ -280,8 +280,8 @@ export function SettingsPage() {
                   active={showFloodDepth}
                 />
                 <ToggleRow
-                  icon={<BarChart2 className="h-5 w-5 text-blue-500" />}
-                  iconBg="bg-blue-100 dark:bg-blue-900/40"
+                  icon={<BarChart2 className="h-6 w-6 text-blue-500" />}
+                  iconBg="bg-blue-100/80 dark:bg-blue-900/40"
                   title={t('settings.showWeatherStats')}
                   description={t('settings.showWeatherStatsHint')}
                   checked={showWeatherStats}
@@ -289,8 +289,8 @@ export function SettingsPage() {
                   active={showWeatherStats}
                 />
                 <SelectRow<RefreshInterval>
-                  icon={<Clock className="h-5 w-5 text-sky-500" />}
-                  iconBg="bg-sky-100 dark:bg-sky-900/40"
+                  icon={<Clock className="h-6 w-6 text-cyan-500" />}
+                  iconBg="bg-cyan-100/80 dark:bg-cyan-900/40"
                   title={t('settings.forecastRefresh')}
                   description={t('settings.forecastRefreshHint')}
                   options={refreshOptions}

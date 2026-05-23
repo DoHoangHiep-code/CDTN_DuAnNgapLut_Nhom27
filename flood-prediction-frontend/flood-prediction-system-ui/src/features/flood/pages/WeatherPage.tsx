@@ -5,7 +5,7 @@ import {
   TrendingUp, Gauge, Cloud, Zap,
 } from 'lucide-react'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie
 } from 'recharts'
 import type { LatLngExpression } from 'leaflet'
 import { useTranslation } from 'react-i18next'
@@ -313,7 +313,7 @@ function Rain24hChart({ forecast24h }: {
         </div>
       </div>
       <div className="relative px-5 pb-4 pt-5 h-[160px]">
-        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+        <ResponsiveContainer width="99%" height="100%">
           <BarChart data={forecast24h} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
             <XAxis dataKey={(d) => `${toVNHour(d.timeIso)}h`} tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -321,7 +321,7 @@ function Rain24hChart({ forecast24h }: {
             <RechartsTooltip 
               contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
               itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
-              formatter={(val: number) => [`${val} mm`, 'Lượng mưa']}
+              formatter={(val) => [`${Number(val ?? 0)} mm`, 'Lượng mưa']}
               labelFormatter={(label) => `Thời gian: ${label}`}
             />
             <Bar dataKey="rainfallMm" radius={[4, 4, 0, 0]}>
@@ -403,7 +403,7 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
         <div className="flex flex-col sm:flex-row items-center gap-6">
           {/* Doughnut Chart */}
           <div className="relative h-32 w-32 flex-shrink-0">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+            <ResponsiveContainer width="99%" height="100%">
               <PieChart>
                 <Pie 
                   data={pieData} 
@@ -420,7 +420,7 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
                 <RechartsTooltip 
                   contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
                   itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
-                  formatter={(val: number) => [`${val} điểm`, 'Số lượng']}
+                  formatter={(val) => [`${Number(val ?? 0)} điểm`, 'Số lượng']}
                 />
               </PieChart>
             </ResponsiveContainer>

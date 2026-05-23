@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Send, Bot, User, X, Droplets } from 'lucide-react'
 import { askChatbot as askChatbotApi, callExpertDetail as callExpertDetailApi } from '../../services/expertChatApi'
+import { useAuth } from '../../context/AuthContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,18 @@ function renderText(text: string) {
 // ─── Component chính ──────────────────────────────────────────────────────────
 
 export function ChatInterface({ onClose }: Props) {
+  const { user } = useAuth()
+  
+  const getAvatarUrl = (url?: string | null) => {
+    if (!url) return null
+    if (url.startsWith('http')) return url
+    const apiUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3002/api/v1'
+    const baseUrl = apiUrl.replace(/\/api\/v1\/?$/, '')
+    return `${baseUrl.replace(/\/+$/, '')}${url}`
+  }
+  
+  const userAvatar = getAvatarUrl(user?.avatar_url)
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'welcome',
@@ -213,10 +226,18 @@ export function ChatInterface({ onClose }: Props) {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-[480px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-
+    <div className="flex h-[480px] flex-col overflow-hidden rounded-3xl border border-slate-200/60 bg-white/90 backdrop-blur-xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.25)] dark:border-slate-700/60 dark:bg-slate-900/90 relative">
+      <style>{`
+        @keyframes slideUpFade {
+          0% { opacity: 0; transform: translateY(12px) scale(0.98); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .msg-animate {
+          animation: slideUpFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+      `}</style>
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-slate-200 bg-sky-600 px-4 py-3 dark:border-slate-700">
+      <div className="flex items-center gap-3 bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-3.5 shadow-md z-10">
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20">
           <Droplets className="h-4 w-4 text-white" />
         </div>
@@ -235,24 +256,30 @@ export function ChatInterface({ onClose }: Props) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 scroll-smooth">
         {messages.map((msg) => (
-          <div key={msg.id}>
+          <div key={msg.id} className="msg-animate">
             {/* Message bubble */}
             <div className={`flex items-end gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
               {/* Avatar */}
               <div
-                className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-white ${msg.role === 'bot' ? 'bg-sky-500' : 'bg-slate-400 dark:bg-slate-600'
+                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-white shadow-sm ring-2 ring-white/50 ${msg.role === 'bot' ? 'bg-gradient-to-br from-cyan-400 to-blue-500' : 'bg-slate-300 dark:bg-slate-600'
                   }`}
               >
-                {msg.role === 'bot' ? <Bot className="h-4 w-4" /> : <User className="h-4 w-4" />}
+                {msg.role === 'bot' ? (
+                  <Bot className="h-4 w-4" />
+                ) : userAvatar ? (
+                  <img src={userAvatar} alt="user" className="h-full w-full rounded-full object-cover" />
+                ) : (
+                  <User className="h-4 w-4 text-slate-500 dark:text-slate-300" />
+                )}
               </div>
 
               {/* Bubble */}
               <div
-                className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${msg.role === 'user'
-                  ? 'rounded-br-sm bg-sky-600 text-white'
-                  : 'rounded-bl-sm bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100'
+                className={`max-w-[78%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed shadow-sm ${msg.role === 'user'
+                  ? 'rounded-br-sm bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-cyan-500/20'
+                  : 'rounded-bl-sm bg-white border border-slate-100 text-slate-800 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100'
                   }`}
               >
                 {renderText(msg.text)}
@@ -301,11 +328,11 @@ export function ChatInterface({ onClose }: Props) {
 
         {/* Typing indicator */}
         {loading && (
-          <div className="flex items-end gap-2">
-            <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-sky-500 text-white">
+          <div className="flex items-end gap-2 msg-animate">
+            <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 text-white shadow-sm">
               <Bot className="h-4 w-4" />
             </div>
-            <div className="rounded-2xl rounded-bl-sm bg-slate-100 px-4 py-3 dark:bg-slate-800">
+            <div className="rounded-2xl rounded-bl-sm bg-white border border-slate-100 px-4 py-3 shadow-sm dark:bg-slate-800 dark:border-slate-700">
               <div className="flex gap-1">
                 <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 dark:bg-slate-500" style={{ animationDelay: '0ms' }} />
                 <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 dark:bg-slate-500" style={{ animationDelay: '150ms' }} />
@@ -333,7 +360,7 @@ export function ChatInterface({ onClose }: Props) {
       </div>
 
       {/* Input */}
-      <div className="flex items-end gap-2 border-t border-slate-200 px-3 py-3 dark:border-slate-700">
+      <div className="flex items-end gap-2 border-t border-slate-100/60 bg-white/50 px-3 py-3 backdrop-blur-md dark:border-slate-700/60 dark:bg-slate-900/50">
         <textarea
           ref={inputRef}
           rows={1}
@@ -341,7 +368,7 @@ export function ChatInterface({ onClose }: Props) {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Nhập câu hỏi… (Enter để gửi)"
-          className="flex-1 resize-none rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder-slate-500 dark:focus:border-sky-500 dark:focus:ring-sky-900/30"
+          className="flex-1 resize-none rounded-2xl border border-slate-200 bg-white/80 px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 outline-none transition focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-100 dark:placeholder-slate-500 dark:focus:border-cyan-500 dark:focus:ring-cyan-900/30"
           style={{ maxHeight: '96px', overflowY: 'auto' }}
           disabled={loading}
         />
@@ -349,7 +376,7 @@ export function ChatInterface({ onClose }: Props) {
           type="button"
           onClick={() => void handleSend()}
           disabled={!input.trim() || loading}
-          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-sky-600 text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/20 transition hover:scale-105 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
           aria-label="Gửi"
         >
           <Send className="h-4 w-4" />

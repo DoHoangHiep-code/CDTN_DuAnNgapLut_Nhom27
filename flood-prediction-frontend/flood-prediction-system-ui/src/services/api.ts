@@ -44,8 +44,8 @@ export async function getFloodPredictionByLocation(lat: number, lon: number) {
 //   usingLiveWeather: boolean
 //   source: 'database' | 'realtime'
 // }
-export async function getForecastLatest(lat: number, lon: number) {
-  const res = await apiV1.get<any>('/forecasts/latest', { params: { lat, lon } })
+export async function getForecastLatest(lat: number, lon: number, signal?: AbortSignal) {
+  const res = await apiV1.get<any>('/forecasts/latest', { params: { lat, lon }, signal })
   return res.data ?? null
 }
 
@@ -352,4 +352,14 @@ export async function searchLandslideLocations(query: string, limit = 10) {
   const res = await apiV1.get<any>('/landslide/search', { params: { q: query, limit } })
   return (res.data?.data ?? res.data?.nodes ?? []) as LandslideNode[]
 }
+
+/**
+ * Lấy số liệu thống kê cho Dashboard sạt lở
+ * Endpoint: GET /api/v1/landslide/dashboard
+ */
+export async function getLandslideDashboardStats() {
+  const res = await apiV1.get<any>('/landslide/dashboard')
+  return res.data?.data
+}
+
 

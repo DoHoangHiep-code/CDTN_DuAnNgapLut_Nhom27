@@ -49,11 +49,14 @@ const RISK_LEVELS = {
  * @returns {'SAFE' | 'WARNING' | 'DANGER'}
  */
 function classifyRisk(probability) {
-  const low  = Math.max(0,    optimal_threshold - 0.15)
-  const high = Math.min(1.01, optimal_threshold + 0.15)
-
-  if (probability >= high)      return 'DANGER'
-  if (probability >= low)       return 'WARNING'
+  // Vì optimal_threshold có thể rất nhỏ (vd: 0.09), 
+  // nếu trừ cứng 0.15 thì ngưỡng dưới (low) sẽ <= 0, dẫn đến mất trạng thái SAFE.
+  // Thay vào đó, ta chia tỷ lệ dựa trên optimal_threshold:
+  const dangerThreshold = optimal_threshold;         // >= Ngưỡng tối ưu -> DANGER
+  const warningThreshold = optimal_threshold * 0.5;  // >= 50% Ngưỡng tối ưu -> WARNING
+  
+  if (probability >= dangerThreshold)   return 'DANGER'
+  if (probability >= warningThreshold)  return 'WARNING'
   return 'SAFE'
 }
 

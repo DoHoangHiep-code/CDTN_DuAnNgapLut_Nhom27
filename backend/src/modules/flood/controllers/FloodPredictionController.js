@@ -90,7 +90,7 @@ class FloodPredictionController {
       // No LEFT JOIN LATERAL – simple JOIN + DISTINCT ON for performance.
       try {
         const rows = await this.sequelize.query(
-          `SELECT DISTINCT ON (fp.node_id)
+          `SELECT 
              fp.node_id,
              gn.latitude,
              gn.longitude,
@@ -99,13 +99,12 @@ class FloodPredictionController {
              fp.flood_depth_cm,
              fp.time        AS prediction_time,
              fp.explanation
-           FROM flood_predictions fp
+           FROM mv_latest_flood_predictions fp
            JOIN grid_nodes gn ON gn.node_id = fp.node_id
            WHERE gn.latitude  BETWEEN $1::numeric AND $2::numeric
              AND gn.longitude BETWEEN $3::numeric AND $4::numeric
-             AND fp.time >= NOW() - INTERVAL '2 hours'
+             AND fp.time >= NOW() - INTERVAL '24 hours'
              AND fp.flood_depth_cm > 10
-           ORDER BY fp.node_id, fp.time DESC
            LIMIT $5`,
           {
             bind: [minLat, maxLat, minLng, maxLng, limit],

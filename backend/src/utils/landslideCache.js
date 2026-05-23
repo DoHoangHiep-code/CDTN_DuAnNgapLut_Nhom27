@@ -23,6 +23,7 @@
  *     api_7d: number|null,
  *     soil_moisture_1d: number|null,
  *     prediction_time: string|null,
+ *     province: string|null,
  *   }>
  */
 
@@ -44,6 +45,7 @@ function updateCache(predictions) {
       api_7d:           p.api_7d           ?? null,
       soil_moisture_1d: p.soil_moisture_1d ?? null,
       prediction_time:  p.prediction_time  ?? null,
+      province:         p.province         ?? null,
     })
   }
   _updatedAt = new Date()
@@ -92,10 +94,12 @@ async function prewarmFromDb(pool) {
     // Bước 1 & 2: Lấy tất cả predictions có prediction_time trong 30 phút của lần chạy đó
     // Dùng trực tiếp subquery để tránh lỗi lệch múi giờ khi Node.js parse Date
     const { rows } = await pool.query(
-      `WITH MaxTime AS (SELECT MAX(prediction_time) as latest FROM landslide_predictions)
-       SELECT node_id, prob_landslide, risk_level, rain_7d_accum, api_7d, soil_moisture_1d, prediction_time
-       FROM landslide_predictions, MaxTime
-       WHERE prediction_time >= MaxTime.latest - INTERVAL '30 minutes'`
+      `WITH MaxTime AS (SELECT MAX(prediction_time) as latest FROM landslide_predictions WHERE risk_level IS NOT NULL)
+       SELECT p.node_id, p.prob_landslide, p.risk_level, p.rain_7d_accum, p.api_7d, p.soil_moisture_1d, p.prediction_time, n.province
+       FROM landslide_predictions p
+       JOIN landslide_grid_nodes n ON p.node_id = n.node_id
+       JOIN MaxTime ON p.prediction_time >= MaxTime.latest - INTERVAL '30 minutes'
+       WHERE p.risk_level IS NOT NULL`
     )
 
     if (!rows.length || rows.length < 100000) {
@@ -103,8 +107,10 @@ async function prewarmFromDb(pool) {
       // tải toàn bộ bảng và deduplicate trong Node.js (nhanh hơn CockroachDB DISTINCT ON)
       console.warn(`[LandslideCache] Chỉ tìm thấy ${rows.length} nodes gần đây. Đang nạp toàn bộ lịch sử để deduplicate...`)
       const { rows: allRows } = await pool.query(
-        `SELECT node_id, prob_landslide, risk_level, rain_7d_accum, api_7d, soil_moisture_1d, prediction_time
-         FROM landslide_predictions`
+        `SELECT p.node_id, p.prob_landslide, p.risk_level, p.rain_7d_accum, p.api_7d, p.soil_moisture_1d, p.prediction_time, n.province
+         FROM landslide_predictions p
+         JOIN landslide_grid_nodes n ON p.node_id = n.node_id
+         WHERE p.risk_level IS NOT NULL`
       )
       
       let loaded = 0
@@ -118,6 +124,7 @@ async function prewarmFromDb(pool) {
             api_7d:           p.api_7d           ?? null,
             soil_moisture_1d: p.soil_moisture_1d ?? null,
             prediction_time:  p.prediction_time  ?? null,
+            province:         p.province         ?? null,
           })
           loaded++
         }
@@ -159,4 +166,51 @@ function scanTop(n) {
   return candidates.slice(0, n).map(c => c.node_id)
 }
 
-module.exports = { updateCache, getForNode, getStats, clearAll, prewarmFromDb, scanTop }
+/**
+ * Tính toán thống kê cho Dashboard
+ * @returns {object} dashboard stats
+ */
+function getDashboardStats() {
+  let avgRain7d = 0, avgSoilMoisture = 0, dangerCount = 0, warningCount = 0, safeCount = 0;
+  let countRain = 0, countSoil = 0;
+  const provinceStats = new Map();
+
+  for (const pred of _map.values()) {
+    if (pred.risk_level === 'DANGER') dangerCount++;
+    else if (pred.risk_level === 'WARNING') warningCount++;
+    else if (pred.risk_level === 'SAFE') safeCount++;
+
+    if (pred.rain_7d_accum != null) {
+      avgRain7d += pred.rain_7d_accum;
+      countRain++;
+    }
+    if (pred.soil_moisture_1d != null) {
+      avgSoilMoisture += pred.soil_moisture_1d;
+      countSoil++;
+    }
+
+    if (pred.risk_level === 'DANGER' || pred.risk_level === 'WARNING') {
+      if (pred.province) {
+         if (!provinceStats.has(pred.province)) provinceStats.set(pred.province, { name: pred.province, danger: 0, warning: 0 });
+         const pStat = provinceStats.get(pred.province);
+         if (pred.risk_level === 'DANGER') pStat.danger++;
+         if (pred.risk_level === 'WARNING') pStat.warning++;
+      }
+    }
+  }
+
+  const topProvinces = Array.from(provinceStats.values())
+    .sort((a, b) => (b.danger * 10 + b.warning) - (a.danger * 10 + a.warning))
+    .slice(0, 5);
+
+  return {
+    rain_7d_accum_avg: countRain > 0 ? +(avgRain7d / countRain).toFixed(1) : 0,
+    soil_moisture_avg: countSoil > 0 ? +(avgSoilMoisture * 100 / countSoil).toFixed(1) : 0,
+    danger_count: dangerCount,
+    warning_count: warningCount,
+    safe_count: safeCount,
+    top_provinces: topProvinces,
+  }
+}
+
+module.exports = { updateCache, getForNode, getStats, clearAll, prewarmFromDb, scanTop, getDashboardStats }
