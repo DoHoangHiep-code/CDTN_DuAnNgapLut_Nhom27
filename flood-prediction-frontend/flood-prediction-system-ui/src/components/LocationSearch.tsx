@@ -50,8 +50,7 @@ async function fetchGeoResults(query: string): Promise<NominatimResult[]> {
     params: {
       format: 'json',
       q: query,
-      viewbox: HANOI_VIEWBOX,
-      bounded: 1,          // Chỉ trả kết quả trong viewbox
+      countrycodes: 'vn',  // Ưu tiên kết quả ở Việt Nam thay vì khóa cứng ở Hà Nội
       limit: 8,            // Tối đa 8 kết quả để dropdown gọn
       addressdetails: 0,
     },
@@ -185,7 +184,7 @@ export function LocationSearch({
         {/* Input tìm kiếm */}
         <input
           id={id}
-          type="search"
+          type="text"
           value={value}
           autoComplete="off"
           onChange={(e) => {

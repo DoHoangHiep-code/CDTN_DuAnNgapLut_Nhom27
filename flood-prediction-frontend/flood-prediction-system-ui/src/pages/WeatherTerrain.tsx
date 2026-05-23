@@ -15,7 +15,7 @@ import {
 } from 'recharts';
 import { LandslideMap, type LandslideMapRef } from '../features/landslide/components/LandslideMap';
 import { LocationSearch, type NominatimResult } from '../components/LocationSearch';
-import { getWeather7Days } from '../services/api';
+import { getWeather7Days, getNearestLandslideNode } from '../services/api';
 
 
 
@@ -33,30 +33,62 @@ const defaultRainHistory = [
 export function WeatherTerrainPage() {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [locationName, setLocationName] = useState('Hà Nội');
+  const [currentCoords, setCurrentCoords] = useState({ lat: 21.0, lon: 105.0 });
   const [rainHistory, setRainHistory] = useState<{day: string, mm: number}[]>(defaultRainHistory);
   const [stats, setStats] = useState({ todayRain: 0, rain3Days: 0, rain7Days: 0, soilMoisture: 85 });
+  const [terrain, setTerrain] = useState({ slope: 32, ndvi: 0.65, twi: 4.2, lulc: 'Rừng rậm' });
   const mapRef = React.useRef<LandslideMapRef>(null);
 
-  const fetchWeather = async () => {
+  const fetchWeather = async (lat = 21.0, lon = 105.0) => {
     setLoading(true);
     try {
-      const data = await getWeather7Days(21.0, 105.0); // Mặc định trung tâm
-      if (data && data.length > 0) {
+      const [weatherData, nodeData] = await Promise.all([
+        getWeather7Days(lat, lon),
+        getNearestLandslideNode(lat, lon).catch(() => null)
+      ]);
+
+      if (weatherData && weatherData.length > 0) {
         const days = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
-        const mapped = data.slice(0, 7).map((d: any) => {
+        const mapped = weatherData.slice(0, 7).map((d: any) => {
           const date = new Date(d.dateIso);
           return {
             day: days[date.getDay()],
             mm: d.rainfallMm
           };
         });
-        setRainHistory(mapped);
-        
-        const r1 = data[0]?.rainfallMm || 0;
-        const r3 = data.slice(0, 3).reduce((acc: number, cur: any) => acc + cur.rainfallMm, 0);
-        const r7 = data.slice(0, 7).reduce((acc: number, cur: any) => acc + cur.rainfallMm, 0);
-        setStats(prev => ({ ...prev, todayRain: r1, rain3Days: r3, rain7Days: r7 }));
+        setRainHistory(mapped.reverse()); // Hiển thị từ quá khứ đến hiện tại nếu cần, hoặc giữ nguyên
       }
+
+      let r1 = weatherData?.[0]?.rainfallMm || 0;
+      let r3 = weatherData?.slice(0, 3).reduce((acc: number, cur: any) => acc + cur.rainfallMm, 0) || 0;
+      let r7 = weatherData?.slice(0, 7).reduce((acc: number, cur: any) => acc + cur.rainfallMm, 0) || 0;
+      let sm = 85;
+
+      if (nodeData) {
+        const ndvi = nodeData.ndvi ?? 0.65;
+        let lulc = 'Đất trống / Đô thị';
+        if (ndvi > 0.6) lulc = 'Rừng rậm';
+        else if (ndvi > 0.3) lulc = 'Nông nghiệp / Cây bụi';
+        else if (ndvi < 0) lulc = 'Mặt nước';
+
+        setTerrain({
+          slope: nodeData.slope ?? 32,
+          ndvi: ndvi,
+          twi: nodeData.twi ?? 4.2,
+          lulc: lulc
+        });
+        
+        r7 = nodeData.rain_7d_accum ?? r7;
+        sm = nodeData.soil_moisture_1d ?? sm;
+
+        if (nodeData.location_name) {
+          setLocationName(nodeData.location_name);
+        }
+      }
+
+      setStats({ todayRain: r1, rain3Days: r3, rain7Days: r7, soilMoisture: sm });
+
     } catch (e) {
       console.error('Fetch weather failed', e);
     } finally {
@@ -69,7 +101,7 @@ export function WeatherTerrainPage() {
   }, []);
 
   const handleRefresh = () => {
-    fetchWeather();
+    fetchWeather(currentCoords.lat, currentCoords.lon);
   };
 
   return (
@@ -77,8 +109,8 @@ export function WeatherTerrainPage() {
       {/* Header */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-            Khí tượng & Địa hình
+          <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            Khí tượng & Địa hình {locationName && <span className="text-lg text-slate-500 font-medium">({locationName})</span>}
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-300">
             Dữ liệu động (thời tiết) và tĩnh (địa hình) phục vụ mô hình học máy sạt lở
@@ -152,7 +184,7 @@ export function WeatherTerrainPage() {
                 </div>
                 <div>
                   <div className="text-xs text-slate-500">Độ dốc (Slope)</div>
-                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">32°</div>
+                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{terrain.slope.toFixed(1)}°</div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -161,7 +193,7 @@ export function WeatherTerrainPage() {
                 </div>
                 <div>
                   <div className="text-xs text-slate-500">Độ phủ (NDVI)</div>
-                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">0.65</div>
+                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{terrain.ndvi.toFixed(2)}</div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -170,7 +202,7 @@ export function WeatherTerrainPage() {
                 </div>
                 <div>
                   <div className="text-xs text-slate-500">Chỉ số ĐH (TWI)</div>
-                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">4.2</div>
+                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{terrain.twi.toFixed(2)}</div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -179,7 +211,7 @@ export function WeatherTerrainPage() {
                 </div>
                 <div>
                   <div className="text-xs text-slate-500">Loại đất (LULC)</div>
-                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">Rừng rậm</div>
+                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{terrain.lulc}</div>
                 </div>
               </div>
             </div>
@@ -202,10 +234,22 @@ export function WeatherTerrainPage() {
                   districts={[]} 
                   placeholder="Tìm kiếm vị trí trên bản đồ..."
                   value={searchQuery}
-                  onChange={setSearchQuery}
+                  onChange={(v) => {
+                    setSearchQuery(v);
+                    if (!v.trim()) {
+                      setCurrentCoords({ lat: 21.0, lon: 105.0 });
+                      mapRef.current?.flyToWard(21.0, 105.0);
+                      fetchWeather(21.0, 105.0);
+                      setLocationName('Hà Nội');
+                    }
+                  }}
                   onFilterChange={() => {}}
                   onSelectGeoResult={(res: NominatimResult) => {
-                    mapRef.current?.flyToWard(parseFloat(res.lat), parseFloat(res.lon))
+                    const lat = parseFloat(res.lat);
+                    const lon = parseFloat(res.lon);
+                    setCurrentCoords({ lat, lon });
+                    mapRef.current?.flyToWard(lat, lon);
+                    fetchWeather(lat, lon);
                   }}
                 />
               </div>

@@ -178,7 +178,7 @@ function LandslideClustersLayer({
                 <div className="space-y-0.5">
                   <div className="text-xs font-bold text-slate-800 dark:text-slate-100">{n.location_name || n.province || 'Khu vực chưa xác định'}</div>
                   <div className="text-[10px] text-slate-600 dark:text-slate-300">
-                    {palette.emoji} {palette.text} · {Math.round(prob * 100)}%
+                    {palette.emoji} {palette.text} · {(prob * 100).toFixed(2)}%
                   </div>
                 </div>
               </Tooltip>
@@ -235,7 +235,7 @@ function NodePopup({
   const risk = riskKey(node)
   const pal = RISK_PALETTE[risk]
   const prob = node.prob_landslide ?? 0
-  const probPct = Math.round(prob * 100)
+  const probPct = Number((prob * 100).toFixed(2))
 
   return (
     <Popup

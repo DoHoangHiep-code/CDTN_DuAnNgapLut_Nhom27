@@ -29,6 +29,16 @@
 
 const _map = new Map()
 let _updatedAt = null
+let _isReady = false
+
+function invalidateCache() {
+  try {
+    const { invalidateCacheNamespace } = require('../middlewares/apiCache');
+    invalidateCacheNamespace('landslide_api');
+  } catch (e) {
+    console.warn('[LandslideCache] Could not invalidate cache', e.message);
+  }
+}
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -67,7 +77,7 @@ function getStats() {
   return {
     size: _map.size,
     updatedAt: _updatedAt,
-    ready: _map.size > 0,
+    ready: _isReady,
   }
 }
 
@@ -132,6 +142,8 @@ async function prewarmFromDb(pool) {
       _updatedAt = new Date()
       const elapsed = Date.now() - t0
       console.log(`[LandslideCache] ✅ Pre-warm (JS Dedupe): ${_map.size.toLocaleString('vi-VN')} nodes | ${elapsed}ms`)
+      _isReady = true
+      invalidateCache()
       return { loaded: _map.size, elapsed }
     }
 
@@ -141,6 +153,8 @@ async function prewarmFromDb(pool) {
       `[LandslideCache] ✅ Pre-warm: ${_map.size.toLocaleString('vi-VN')} nodes | ` +
       `${elapsed}ms`
     )
+    _isReady = true
+    invalidateCache()
     return { loaded: _map.size, elapsed }
   } catch (err) {
     const elapsed = Date.now() - t0

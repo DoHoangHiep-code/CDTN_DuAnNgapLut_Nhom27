@@ -130,9 +130,15 @@ router.get('/nodes', cacheResponse(12 * 3600, 'landslide_api'), async (req, res,
 
     const cacheStats = landslideCache.getStats()
 
+    if (!cacheStats.ready) {
+      return res.status(503).json({
+        success: false,
+        error: { message: 'Đang nạp dữ liệu sạt lở từ CSDL, vui lòng thử lại sau.' },
+      })
+    }
+
     // ── ⚡ FAST PATH: Cache đã sẵn sàng ──────────────────────────────────────
-    if (cacheStats.ready) {
-      // Bước 1: Lấy nodes trong bbox từ landslide_grid_nodes (chỉ cột địa hình)
+    // Bước 1: Lấy nodes trong bbox từ landslide_grid_nodes (chỉ cột địa hình)
       // Query này rất nhanh — chỉ cần lat/lon range scan, không join predictions
       const [gridNodes] = await sequelize.query(
         `SELECT node_id, lat, lon, province, location_name, slope, twi, elevation, ndvi
@@ -181,41 +187,13 @@ router.get('/nodes', cacheResponse(12 * 3600, 'landslide_api'), async (req, res,
       // Bước 3: Sort theo prob giảm dần, cắt limit
       nodes.sort((a, b) => (b.prob_landslide ?? 0) - (a.prob_landslide ?? 0))
 
-      return res.status(200).json({
-        success: true,
-        source:  'cache',
-        cache_size: cacheStats.size,
-        nodes:   nodes.slice(0, limit),
-      })
-    }
-
-    // ── 🐢 SLOW PATH: Cache chưa sẵn sàng → fallback về DB ─────────────────
-    console.warn('[LandslideRoutes] Cache chưa sẵn sàng, dùng DB query (chậm)...')
-    let riskCondition = ''
-    if (risk_filter === 'DANGER')  riskCondition = "AND p.risk_level = 'DANGER'"
-    else if (risk_filter === 'WARNING') riskCondition = "AND p.risk_level IN ('WARNING', 'DANGER')"
-
-    const query = `
-      WITH LatestPreds AS (
-        SELECT node_id, prob_landslide, risk_level, rain_7d_accum, api_7d, soil_moisture_1d, prediction_time,
-               ROW_NUMBER() OVER(PARTITION BY node_id ORDER BY prediction_time DESC) AS rn
-        FROM landslide_predictions
-      )
-      SELECT
-        n.node_id, n.lat, n.lon, n.province, n.location_name, n.slope, n.twi, n.elevation, n.ndvi,
-        p.prob_landslide, p.risk_level, p.rain_7d_accum, p.api_7d, p.soil_moisture_1d, p.prediction_time
-      FROM landslide_grid_nodes n
-      JOIN LatestPreds p ON n.node_id = p.node_id AND p.rn = 1
-      WHERE n.lat BETWEEN :min_lat AND :max_lat
-        AND n.lon BETWEEN :min_lng AND :max_lng
-        ${riskCondition}
-      ORDER BY p.prob_landslide DESC NULLS LAST
-      LIMIT :limit
-    `
-    const [nodes] = await sequelize.query(query, {
-      replacements: { min_lat, max_lat, min_lng, max_lng, limit },
-    })
-    return res.status(200).json({ success: true, source: 'db', nodes })
+        return res.status(200).json({
+          success: true,
+          source:  'cache',
+          cache_size: cacheStats.size,
+          nodes:   nodes.slice(0, limit),
+        })
+    // NOTE: The SLOW PATH DB fallback was removed here because cacheStats.ready is strictly enforced above.
 
   } catch (err) {
     console.error('[LandslideRoutes] Lỗi /nodes:', err.message)
@@ -235,10 +213,16 @@ router.get('/hotspots', cacheResponse(12 * 3600, 'landslide_api'), async (req, r
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50)
     const cacheStats = landslideCache.getStats()
 
+    if (!cacheStats.ready) {
+      return res.status(503).json({
+        success: false,
+        error: { message: 'Đang nạp dữ liệu sạt lở từ CSDL, vui lòng thử lại sau.' },
+      })
+    }
+
     // ── ⚡ FAST PATH ─────────────────────────────────────────────────────────
-    if (cacheStats.ready) {
-      // Scan cache để lấy top DANGER/WARNING nodes theo prob_landslide
-      // Cache có 425K entries → scan ~5ms (JavaScript Map iteration rất nhanh)
+    // Scan cache để lấy top DANGER/WARNING nodes theo prob_landslide
+    // Cache có 425K entries → scan ~5ms (JavaScript Map iteration rất nhanh)
       const candidates = []
       // landslideCache không expose raw Map, cần query grid nodes với province info
       // Dùng DB query chỉ cho grid_nodes (không cần predictions)
@@ -276,26 +260,10 @@ router.get('/hotspots', cacheResponse(12 * 3600, 'landslide_api'), async (req, r
           nodes: candidates.slice(0, limit),
         })
       }
-    }
-
-    // ── 🐢 SLOW PATH fallback ────────────────────────────────────────────────
-    const query = `
-      WITH LatestPreds AS (
-        SELECT node_id, prob_landslide, risk_level, rain_7d_accum, api_7d, soil_moisture_1d, prediction_time,
-               ROW_NUMBER() OVER(PARTITION BY node_id ORDER BY prediction_time DESC) AS rn
-        FROM landslide_predictions
-      )
-      SELECT
-        n.node_id, n.lat, n.lon, n.province, n.location_name, n.slope, n.twi, n.elevation, n.ndvi,
-        p.prob_landslide, p.risk_level, p.rain_7d_accum, p.api_7d, p.soil_moisture_1d, p.prediction_time
-      FROM landslide_grid_nodes n
-      JOIN LatestPreds p ON n.node_id = p.node_id AND p.rn = 1
-      WHERE p.risk_level IN ('DANGER', 'WARNING')
-      ORDER BY p.prob_landslide DESC NULLS LAST
-      LIMIT :limit
-    `
-    const [nodes] = await sequelize.query(query, { replacements: { limit } })
-    return res.status(200).json({ success: true, source: 'db', nodes })
+      
+      // Nếu topNodeIds.length === 0, trả về rỗng
+      return res.status(200).json({ success: true, source: 'cache', nodes: [] })
+    // NOTE: SLOW PATH was removed because cacheStats.ready is enforced.
 
   } catch (err) {
     console.error('[LandslideRoutes] Lỗi /hotspots:', err.message)
@@ -371,5 +339,62 @@ router.get('/search', async (req, res, next) => {
     return next(err)
   }
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/v1/landslide/nearest-node
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Tìm node sạt lở gần nhất với tọa độ (lat, lon) cho trước.
+ */
+router.get('/nearest-node', async (req, res, next) => {
+  try {
+    const lat = parseFloat(req.query.lat);
+    const lon = parseFloat(req.query.lon);
+
+    if (isNaN(lat) || isNaN(lon)) {
+      return res.status(400).json({ success: false, error: { message: 'Thiếu lat hoặc lon hợp lệ.' } });
+    }
+
+    // Dùng khoảng cách Euclid cơ bản. (Tối ưu: dùng PostGIS ST_Distance nếu có index)
+    const [gridNodes] = await sequelize.query(
+      `SELECT node_id, lat, lon, province, location_name, slope, twi, elevation, ndvi,
+              ((lat - :lat)*(lat - :lat) + (lon - :lon)*(lon - :lon)) as dist
+       FROM landslide_grid_nodes
+       ORDER BY dist ASC
+       LIMIT 1`,
+      { replacements: { lat, lon } }
+    );
+
+    if (!gridNodes || gridNodes.length === 0) {
+      return res.status(404).json({ success: false, error: { message: 'Không tìm thấy node nào.' } });
+    }
+
+    const n = gridNodes[0];
+    const pred = landslideCache.getForNode(n.node_id) || {};
+
+    const result = {
+      node_id: n.node_id,
+      lat: parseFloat(n.lat),
+      lon: parseFloat(n.lon),
+      province: n.province,
+      location_name: n.location_name,
+      slope: n.slope != null ? parseFloat(n.slope) : null,
+      twi: n.twi != null ? parseFloat(n.twi) : null,
+      elevation: n.elevation != null ? parseFloat(n.elevation) : null,
+      ndvi: n.ndvi != null ? parseFloat(n.ndvi) : null,
+      dist_sq: n.dist,
+      prob_landslide: pred.prob_landslide || null,
+      risk_level: pred.risk_level || 'UNKNOWN',
+      rain_7d_accum: pred.rain_7d_accum || null,
+      api_7d: pred.api_7d || null,
+      soil_moisture_1d: pred.soil_moisture_1d || null,
+    };
+
+    return res.status(200).json({ success: true, node: result });
+  } catch (err) {
+    console.error('[LandslideRoutes] Lỗi /nearest-node:', err.message);
+    return next(err);
+  }
+});
 
 module.exports = { landslideRouter: router }

@@ -201,6 +201,11 @@ export async function authForgotPassword(payload: { email: string }) {
   return res.data
 }
 
+export async function authCheckEmail(payload: { email: string }) {
+  const res = await apiV1.post<{ success: boolean; message: string; resetToken: string }>('/auth/check-email', payload)
+  return res.data
+}
+
 export async function authResetPassword(payload: { token: string; newPassword: string }) {
   const res = await apiV1.post<{ success: boolean; message: string }>('/auth/reset-password', payload)
   return res.data
@@ -351,6 +356,15 @@ export async function searchLandslideLocations(query: string, limit = 10) {
   if (!query) return []
   const res = await apiV1.get<any>('/landslide/search', { params: { q: query, limit } })
   return (res.data?.data ?? res.data?.nodes ?? []) as LandslideNode[]
+}
+
+/**
+ * Lấy node sạt lở gần nhất với toạ độ cho trước
+ * Endpoint: GET /api/v1/landslide/nearest-node?lat=...&lon=...
+ */
+export async function getNearestLandslideNode(lat: number, lon: number) {
+  const res = await apiV1.get<any>('/landslide/nearest-node', { params: { lat, lon } })
+  return (res.data?.data ?? res.data?.node ?? null) as LandslideNode | null
 }
 
 /**
