@@ -178,7 +178,7 @@ function LandslideClustersLayer({
                 <div className="space-y-0.5">
                   <div className="text-xs font-bold text-slate-800 dark:text-slate-100">{n.location_name || n.province || 'Khu vực chưa xác định'}</div>
                   <div className="text-[10px] text-slate-600 dark:text-slate-300">
-                    {palette.emoji} {palette.text} · {Math.round(prob * 100)}%
+                    {palette.emoji} {palette.text} · {(prob * 100).toFixed(2)}%
                   </div>
                 </div>
               </Tooltip>
@@ -235,7 +235,7 @@ function NodePopup({
   const risk = riskKey(node)
   const pal = RISK_PALETTE[risk]
   const prob = node.prob_landslide ?? 0
-  const probPct = Math.round(prob * 100)
+  const probPct = Number((prob * 100).toFixed(2))
 
   return (
     <Popup
@@ -375,9 +375,13 @@ interface LandslideMapProps {
   mapRef?: React.RefObject<LandslideMapRef | null>
   /** Ẩn các HUD (thống kê, bộ lọc, chú giải) khi dùng làm mini map */
   hideHUD?: boolean
+  /** Offset số ngày dự báo (0: hôm nay, 1: mai...) */
+  dayOffset?: number
+  /** Callback khi người dùng kéo Time Slider */
+  onChangeOffset?: (offset: number) => void
 }
 
-export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false }: LandslideMapProps) {
+export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, dayOffset = 0, onChangeOffset }: LandslideMapProps) {
   const [map, setMap] = useState<L.Map | null>(null)
   const [nodes, setNodes] = useState<LandslideNode[]>([])
   const [isFetching, setIsFetching] = useState(false)
@@ -411,6 +415,7 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false }:
         maxLng: bounds.getEast(),
         limit: 3000,
         riskFilter,
+        offset: dayOffset,
       }, ctrl.signal)
       // Filter out nodes with <= 0% probability to improve performance
       setNodes(data.filter((n) => (n.prob_landslide ?? 0) > 0))
@@ -419,14 +424,14 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false }:
     } finally {
       setIsFetching(false)
     }
-  }, [riskFilter])
+  }, [riskFilter, dayOffset])
 
   // ── Re-fetch khi riskFilter đổi ──────────────────────────────────────────
   useEffect(() => {
     if (!map) return
     const timer = setTimeout(() => fetchNodes(map.getBounds()), 200)
     return () => clearTimeout(timer)
-  }, [map, riskFilter, fetchNodes])
+  }, [map, riskFilter, dayOffset, fetchNodes])
 
   // Cleanup abort on unmount
   useEffect(() => () => { abortRef.current?.abort() }, [])
@@ -522,10 +527,38 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false }:
           <span>Sạt lở Miền Bắc</span>
         </div>
 
-        <div className="flex gap-1.5">
+        <div className="flex gap-1.5 items-center">
+          <span className="text-[10px] text-stone-400 px-1 font-medium drop-shadow-md">Trong khung hình:</span>
           <StatChip color="red" label="Nguy hiểm" count={dangerCount} />
           <StatChip color="orange" label="Cảnh báo" count={warningCount} />
         </div>
+        </div>
+      )}
+
+      {/* ── HUD: Time Slider ─────────────────────────────────────────────────── */}
+      {!hideHUD && onChangeOffset && (
+        <div className="absolute bottom-6 left-1/2 z-[1000] -translate-x-1/2 w-64 md:w-80 rounded-2xl p-3 shadow-xl backdrop-blur transition-all"
+             style={{ background: 'rgba(28,22,14,0.92)', border: '1px solid rgba(217,119,6,0.3)' }}>
+          <div className="flex justify-between text-xs font-bold text-amber-100 mb-2">
+            <span>Thời gian dự báo</span>
+            <span className="text-amber-500">{dayOffset === 0 ? 'Hôm nay' : `+${dayOffset} Ngày`}</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="3"
+            step="1"
+            value={dayOffset}
+            onChange={(e) => onChangeOffset(parseInt(e.target.value, 10))}
+            className="w-full accent-amber-500 bg-stone-800 rounded-lg h-1.5 appearance-none cursor-pointer outline-none"
+            style={{ boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)' }}
+          />
+          <div className="flex justify-between text-[10px] font-medium text-stone-500 mt-2 px-1">
+            <span>Hôm nay</span>
+            <span>+1</span>
+            <span>+2</span>
+            <span>+3</span>
+          </div>
         </div>
       )}
 

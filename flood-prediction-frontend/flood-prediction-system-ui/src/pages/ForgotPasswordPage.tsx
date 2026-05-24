@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Waves, ArrowLeft, Send, Loader2 } from 'lucide-react'
-import { authForgotPassword } from '../services/api'
+import { authCheckEmail } from '../services/api'
 
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-slate-950 flex items-center justify-center p-4 selection:bg-cyan-500/30">
@@ -34,7 +35,7 @@ export function ForgotPasswordPage() {
             Quên mật khẩu
           </h1>
           <p className="mt-2 text-sm font-medium text-slate-300">
-            Nhập email để nhận link đặt lại mật khẩu (DEV mode)
+            Nhập email để nhận link đặt lại mật khẩu (DEV Bypass)
           </p>
         </div>
 
@@ -67,10 +68,13 @@ export function ForgotPasswordPage() {
                   }
                   setLoading(true)
                   try {
-                    const res = await authForgotPassword({ email: email.trim() })
-                    toast.success(res.message || 'Đã gửi yêu cầu đặt lại mật khẩu.')
+                    const res = await authCheckEmail({ email: email.trim() })
+                    if (res.success && res.resetToken) {
+                      toast.success('Xác minh email thành công!')
+                      navigate('/reset-password?token=' + res.resetToken)
+                    }
                   } catch (e: any) {
-                    const msg = e?.response?.data?.error?.message || e?.response?.data?.message || 'Gửi yêu cầu thất bại'
+                    const msg = e?.response?.data?.error?.message || e?.response?.data?.message || 'Email không tồn tại'
                     toast.error(String(msg))
                   } finally {
                     setLoading(false)
@@ -81,7 +85,7 @@ export function ForgotPasswordPage() {
                 {loading ? (
                   <>
                     <Loader2 className="h-5 w-5 animate-spin" />
-                    Đang gửi...
+                    Đang kiểm tra...
                   </>
                 ) : (
                   <>

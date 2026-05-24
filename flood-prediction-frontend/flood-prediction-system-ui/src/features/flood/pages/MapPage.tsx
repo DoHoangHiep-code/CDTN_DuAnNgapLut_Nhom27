@@ -392,6 +392,7 @@ function FloodMapContent() {
   const [map, setMap] = useState<L.Map | null>(null)
   const [searchParams] = useSearchParams()
   const districtIdFromUrl = searchParams.get('districtId')
+  const [dayOffset, setDayOffset] = useState(0)
 
   const defaultCenter: LatLngExpression = [21.0278, 105.8342]
   const defaultZoom = 12
@@ -462,6 +463,7 @@ function FloodMapContent() {
           minLng: b.getWest(),
           maxLng: b.getEast(),
           limit: 2000,  // chỉ nhận điểm ngập (flood_depth_cm > 10) → 2000 điểm vẫn nhẹ
+          offset: dayOffset,
         }, controller.signal)
         const pts: FloodPoint[] = (result?.districts ?? []).map((d) => ({
           id:                   d.id,
@@ -490,7 +492,7 @@ function FloodMapContent() {
         bboxAbortRef.current = null
       }
     }
-  }, [map, bboxTick])  // bboxTick tăng mỗi moveend/zoomend → không tạo object mới, tránh loop
+  }, [map, bboxTick, dayOffset])  // bboxTick tăng mỗi moveend/zoomend → không tạo object mới, tránh loop
 
   // Xử lý chọn kết quả từ Nominatim geocoding
   const handleGeoResult = useCallback((result: NominatimResult) => {
@@ -592,6 +594,31 @@ function FloodMapContent() {
                 </div>
               </div>
             )}
+
+            {/* ── HUD: Time Slider ─────────────────────────────────────────────────── */}
+            <div className="absolute bottom-6 left-1/2 z-[1000] -translate-x-1/2 w-64 md:w-80 rounded-2xl p-3 shadow-xl backdrop-blur transition-all dark:bg-slate-900/90 bg-white/95"
+                 style={{ border: '1px solid rgba(148,163,184,0.3)' }}>
+              <div className="flex justify-between text-xs font-bold text-slate-800 dark:text-slate-200 mb-2">
+                <span>Thời gian dự báo</span>
+                <span className="text-sky-600 dark:text-sky-400">{dayOffset === 0 ? 'Hôm nay' : `+${dayOffset} Ngày`}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="3"
+                step="1"
+                value={dayOffset}
+                onChange={(e) => setDayOffset(parseInt(e.target.value, 10))}
+                className="w-full accent-sky-500 bg-slate-200 dark:bg-slate-800 rounded-lg h-1.5 appearance-none cursor-pointer outline-none"
+                style={{ boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)' }}
+              />
+              <div className="flex justify-between text-[10px] font-medium text-slate-500 dark:text-slate-400 mt-2 px-1">
+                <span>Hôm nay</span>
+                <span>+1</span>
+                <span>+2</span>
+                <span>+3</span>
+              </div>
+            </div>
 
             {/* ── Leaflet MapContainer ── */}
             <MapContainer

@@ -129,10 +129,28 @@ async function initLandslideModel() {
  * @returns {Record<string, number | undefined | null>}
  */
 function addInteractionFeatures(rawFeatures) {
-  // ML v7: các biến tương tác đã bạke trong ONNX.
-  // Vẫn tính để giữ API ổn định với các caller.
+  // 1. Chuyển đổi khoảng cách m -> km (nếu null, giả định xa nhất: 50km cho sông, 20km cho đường)
+  rawFeatures.dist_to_river_km = ((rawFeatures.dist_to_river_m != null && !isNaN(rawFeatures.dist_to_river_m)) ? rawFeatures.dist_to_river_m : 50000) / 1000
+  rawFeatures.dist_to_road_km  = ((rawFeatures.dist_to_road_m != null && !isNaN(rawFeatures.dist_to_road_m)) ? rawFeatures.dist_to_road_m : 20000) / 1000
+
+  // 2. Map lulc_class sang lulc_group (1: Rừng, 2: Đất thưa, 3: Nông nghiệp, 4: Đô thị/Trống)
+  const c = rawFeatures.lulc_class
+  let lulc_group = 3 // default
+  if ([1, 2, 3, 4, 5].includes(c)) lulc_group = 1
+  else if ([6, 7, 8, 9, 10].includes(c)) lulc_group = 2
+  else if ([11, 12, 14].includes(c)) lulc_group = 3
+  else if ([13, 16, 17].includes(c)) lulc_group = 4
+  rawFeatures.lulc_group = lulc_group
+
+  // 3. Tính toán các tương tác phái sinh chính xác theo công thức v7
+  rawFeatures.slope_x_deforestation = (rawFeatures.slope || 0) * (1 - Math.min(Math.max(rawFeatures.ndvi || 0, 0), 1))
+  rawFeatures.twi_x_rain7d          = (rawFeatures.twi || 0) * (rawFeatures.rain_7d_accum || 0)
+  rawFeatures.rain_intensity_ratio  = (rawFeatures.rain_1d_accum || 0) / Math.max(rawFeatures.rain_7d_accum || 0, 0.001)
+
+  // (Giữ lại các tính toán cũ phòng hờ nếu metadata gọi tới)
   rawFeatures.slope_x_api7d = (rawFeatures.slope ?? 0) * (rawFeatures.api_7d ?? 0)
   rawFeatures.twi_x_soil    = (rawFeatures.twi   ?? 0) * (rawFeatures.soil_moisture_1d ?? 0)
+
   return rawFeatures
 }
 

@@ -158,11 +158,10 @@ function buildRawFeatures(node, weather) {
  * Dùng 1 câu INSERT VALUES(...),(...) thay vì N INSERT riêng lẻ.
  * ON CONFLICT → cập nhật tất cả trường (prediction mới nhất luôn thắng).
  *
- * @param {Array<{node_id: string, weather: object|null, prediction: object}>} batchResults
- * @param {Date} predictionTime
+ * @param {Array<{node_id: string, rawFeatures: object, prediction: object, predDate: Date}>} batchResults
  * @returns {Promise<number>} Số rows đã upsert
  */
-async function bulkUpsertPredictions(batchResults, predictionTime) {
+async function bulkUpsertPredictions(batchResults) {
   if (!batchResults.length) return 0
 
   const CHUNK_SIZE = 3000
@@ -180,7 +179,7 @@ async function bulkUpsertPredictions(batchResults, predictionTime) {
       let idx = 1
 
       for (const item of chunk) {
-        const { node_id, rawFeatures, prediction } = item
+        const { node_id, rawFeatures, prediction, predDate } = item
 
         valueClauses.push(
           `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, ` +
@@ -191,7 +190,7 @@ async function bulkUpsertPredictions(batchResults, predictionTime) {
 
         params.push(
           node_id,
-          predictionTime,
+          predDate,
           rawFeatures.rain_1d_accum    ?? null,
           rawFeatures.rain_3d_accum    ?? null,
           rawFeatures.rain_7d_accum    ?? null,
@@ -292,6 +291,7 @@ async function runLandslideJob() {
   let totalSuccess = 0
   let totalError = 0
   const predictionTime = new Date()
+  predictionTime.setMinutes(0, 0, 0) // Làm tròn về đầu giờ (VD: 9:04 -> 9:00) để ghi đè ON CONFLICT
 
   try {
     // Bước 0: Đếm tổng
@@ -352,29 +352,44 @@ async function runLandslideJob() {
         const rLon = Math.round(parseFloat(node.lon) * 10) / 10
         const vsId = `${rLat.toFixed(1)}_${rLon.toFixed(1)}`
         
-        // Lookup weather dictionary O(1)
-        const weather = weatherDictionary.get(vsId) || null
+        // Lookup weather dictionary O(1) - trả về mảng 4 ngày
+        const weathers = weatherDictionary.get(vsId) || [null, null, null, null]
+        const weatherArray = Array.isArray(weathers) ? weathers : [weathers, weathers, weathers, weathers]
 
-        // Build rawFeatures (Imputer trong model sẽ tự xử lý weather=null)
-        const rawFeatures = buildRawFeatures(node, weather)
+        for (let offset = 0; offset <= 3; offset++) {
+          // Bắt buộc áp dụng bộ lọc độ dốc (Slope > 15 độ) trước khi đưa vào vòng lặp Phase 3 cho 3 ngày tương lai.
+          if (offset > 0) {
+            const slope = parseFloat(node.slope) || 0
+            if (slope <= 15) continue
+          }
 
-        // Gọi model dự báo
-        let prediction
-        try {
-          prediction = await predictLandslide(rawFeatures)
-          batchResults.push({ node_id: node.node_id, province: node.province, rawFeatures, prediction })
-        } catch (modelErr) {
-          totalError++
-          continue
+          const weather = weatherArray[offset]
+          // Build rawFeatures (Imputer trong model sẽ tự xử lý weather=null)
+          const rawFeatures = buildRawFeatures(node, weather)
+
+          // Tính toán predDate
+          const predDate = new Date(predictionTime)
+          predDate.setDate(predDate.getDate() + offset)
+
+          // Gọi model dự báo
+          let prediction
+          try {
+            prediction = await predictLandslide(rawFeatures)
+            batchResults.push({ node_id: node.node_id, province: node.province, rawFeatures, prediction, predDate, offset })
+          } catch (modelErr) {
+            totalError++
+            continue
+          }
         }
       }
 
       // UPSERT cho từng lô 50k
       if (batchResults.length > 0) {
         try {
-          await bulkUpsertPredictions(batchResults, predictionTime)
+          await bulkUpsertPredictions(batchResults)
           totalSuccess += batchResults.length
-          allPredictions.push(...batchResults)
+          // Chú ý chỉ lưu offset = 0 vào cache in-memory để phục vụ API real-time mặc định
+          allPredictions.push(...batchResults.filter(r => r.offset === 0))
         } catch (upsertErr) {
           console.error(`[LandslideCron] ❌ Lỗi UPSERT Phase 3 (lô ${batchIdx + 1}):`, upsertErr.message)
           totalError += batchResults.length
@@ -397,8 +412,20 @@ async function runLandslideJob() {
       prediction_time: predictionTime
     })))
 
-    // Xóa cache API HTTP (node-cache) để bắt buộc tạo lại
-    invalidateCacheNamespace('landslide_api')
+    // Xóa cache API HTTP (node-cache) để bắt buộc tạo lại (Gọi Webhook sang tiến trình chính)
+    try {
+      const http = require('http')
+      const req = http.request({
+        hostname: 'localhost',
+        port: process.env.PORT || 3002,
+        path: '/api/v1/landslide/clear-cache',
+        method: 'POST'
+      }, (res) => {
+        console.log(`[LandslideCron] 🧹 Gọi Webhook Clear Cache thành công: HTTP ${res.statusCode}`)
+      })
+      req.on('error', (e) => console.log(`[LandslideCron] Webhook error (nếu server tắt thì bỏ qua): ${e.message}`))
+      req.end()
+    } catch(err) {}
 
     console.log(`\n[LandslideCron] 🎉 HOÀN TẤT DỰ BÁO LÚC ${new Date().toLocaleTimeString('vi-VN')}`)
 

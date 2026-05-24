@@ -75,6 +75,7 @@ class FloodPredictionController {
         parseInt(req.query.limit) || DEFAULT_LIMIT,
         MAX_LIMIT,
       )
+      const offsetDays = parseInt(req.query.offset) || 0
 
       // Validate bbox hợp lý
       if (minLat >= maxLat || minLng >= maxLng) {
@@ -84,34 +85,42 @@ class FloodPredictionController {
         })
       }
 
-      // ── Optimized BBox Query: DISTINCT ON from flood_predictions ────────
-      // Uses parameterized $bind with ::numeric cast (pg-pool safe).
-      // Only returns fresh data (last 2 hours) to avoid stale predictions.
-      // No LEFT JOIN LATERAL – simple JOIN + DISTINCT ON for performance.
       try {
-        const rows = await this.sequelize.query(
-          `SELECT DISTINCT ON (fp.node_id)
-             fp.node_id,
-             gn.latitude,
-             gn.longitude,
-             gn.location_name,
-             fp.risk_level,
-             fp.flood_depth_cm,
-             fp.time        AS prediction_time,
-             fp.explanation
-           FROM flood_predictions fp
-           JOIN grid_nodes gn ON gn.node_id = fp.node_id
-           WHERE gn.latitude  BETWEEN $1::numeric AND $2::numeric
-             AND gn.longitude BETWEEN $3::numeric AND $4::numeric
-             AND fp.time >= NOW() - INTERVAL '2 hours'
-             AND fp.flood_depth_cm > 10
-           ORDER BY fp.node_id, fp.time DESC
-           LIMIT $5`,
-          {
-            bind: [minLat, maxLat, minLng, maxLng, limit],
-            type: QueryTypes.SELECT,
-          },
-        )
+        let rows;
+        if (offsetDays === 0) {
+          // Lấy kết quả hiện tại (gần NOW() nhất)
+          rows = await this.sequelize.query(
+            `SELECT DISTINCT ON (fp.node_id)
+               fp.node_id, gn.latitude, gn.longitude, gn.location_name,
+               fp.risk_level, fp.flood_depth_cm, fp.time AS prediction_time, fp.explanation
+             FROM flood_predictions fp
+             JOIN grid_nodes gn ON gn.node_id = fp.node_id
+             WHERE gn.latitude  BETWEEN $1::numeric AND $2::numeric
+               AND gn.longitude BETWEEN $3::numeric AND $4::numeric
+               AND fp.time BETWEEN NOW() - INTERVAL '4 hours' AND NOW() + INTERVAL '4 hours'
+               AND fp.flood_depth_cm > 10
+             ORDER BY fp.node_id, ABS(EXTRACT(EPOCH FROM (fp.time - NOW()))) ASC
+             LIMIT $5`,
+            { bind: [minLat, maxLat, minLng, maxLng, limit], type: QueryTypes.SELECT }
+          )
+        } else {
+          // Lấy kết quả max depth trong ngày tương lai
+          rows = await this.sequelize.query(
+            `SELECT DISTINCT ON (fp.node_id)
+               fp.node_id, gn.latitude, gn.longitude, gn.location_name,
+               fp.risk_level, fp.flood_depth_cm, fp.time AS prediction_time, fp.explanation
+             FROM flood_predictions fp
+             JOIN grid_nodes gn ON gn.node_id = fp.node_id
+             WHERE gn.latitude  BETWEEN $1::numeric AND $2::numeric
+               AND gn.longitude BETWEEN $3::numeric AND $4::numeric
+               AND fp.time BETWEEN (NOW() + ($6 * INTERVAL '1 day'))::timestamp 
+                               AND (NOW() + ($6 * INTERVAL '1 day') + INTERVAL '24 hours')::timestamp
+               AND fp.flood_depth_cm > 10
+             ORDER BY fp.node_id, fp.flood_depth_cm DESC
+             LIMIT $5`,
+            { bind: [minLat, maxLat, minLng, maxLng, limit, offsetDays], type: QueryTypes.SELECT }
+          )
+        }
 
         if (!rows || rows.length === 0) {
           return res.status(200).json({

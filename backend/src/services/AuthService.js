@@ -88,6 +88,25 @@ class AuthService {
     return { message: 'Đăng xuất thành công. Vui lòng xóa JWT token phía client.' }
   }
 
+  // Check email (DEV Mode Bypass): Kiểm tra email và trả về resetToken trực tiếp
+  async checkEmail({ email }) {
+    // Tìm user theo email
+    const user = await User.findOne({ where: { email } })
+
+    // Nếu không tồn tại: báo lỗi 404
+    if (!user) {
+      const err = new Error('Email không tồn tại trong hệ thống')
+      err.statusCode = 404
+      throw err
+    }
+
+    // Nếu tồn tại: tạo token chứa email (chỉ sống 15 phút)
+    const payload = { email: user.email, purpose: 'reset_password' }
+    const resetToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' })
+
+    return { message: 'Kiểm tra email thành công', resetToken }
+  }
+
   // Forgot password: tạo resetToken JWT 15 phút, mock email bằng console.log
   async forgotPassword({ email }) {
     // Tìm user theo email để đảm bảo đúng flow reset theo mail
@@ -127,10 +146,10 @@ class AuthService {
     // Hash mật khẩu mới trước khi lưu
     const password_hash = await bcrypt.hash(newPassword, 10)
 
-    // Update DB theo user_id trong token (không tin tưởng user_id từ body)
+    // Update DB theo email trong token (không tin tưởng email từ body)
     const [updated] = await User.update(
       { password_hash },
-      { where: { user_id: decoded.user_id } },
+      { where: { email: decoded.email } },
     )
 
     // Nếu không update được (user bị xóa) thì trả lỗi nhẹ

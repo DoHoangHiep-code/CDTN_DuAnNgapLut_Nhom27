@@ -10,6 +10,7 @@ class AuthController {
     this.login = this.login.bind(this)
     this.logout = this.logout.bind(this)
     this.forgotPassword = this.forgotPassword.bind(this)
+    this.checkEmail = this.checkEmail.bind(this)
     this.resetPassword = this.resetPassword.bind(this)
   }
 
@@ -68,6 +69,20 @@ class AuthController {
       const result = await this.authService.logout()
       return res.status(200).json({ success: true, message: result.message })
     } catch (err) {
+      return next(err)
+    }
+  }
+
+  // POST /check-email (DEV Mode Bypass)
+  async checkEmail(req, res, next) {
+    try {
+      const { email } = req.body
+      if (!email) return res.status(400).json({ success: false, error: { message: 'Thiếu email' } })
+
+      const result = await this.authService.checkEmail({ email })
+      return res.status(200).json({ success: true, message: result.message, resetToken: result.resetToken })
+    } catch (err) {
+      if (err && err.statusCode) return res.status(err.statusCode).json({ success: false, error: { message: err.message } })
       return next(err)
     }
   }

@@ -63,7 +63,8 @@ apiV1.interceptors.response.use(
       // Xóa token để tránh gửi lại token lỗi ở các request sau
       clearToken()
       // Điều hướng về /login (dùng window.location để không phụ thuộc hook router)
-      if (window.location.pathname !== '/login') {
+      const publicRoutes = ['/login', '/register', '/forgot-password', '/reset-password']
+      if (!publicRoutes.includes(window.location.pathname)) {
         window.location.href = '/login'
       }
     }

@@ -25,7 +25,7 @@ const https = require('https')
 const OPEN_METEO_ARCHIVE_BASE = 'https://archive-api.open-meteo.com/v1/archive'
 const OPEN_METEO_FORECAST_BASE = 'https://api.open-meteo.com/v1/forecast'
 
-const REQUEST_TIMEOUT_MS = 15_000   // 15s per request
+const REQUEST_TIMEOUT_MS = 30_000   // 30s per request
 const MAX_RETRIES        = 3
 const RETRY_DELAY_MS     = 1_500    // 1.5s giữa các retry
 
@@ -155,80 +155,76 @@ async function fetchWeatherForNode(lat, lon) {
   }
 
   // ── Build Archive API URL (30 ngày lịch sử) ──────────────────────────────
-  // Open-Meteo Archive API yêu cầu end_date là ngày HÔM QUA (dữ liệu trễ 1 ngày)
-  const endDate   = dateStr(1)    // hôm qua
-  const startDate = dateStr(31)   // 31 ngày trước
-
-  const archiveUrl = [
-    `${OPEN_METEO_ARCHIVE_BASE}?`,
+  // ── Build Forecast API URL (30 ngày lịch sử + 4 ngày forecast) ──────────────────────────────
+  const forecastUrl = [
+    `${OPEN_METEO_FORECAST_BASE}?`,
     `latitude=${gridLat.toFixed(1)}&longitude=${gridLon.toFixed(1)}`,
-    `&start_date=${startDate}&end_date=${endDate}`,
+    `&past_days=31&forecast_days=4`,
     `&daily=precipitation_sum,soil_moisture_0_to_7cm_mean`,
     `&timezone=Asia/Ho_Chi_Minh`,
   ].join('')
 
-  let archiveData
+  let forecastData
   try {
-    archiveData = await fetchWithRetry(archiveUrl)
+    forecastData = await fetchWithRetry(forecastUrl)
   } catch (err) {
-    // Nếu archive fail, trả về giá trị null (sẽ được imputer xử lý)
-    console.warn(`[OpenMeteo] Archive fetch failed (${lat.toFixed(2)},${lon.toFixed(2)}): ${err.message}`)
+    // Nếu fetch fail, trả về giá trị null (sẽ được imputer xử lý)
+    console.warn(`[OpenMeteo] Forecast fetch failed (${lat.toFixed(2)},${lon.toFixed(2)}): ${err.message}`)
     return null
   }
 
-  const dailyTime     = archiveData?.daily?.time              ?? []
-  const dailyRain     = archiveData?.daily?.precipitation_sum ?? []
-  const dailySoilMois = archiveData?.daily?.soil_moisture_0_to_7cm_mean ?? []
+  const dailyRain     = forecastData?.daily?.precipitation_sum ?? []
+  const dailySoilMois = forecastData?.daily?.soil_moisture_0_to_7cm_mean ?? []
 
   if (dailyRain.length === 0) {
     console.warn(`[OpenMeteo] Không có dữ liệu mưa (${lat.toFixed(2)},${lon.toFixed(2)})`)
     return null
   }
 
-  // Đảo ngược mảng: index 0 = ngày mới nhất (hôm qua), index n = cũ nhất
-  const rainDesc     = [...dailyRain].reverse().map((v) => v ?? 0)
-  const soilDesc     = [...dailySoilMois].reverse().map((v) => v ?? 0)
+  const stationForecasts = []
 
-  // ── Tính các biến tích lũy mưa ────────────────────────────────────────────
-  const sumN = (arr, n) => arr.slice(0, n).reduce((a, b) => a + b, 0)
-  const maxN = (arr, n) => Math.max(...arr.slice(0, n), 0)
+  for (let offset = 0; offset <= 3; offset++) {
+    const targetEndIndex = 30 + offset
 
-  const rain_1d_accum   = sumN(rainDesc,  1)
-  const rain_3d_accum   = sumN(rainDesc,  3)
-  const rain_7d_accum   = sumN(rainDesc,  7)
-  const rain_14d_accum  = sumN(rainDesc, 14)
-  const rain_30d_accum  = sumN(rainDesc, 30)
+    const rainDesc = dailyRain.slice(0, targetEndIndex + 1).reverse().map(v => v ?? 0)
+    const soilDesc = dailySoilMois.slice(0, targetEndIndex + 1).reverse().map(v => v ?? 0)
 
-  const max_rain_1d_in_7d = maxN(rainDesc, 7)
-  const max_rain_1d_in_3d = maxN(rainDesc, 3)
+    const sumN = (arr, n) => arr.slice(0, n).reduce((a, b) => a + b, 0)
+    const maxN = (arr, n) => Math.max(...arr.slice(0, n), 0)
 
-  // ── API (Antecedent Precipitation Index) ──────────────────────────────────
-  const api_7d  = calcAPI(rainDesc,  7)
-  const api_14d = calcAPI(rainDesc, 14)
+    const rain_1d_accum   = sumN(rainDesc,  1)
+    const rain_3d_accum   = sumN(rainDesc,  3)
+    const rain_7d_accum   = sumN(rainDesc,  7)
+    const rain_14d_accum  = sumN(rainDesc, 14)
+    const rain_30d_accum  = sumN(rainDesc, 30)
 
-  // ── Độ ẩm đất (SMAP proxy từ Open-Meteo ERA5) ────────────────────────────
-  // Open-Meteo trả ra soil moisture (m³/m³), scale khác SMAP một chút
-  // nhưng đủ tốt để impute trong phạm vi training data.
-  const soil_moisture_1d = soilDesc[0] ?? 0
-  const soil_moisture_7d = soilDesc.slice(0, 7).reduce((a, b) => a + b, 0) / Math.max(soilDesc.slice(0, 7).filter((v) => v > 0).length, 1)
+    const max_rain_1d_in_7d = maxN(rainDesc, 7)
+    const max_rain_1d_in_3d = maxN(rainDesc, 3)
 
-  const result = {
-    rain_1d_accum:   Math.round(rain_1d_accum  * 100) / 100,
-    rain_3d_accum:   Math.round(rain_3d_accum  * 100) / 100,
-    rain_7d_accum:   Math.round(rain_7d_accum  * 100) / 100,
-    rain_14d_accum:  Math.round(rain_14d_accum * 100) / 100,
-    rain_30d_accum:  Math.round(rain_30d_accum * 100) / 100,
-    max_rain_1d_in_7d: Math.round(max_rain_1d_in_7d * 100) / 100,
-    max_rain_1d_in_3d: Math.round(max_rain_1d_in_3d * 100) / 100,
-    api_7d:          Math.round(api_7d          * 100) / 100,
-    api_14d:         Math.round(api_14d         * 100) / 100,
-    soil_moisture_1d: Math.round(soil_moisture_1d * 10000) / 10000,
-    soil_moisture_7d: Math.round(soil_moisture_7d * 10000) / 10000,
-    _cached: false
+    const api_7d  = calcAPI(rainDesc,  7)
+    const api_14d = calcAPI(rainDesc, 14)
+
+    const soil_moisture_1d = soilDesc[0] ?? 0
+    const soil_moisture_7d = soilDesc.slice(0, 7).reduce((a, b) => a + b, 0) / Math.max(soilDesc.slice(0, 7).filter(v => v > 0).length, 1)
+
+    stationForecasts.push({
+      rain_1d_accum:   Math.round(rain_1d_accum  * 100) / 100,
+      rain_3d_accum:   Math.round(rain_3d_accum  * 100) / 100,
+      rain_7d_accum:   Math.round(rain_7d_accum  * 100) / 100,
+      rain_14d_accum:  Math.round(rain_14d_accum * 100) / 100,
+      rain_30d_accum:  Math.round(rain_30d_accum * 100) / 100,
+      max_rain_1d_in_7d: Math.round(max_rain_1d_in_7d * 100) / 100,
+      max_rain_1d_in_3d: Math.round(max_rain_1d_in_3d * 100) / 100,
+      api_7d:          Math.round(api_7d          * 100) / 100,
+      api_14d:         Math.round(api_14d         * 100) / 100,
+      soil_moisture_1d: Math.round(soil_moisture_1d * 10000) / 10000,
+      soil_moisture_7d: Math.round(soil_moisture_7d * 10000) / 10000,
+      _cached: false
+    })
   }
 
   // ── Lưu cache ────────────────────────────────────────────────────────────
-  _cache.set(cacheKey, { data: result, fetchedAt: Date.now() })
+  _cache.set(cacheKey, { data: stationForecasts, fetchedAt: Date.now() })
 
   // Dọn cache cũ nếu quá lớn (giữ tối đa 5000 entries)
   if (_cache.size > 5000) {
@@ -236,7 +232,7 @@ async function fetchWeatherForNode(lat, lon) {
     _cache.delete(firstKey)
   }
 
-  return result
+  return stationForecasts
 }
 
 /**
@@ -262,7 +258,8 @@ async function fetchWeatherForMultipleNodes(stations) {
   const resultDictionary = new Map()
   if (!stations || stations.length === 0) return resultDictionary
 
-  const CHUNK_SIZE = 50;
+  const CHUNK_SIZE = 20;
+  let consecutiveErrors = 0;
   for (let c = 0; c < stations.length; c += CHUNK_SIZE) {
     const chunk = stations.slice(c, c + CHUNK_SIZE)
     
@@ -270,31 +267,40 @@ async function fetchWeatherForMultipleNodes(stations) {
     const lats = chunk.map(s => s.lat.toFixed(1)).join(',')
     const lons = chunk.map(s => s.lon.toFixed(1)).join(',')
     
-    const endDate   = dateStr(1)    // hôm qua
+    const endDate   = dateStr(-3)   // 3 ngày tới (forecast_days=4)
     const startDate = dateStr(31)   // 31 ngày trước
 
-    const archiveUrl = [
-      `${OPEN_METEO_ARCHIVE_BASE}?`,
+    const forecastUrl = [
+      `${OPEN_METEO_FORECAST_BASE}?`,
       `latitude=${lats}&longitude=${lons}`,
-      `&start_date=${startDate}&end_date=${endDate}`,
+      `&past_days=31&forecast_days=4`,
       `&daily=precipitation_sum,soil_moisture_0_to_7cm_mean`,
       `&timezone=Asia/Ho_Chi_Minh`,
     ].join('')
 
-    let archiveData
+    let forecastData
     try {
-      archiveData = await fetchWithRetry(archiveUrl)
+      forecastData = await fetchWithRetry(forecastUrl)
+      consecutiveErrors = 0 // reset on success
     } catch (err) {
       console.warn(`[OpenMeteo] Batch fetch failed for chunk of ${chunk.length} locations: ${err.message}`)
-      // Gán null cho tất cả để chạy Imputer
       for (const st of chunk) {
         resultDictionary.set(st.id, null)
+      }
+      consecutiveErrors++
+      if (consecutiveErrors >= 2) {
+        console.error(`[OpenMeteo] ❌ Mạng lỗi hoặc API bị chặn (2 lần liên tiếp). Bỏ qua fetch OpenMeteo cho các trạm còn lại!`)
+        // Fill null cho TẤT CẢ các trạm còn lại
+        for (let j = c + CHUNK_SIZE; j < stations.length; j++) {
+          resultDictionary.set(stations[j].id, null)
+        }
+        break // Dừng fetch
       }
       continue // Move to next chunk
     }
 
     // OpenMeteo trả về Array khi request nhiều tọa độ, Object nếu chỉ 1
-    const resultsArr = Array.isArray(archiveData) ? archiveData : [archiveData]
+    const resultsArr = Array.isArray(forecastData) ? forecastData : [forecastData]
 
     for (let i = 0; i < chunk.length; i++) {
       const station = chunk[i]
@@ -313,53 +319,64 @@ async function fetchWeatherForMultipleNodes(stations) {
         continue
       }
 
-      const rainDesc = [...dailyRain].reverse().map(v => v ?? 0)
-      const soilDesc = [...dailySoilMois].reverse().map(v => v ?? 0)
+      const stationForecasts = []
 
-      const sumN = (arr, n) => arr.slice(0, n).reduce((a, b) => a + b, 0)
-      const maxN = (arr, n) => Math.max(...arr.slice(0, n), 0)
+      // Lặp 4 mốc thời gian: 0 (Hôm nay), 1 (Ngày mai), 2 (Ngày kia), 3 (Ngày kìa)
+      for (let offset = 0; offset <= 3; offset++) {
+        // Trong mảng 35 phần tử (past_days=31 + forecast_days=4)
+        // Hôm nay luôn ở index 31.
+        const targetEndIndex = 30 + offset
 
-      const rain_1d_accum   = sumN(rainDesc,  1)
-      const rain_3d_accum   = sumN(rainDesc,  3)
-      const rain_7d_accum   = sumN(rainDesc,  7)
-      const rain_14d_accum  = sumN(rainDesc, 14)
-      const rain_30d_accum  = sumN(rainDesc, 30)
+        // Lấy lịch sử từ 0 đến targetEndIndex, đảo ngược để index 0 là ngày sát target nhất (hôm qua của target)
+        // Lưu ý: data huấn luyện dùng endDate=ngày hôm qua. Nên để tính mốc target, ta dùng lịch sử từ hôm qua trở về trước.
+        const rainDesc = dailyRain.slice(0, targetEndIndex + 1).reverse().map(v => v ?? 0)
+        const soilDesc = dailySoilMois.slice(0, targetEndIndex + 1).reverse().map(v => v ?? 0)
 
-      const max_rain_1d_in_7d = maxN(rainDesc, 7)
-      const max_rain_1d_in_3d = maxN(rainDesc, 3)
+        const sumN = (arr, n) => arr.slice(0, n).reduce((a, b) => a + b, 0)
+        const maxN = (arr, n) => Math.max(...arr.slice(0, n), 0)
 
-      const api_7d  = calcAPI(rainDesc,  7)
-      const api_14d = calcAPI(rainDesc, 14)
+        const rain_1d_accum   = sumN(rainDesc,  1)
+        const rain_3d_accum   = sumN(rainDesc,  3)
+        const rain_7d_accum   = sumN(rainDesc,  7)
+        const rain_14d_accum  = sumN(rainDesc, 14)
+        const rain_30d_accum  = sumN(rainDesc, 30)
 
-      const soil_moisture_1d = soilDesc[0] ?? 0
-      const soil_moisture_7d = soilDesc.slice(0, 7).reduce((a, b) => a + b, 0) / Math.max(soilDesc.slice(0, 7).filter(v => v > 0).length, 1)
+        const max_rain_1d_in_7d = maxN(rainDesc, 7)
+        const max_rain_1d_in_3d = maxN(rainDesc, 3)
 
-      const parsedResult = {
-        rain_1d_accum:   Math.round(rain_1d_accum  * 100) / 100,
-        rain_3d_accum:   Math.round(rain_3d_accum  * 100) / 100,
-        rain_7d_accum:   Math.round(rain_7d_accum  * 100) / 100,
-        rain_14d_accum:  Math.round(rain_14d_accum * 100) / 100,
-        rain_30d_accum:  Math.round(rain_30d_accum * 100) / 100,
-        max_rain_1d_in_7d: Math.round(max_rain_1d_in_7d * 100) / 100,
-        max_rain_1d_in_3d: Math.round(max_rain_1d_in_3d * 100) / 100,
-        api_7d:          Math.round(api_7d          * 100) / 100,
-        api_14d:         Math.round(api_14d         * 100) / 100,
-        soil_moisture_1d: Math.round(soil_moisture_1d * 10000) / 10000,
-        soil_moisture_7d: Math.round(soil_moisture_7d * 10000) / 10000,
-        _cached: false
+        const api_7d  = calcAPI(rainDesc,  7)
+        const api_14d = calcAPI(rainDesc, 14)
+
+        const soil_moisture_1d = soilDesc[0] ?? 0
+        const soil_moisture_7d = soilDesc.slice(0, 7).reduce((a, b) => a + b, 0) / Math.max(soilDesc.slice(0, 7).filter(v => v > 0).length, 1)
+
+        stationForecasts.push({
+          rain_1d_accum:   Math.round(rain_1d_accum  * 100) / 100,
+          rain_3d_accum:   Math.round(rain_3d_accum  * 100) / 100,
+          rain_7d_accum:   Math.round(rain_7d_accum  * 100) / 100,
+          rain_14d_accum:  Math.round(rain_14d_accum * 100) / 100,
+          rain_30d_accum:  Math.round(rain_30d_accum * 100) / 100,
+          max_rain_1d_in_7d: Math.round(max_rain_1d_in_7d * 100) / 100,
+          max_rain_1d_in_3d: Math.round(max_rain_1d_in_3d * 100) / 100,
+          api_7d:          Math.round(api_7d          * 100) / 100,
+          api_14d:         Math.round(api_14d         * 100) / 100,
+          soil_moisture_1d: Math.round(soil_moisture_1d * 10000) / 10000,
+          soil_moisture_7d: Math.round(soil_moisture_7d * 10000) / 10000,
+          _cached: false
+        })
       }
 
-      resultDictionary.set(station.id, parsedResult)
+      resultDictionary.set(station.id, stationForecasts)
     }
 
     // Update Cache luôn cho các trạm này để API lẻ tẻ cũng tận dụng được
     const today = dateStr(0)
     for (let i = 0; i < chunk.length; i++) {
       const station = chunk[i]
-      const parsedResult = resultDictionary.get(station.id)
-      if (parsedResult) {
+      const parsedResults = resultDictionary.get(station.id)
+      if (parsedResults && Array.isArray(parsedResults)) {
         const cacheKey = `${station.lat.toFixed(1)}_${station.lon.toFixed(1)}_${today}`
-        _cache.set(cacheKey, { data: parsedResult, fetchedAt: Date.now() })
+        _cache.set(cacheKey, { data: parsedResults, fetchedAt: Date.now() })
       }
     }
 
