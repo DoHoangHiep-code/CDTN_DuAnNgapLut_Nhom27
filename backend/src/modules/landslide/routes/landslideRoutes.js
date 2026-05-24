@@ -23,9 +23,23 @@ const express = require('express')
 const { predictLandslide, getModelStatus } = require('../services/landslideInference')
 const { sequelize } = require('../../../db/sequelize')
 const landslideCache = require('../../../utils/landslideCache')
-const { cacheResponse } = require('../../../middlewares/apiCache')
+const { cacheResponse, invalidateCacheNamespace } = require('../../../middlewares/apiCache')
 
 const router = express.Router()
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/v1/landslide/clear-cache
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/clear-cache', async (_req, res) => {
+  try {
+    invalidateCacheNamespace('landslide_api')
+    // Trigger in-memory map reload async
+    landslideCache.loadCache().catch(e => console.error('[LandslideCache] Reload error:', e))
+    return res.status(200).json({ success: true, message: 'Đã xóa HTTP Cache và nạp lại in-memory Cache Sạt lở.' })
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/v1/landslide/predict
@@ -72,7 +86,7 @@ router.get('/status', (_req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/v1/landslide/dashboard
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/dashboard', cacheResponse(1 * 3600, 'landslide_api'), async (_req, res, next) => {
+router.get('/dashboard', cacheResponse(1 * 3600, 'landslide_api'), async (req, res, next) => {
   try {
     const cacheStats = landslideCache.getStats()
     if (!cacheStats.ready) {
@@ -82,13 +96,24 @@ router.get('/dashboard', cacheResponse(1 * 3600, 'landslide_api'), async (_req, 
       })
     }
 
-    const stats = landslideCache.getDashboardStats()
+    const offset = Math.min(Math.max(parseInt(req.query.offset, 10) || 0, 0), 3)
+    const stats = landslideCache.getDashboardStats(offset)
     
     // SQL cho xu hướng API7d 7 ngày qua
     const [trendRows] = await sequelize.query(`
       SELECT DATE_TRUNC('day', prediction_time) as day, AVG(api_7d) as mm
       FROM landslide_predictions
       WHERE prediction_time >= NOW() - INTERVAL '7 days'
+        AND prediction_time <= NOW()
+      GROUP BY 1 ORDER BY 1
+    `)
+
+    // SQL cho dự báo mưa 3 ngày tới
+    const [forecastRows] = await sequelize.query(`
+      SELECT DATE_TRUNC('day', prediction_time) as day, AVG(api_7d) as mm
+      FROM landslide_predictions
+      WHERE prediction_time > NOW()
+        AND prediction_time <= NOW() + INTERVAL '3 days'
       GROUP BY 1 ORDER BY 1
     `)
 
@@ -97,6 +122,10 @@ router.get('/dashboard', cacheResponse(1 * 3600, 'landslide_api'), async (_req, 
       data: {
         ...stats,
         rain_trend: trendRows.map(r => ({
+          day: new Date(r.day).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }),
+          mm: parseFloat(r.mm).toFixed(1)
+        })),
+        rain_forecast_3d: forecastRows.map(r => ({
           day: new Date(r.day).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }),
           mm: parseFloat(r.mm).toFixed(1)
         }))
@@ -128,6 +157,8 @@ router.get('/nodes', cacheResponse(12 * 3600, 'landslide_api'), async (req, res,
     const limit       = Math.min(parseInt(req.query.limit, 10) || 3000, 5000)
     const risk_filter = req.query.risk_filter || 'ALL'
 
+    const offset      = Math.min(Math.max(parseInt(req.query.offset, 10) || 0, 0), 3)
+
     const cacheStats = landslideCache.getStats()
 
     if (!cacheStats.ready) {
@@ -158,7 +189,7 @@ router.get('/nodes', cacheResponse(12 * 3600, 'landslide_api'), async (req, res,
       // Bước 2: In-memory join với cache (O(n) lookups, không cần DB)
       const nodes = []
       for (const n of gridNodes) {
-        const pred = landslideCache.getForNode(n.node_id)
+        const pred = landslideCache.getForNode(n.node_id, offset)
         if (!pred) continue  // node này chưa có dự báo
 
         // Risk filter
@@ -227,6 +258,7 @@ router.get('/hotspots', cacheResponse(12 * 3600, 'landslide_api'), async (req, r
       // landslideCache không expose raw Map, cần query grid nodes với province info
       // Dùng DB query chỉ cho grid_nodes (không cần predictions)
       // Lấy top 200 hotspot node_ids từ cache trước
+      // Hotspot mặc định lấy cho offset=0 (hôm nay) để hiển thị Dashboard
       const topNodeIds = getTopNodeIdsFromCache(limit * 20) // lấy nhiều để có đủ sau khi join
 
       if (topNodeIds.length > 0) {
@@ -243,7 +275,7 @@ router.get('/hotspots', cacheResponse(12 * 3600, 'landslide_api'), async (req, r
         )
 
         for (const n of gridNodes) {
-          const pred = landslideCache.getForNode(n.node_id)
+          const pred = landslideCache.getForNode(n.node_id, 0)
           if (!pred || !['DANGER', 'WARNING'].includes(pred.risk_level)) continue
           candidates.push({
             node_id: n.node_id, lat: parseFloat(n.lat), lon: parseFloat(n.lon),
@@ -358,6 +390,7 @@ router.get('/nearest-node', async (req, res, next) => {
     // Dùng khoảng cách Euclid cơ bản. (Tối ưu: dùng PostGIS ST_Distance nếu có index)
     const [gridNodes] = await sequelize.query(
       `SELECT node_id, lat, lon, province, location_name, slope, twi, elevation, ndvi,
+              tpi, tri, roughness, ndwi, bsi, lulc_class, dist_to_river_m, dist_to_road_m,
               ((lat - :lat)*(lat - :lat) + (lon - :lon)*(lon - :lon)) as dist
        FROM landslide_grid_nodes
        ORDER BY dist ASC
@@ -382,6 +415,14 @@ router.get('/nearest-node', async (req, res, next) => {
       twi: n.twi != null ? parseFloat(n.twi) : null,
       elevation: n.elevation != null ? parseFloat(n.elevation) : null,
       ndvi: n.ndvi != null ? parseFloat(n.ndvi) : null,
+      tpi: n.tpi != null ? parseFloat(n.tpi) : null,
+      tri: n.tri != null ? parseFloat(n.tri) : null,
+      roughness: n.roughness != null ? parseFloat(n.roughness) : null,
+      ndwi: n.ndwi != null ? parseFloat(n.ndwi) : null,
+      bsi: n.bsi != null ? parseFloat(n.bsi) : null,
+      lulc_class: n.lulc_class != null ? parseInt(n.lulc_class, 10) : null,
+      dist_to_river_m: n.dist_to_river_m != null ? parseFloat(n.dist_to_river_m) : null,
+      dist_to_road_m: n.dist_to_road_m != null ? parseFloat(n.dist_to_road_m) : null,
       dist_sq: n.dist,
       prob_landslide: pred.prob_landslide || null,
       risk_level: pred.risk_level || 'UNKNOWN',

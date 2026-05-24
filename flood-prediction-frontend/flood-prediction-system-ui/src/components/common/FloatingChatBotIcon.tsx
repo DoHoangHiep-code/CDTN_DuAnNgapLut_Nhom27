@@ -1,8 +1,28 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { X } from 'lucide-react'
 import { ChatInterface } from './ChatInterface'
+import { useDisasterMode } from '../../context/DisasterContext'
 
 const SNAP_MARGIN = 16 // px from edge when snapping
+
+const TOOLTIP_MESSAGES = {
+  default: [
+    "Xin chào 👋",
+    "Bạn cần tôi giúp gì?",
+    "Tôi có thể giúp gì cho bạn?",
+    "Bạn có cần hỗ trợ không?"
+  ],
+  landslide: [
+    "Bạn muốn kiểm tra sạt lở?",
+    "Khu vực của bạn an toàn chứ?",
+    "Xem độ ổn định sườn dốc?"
+  ],
+  flood: [
+    "Bạn cần xem dự báo ngập lụt?",
+    "Có khu vực nào ngập không?",
+    "Xem chi tiết lượng mưa?"
+  ]
+}
 
 export function FloatingChatBotIcon() {
   const [isOpen, setIsOpen] = useState(false)
@@ -11,6 +31,34 @@ export function FloatingChatBotIcon() {
   const dragOffset = useRef({ x: 0, y: 0 })
   const moved = useRef(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
+  const { mode } = useDisasterMode()
+
+  const [showTooltip, setShowTooltip] = useState(false)
+  const [tooltipText, setTooltipText] = useState('')
+  const [hasInteracted, setHasInteracted] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen && !hasInteracted && !showTooltip) {
+      const timer = setTimeout(() => {
+        const modeList = TOOLTIP_MESSAGES[mode === 'landslide' ? 'landslide' : 'flood']
+        const allMsgs = [...TOOLTIP_MESSAGES.default, ...modeList]
+        const randomMsg = allMsgs[Math.floor(Math.random() * allMsgs.length)]
+        setTooltipText(randomMsg)
+        setShowTooltip(true)
+      }, 7000)
+      return () => clearTimeout(timer)
+    }
+  }, [isOpen, hasInteracted, showTooltip, mode])
+
+  useEffect(() => {
+    if (showTooltip) {
+      const hideTimer = setTimeout(() => {
+        setShowTooltip(false)
+        // Không setHasInteracted(true) ở đây để nó có thể lặp lại sau 7s
+      }, 5000)
+      return () => clearTimeout(hideTimer)
+    }
+  }, [showTooltip])
 
   const clamp = useCallback((x: number, y: number) => ({
     x: Math.max(SNAP_MARGIN, Math.min(window.innerWidth - 56 - SNAP_MARGIN, x)),
@@ -63,6 +111,8 @@ export function FloatingChatBotIcon() {
     } else {
       // It was a tap — toggle chat
       setIsOpen((o) => !o)
+      setHasInteracted(true)
+      setShowTooltip(false)
     }
     ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
   }, [snapToEdge])
@@ -91,13 +141,58 @@ export function FloatingChatBotIcon() {
           type="button"
           aria-label="Mở chatbot hỗ trợ"
           style={{ left: pos.x, top: pos.y, touchAction: 'none' }}
-          className="fixed z-[9999] flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 shadow-xl shadow-cyan-500/30 ring-2 ring-white/50 transition-transform hover:scale-105 active:scale-95 dark:ring-slate-800 select-none overflow-hidden p-0 animate-bounce hover:animate-none"
+          className={`fixed z-[9999] flex h-16 w-16 items-center justify-center rounded-full shadow-xl transition-transform hover:scale-105 active:scale-95 select-none overflow-hidden p-0 animate-bounce hover:animate-none ${
+            mode === 'landslide'
+              ? 'bg-gradient-to-br from-amber-500 to-orange-600 shadow-amber-500/30'
+              : 'bg-gradient-to-br from-cyan-400 to-blue-500 shadow-cyan-500/30'
+          }`}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
         >
-          <img src="/okicon.png" alt="Chatbot" className="h-full w-full object-cover" draggable={false} />
+          <img 
+            src={mode === 'landslide' ? '/landslide_bot.png' : '/okicon.png'} 
+            alt="Chatbot" 
+            className="h-full w-full object-cover" 
+            draggable={false} 
+          />
         </button>
+      )}
+
+      {/* Floating Tooltip */}
+      {!isOpen && showTooltip && (
+        <div
+          className={`fixed z-[9999] px-4 py-2.5 rounded-2xl shadow-xl text-sm font-bold cursor-pointer transition-all hover:scale-105 ${
+            mode === 'landslide'
+              ? 'bg-amber-50 text-amber-800 border border-amber-300 shadow-amber-500/20 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800'
+              : 'bg-sky-50 text-sky-800 border border-sky-300 shadow-sky-500/20 dark:bg-sky-950 dark:text-sky-200 dark:border-sky-800'
+          }`}
+          style={{
+            right: window.innerWidth - pos.x + 8,
+            top: pos.y + 12,
+          }}
+          onClick={() => {
+            setIsOpen(true)
+            setShowTooltip(false)
+            setHasInteracted(true)
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${mode === 'landslide' ? 'bg-amber-500' : 'bg-sky-500'}`}></span>
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${mode === 'landslide' ? 'bg-amber-500' : 'bg-sky-500'}`}></span>
+            </span>
+            {tooltipText}
+          </div>
+          {/* Arrow pointing right */}
+          <div 
+            className={`absolute -right-[5px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 rotate-45 border-r border-t ${
+              mode === 'landslide' 
+                ? 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950' 
+                : 'border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950'
+            }`}
+          />
+        </div>
       )}
 
       {/* Chat window */}

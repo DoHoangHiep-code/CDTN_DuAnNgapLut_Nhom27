@@ -37,7 +37,7 @@ export function WeatherTerrainPage() {
   const [currentCoords, setCurrentCoords] = useState({ lat: 21.0, lon: 105.0 });
   const [rainHistory, setRainHistory] = useState<{day: string, mm: number}[]>(defaultRainHistory);
   const [stats, setStats] = useState({ todayRain: 0, rain3Days: 0, rain7Days: 0, soilMoisture: 85 });
-  const [terrain, setTerrain] = useState({ slope: 32, ndvi: 0.65, twi: 4.2, lulc: 'Rừng rậm' });
+  const [terrain, setTerrain] = useState({ slope: 32, ndvi: 0.65, twi: 4.2, lulc: 'Rừng rậm', tpi: 0, tri: 0, roughness: 0, ndwi: 0, bsi: 0, riverDist: 0, roadDist: 0 });
   const mapRef = React.useRef<LandslideMapRef>(null);
 
   const fetchWeather = async (lat = 21.0, lon = 105.0) => {
@@ -67,16 +67,32 @@ export function WeatherTerrainPage() {
 
       if (nodeData) {
         const ndvi = nodeData.ndvi ?? 0.65;
-        let lulc = 'Đất trống / Đô thị';
-        if (ndvi > 0.6) lulc = 'Rừng rậm';
-        else if (ndvi > 0.3) lulc = 'Nông nghiệp / Cây bụi';
-        else if (ndvi < 0) lulc = 'Mặt nước';
+        const c = nodeData.lulc_class;
+        let lulc = 'Không rõ';
+        if (c !== null && c !== undefined) {
+          if ([1, 2, 3, 4, 5].includes(c)) lulc = 'Rừng (Các loại)';
+          else if ([6, 7, 8, 9, 10].includes(c)) lulc = 'Đất thưa / Cây bụi';
+          else if ([11, 12, 14].includes(c)) lulc = 'Nông nghiệp / Đồng cỏ';
+          else if ([13, 16, 17].includes(c)) lulc = 'Đô thị / Đất trống';
+        } else {
+          // fallback
+          if (ndvi > 0.6) lulc = 'Rừng rậm';
+          else if (ndvi > 0.3) lulc = 'Nông nghiệp / Cây bụi';
+          else if (ndvi < 0) lulc = 'Mặt nước';
+        }
 
         setTerrain({
           slope: nodeData.slope ?? 32,
           ndvi: ndvi,
           twi: nodeData.twi ?? 4.2,
-          lulc: lulc
+          lulc: lulc,
+          tpi: nodeData.tpi ?? 0,
+          tri: nodeData.tri ?? 0,
+          roughness: nodeData.roughness ?? 0,
+          ndwi: nodeData.ndwi ?? 0,
+          bsi: nodeData.bsi ?? 0,
+          riverDist: (nodeData.dist_to_river_m ?? 50000) / 1000,
+          roadDist: (nodeData.dist_to_road_m ?? 20000) / 1000,
         });
         
         r7 = nodeData.rain_7d_accum ?? r7;
@@ -211,7 +227,43 @@ export function WeatherTerrainPage() {
                 </div>
                 <div>
                   <div className="text-xs text-slate-500">Loại đất (LULC)</div>
-                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{terrain.lulc}</div>
+                  <div className="text-sm font-bold text-slate-800 dark:text-slate-100">{terrain.lulc}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-rose-100 p-2 dark:bg-rose-900/30">
+                  <Mountain className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Độ gồ ghề (Rough)</div>
+                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{terrain.roughness.toFixed(1)}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30">
+                  <Droplets className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Nước/Độ ẩm (NDWI)</div>
+                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{terrain.ndwi.toFixed(2)}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-stone-100 p-2 dark:bg-stone-900/30">
+                  <Layers className="h-5 w-5 text-stone-600 dark:text-stone-400" />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Đất trống (BSI)</div>
+                  <div className="text-lg font-bold text-slate-800 dark:text-slate-100">{terrain.bsi.toFixed(2)}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-teal-100 p-2 dark:bg-teal-900/30">
+                  <MapPin className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Cách Sông / Đường</div>
+                  <div className="text-sm font-bold text-slate-800 dark:text-slate-100">{terrain.riverDist.toFixed(1)}km / {terrain.roadDist.toFixed(1)}km</div>
                 </div>
               </div>
             </div>

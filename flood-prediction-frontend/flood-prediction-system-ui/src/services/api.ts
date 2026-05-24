@@ -63,6 +63,7 @@ export async function getFloodPredictionBbox(bbox: {
   minLng: number
   maxLng: number
   limit?: number
+  offset?: number
 }, signal?: AbortSignal) {
   const res = await apiV1.get<any>('/flood-prediction', {
     params: {
@@ -71,6 +72,7 @@ export async function getFloodPredictionBbox(bbox: {
       min_lng: bbox.minLng,
       max_lng: bbox.maxLng,
       limit: bbox.limit ?? 200,
+      offset: bbox.offset ?? 0,
     },
     signal,
   })
@@ -324,6 +326,7 @@ export async function getLandslideBbox(bbox: {
   maxLng: number
   limit?: number
   riskFilter?: 'ALL' | 'WARNING' | 'DANGER'
+  offset?: number
 }, signal?: AbortSignal) {
   const res = await apiV1.get<any>('/landslide/nodes', {
     params: {
@@ -333,6 +336,7 @@ export async function getLandslideBbox(bbox: {
       max_lng: bbox.maxLng,
       limit: bbox.limit ?? 2000,
       risk_filter: bbox.riskFilter ?? 'ALL',
+      offset: bbox.offset ?? 0,
     },
     signal,
   })
@@ -343,8 +347,8 @@ export async function getLandslideBbox(bbox: {
  * Lấy top hotspot sạt lở (DANGER + WARNING) để hiển thị trong Hotspot Cards.
  * Endpoint: GET /api/v1/landslide/hotspots?limit=10
  */
-export async function getLandslideHotspots(limit = 10) {
-  const res = await apiV1.get<any>('/landslide/hotspots', { params: { limit } })
+export async function getLandslideHotspots(limit = 10, offset = 0) {
+  const res = await apiV1.get<any>('/landslide/hotspots', { params: { limit, offset } })
   return (res.data?.data ?? res.data?.nodes ?? []) as LandslideNode[]
 }
 
@@ -371,8 +375,8 @@ export async function getNearestLandslideNode(lat: number, lon: number) {
  * Lấy số liệu thống kê cho Dashboard sạt lở
  * Endpoint: GET /api/v1/landslide/dashboard
  */
-export async function getLandslideDashboardStats() {
-  const res = await apiV1.get<any>('/landslide/dashboard')
+export async function getLandslideDashboardStats(offset: number = 0) {
+  const res = await apiV1.get<any>('/landslide/dashboard', { params: { offset } })
   return res.data?.data
 }
 

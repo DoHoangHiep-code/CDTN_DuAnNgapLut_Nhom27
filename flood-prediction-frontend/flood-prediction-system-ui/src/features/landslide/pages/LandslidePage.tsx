@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { LandslideMap, type LandslideMapRef } from '../components/LandslideMap'
 import { LANDSLIDE_HOTSPOTS } from '../components/LandslideHotspotCards'
 import { cn } from '../../../utils/cn'
-import { getLandslideHotspots } from '../../../services/api'
+import { getLandslideHotspots, getLandslideDashboardStats } from '../../../services/api'
 
 // ── Màu theme sạt lở: đất/núi (amber-red-stone) ────────────────────────────
 const LS = {
@@ -124,13 +124,18 @@ export function LandslidePage() {
     soilMoisture: number; rain7d: number; slope: number; ndvi: number; lat: number; lng: number
   }>>([])
   const [loadingHotspots, setLoadingHotspots] = useState(true)
+  const [dayOffset, setDayOffset] = useState(0)
+  const [globalStats, setGlobalStats] = useState({ danger: 0, warning: 0 })
 
   useEffect(() => {
     let active = true
     async function fetchDynamicHotspots() {
       try {
         setLoadingHotspots(true)
-        const data = await getLandslideHotspots(10)
+        const [data, statsData] = await Promise.all([
+          getLandslideHotspots(10, dayOffset),
+          getLandslideDashboardStats(dayOffset)
+        ])
         if (!active) return
         if (data && data.length > 0) {
           setHotspots(data.map(node => ({
@@ -147,6 +152,10 @@ export function LandslidePage() {
         } else {
           setHotspots(LANDSLIDE_HOTSPOTS)
         }
+        
+        if (statsData) {
+          setGlobalStats({ danger: statsData.danger_count || 0, warning: statsData.warning_count || 0 })
+        }
       } catch {
         if (active) setHotspots(LANDSLIDE_HOTSPOTS)
       } finally {
@@ -155,15 +164,15 @@ export function LandslidePage() {
     }
     fetchDynamicHotspots()
     return () => { active = false }
-  }, [])
+  }, [dayOffset])
 
   const handleFlyToWard = useCallback((lat: number, lng: number, id?: string) => {
     mapRef.current?.flyToWard(lat, lng)
     setFocusedSpot(id ?? null)
   }, [])
 
-  const criticalCount = hotspots.filter(h => h.risk === 'critical').length
-  const warningCount  = hotspots.filter(h => h.risk === 'warning').length
+  const criticalCount = globalStats.danger.toLocaleString('vi-VN')
+  const warningCount  = globalStats.warning.toLocaleString('vi-VN')
 
   const tileOptions = [
     { key: 'terrain'   as const, label: 'Địa hình', icon: '🗻' },
@@ -277,7 +286,7 @@ export function LandslidePage() {
           className="col-span-12 overflow-hidden rounded-2xl shadow-xl lg:col-span-8"
           style={{ border: '1px solid rgba(120,113,108,0.3)' }}
         >
-          <LandslideMap tileStyle={tileStyle} mapRef={mapRef} />
+          <LandslideMap tileStyle={tileStyle} mapRef={mapRef} dayOffset={dayOffset} onChangeOffset={setDayOffset} />
         </div>
 
         {/* Sidebar */}

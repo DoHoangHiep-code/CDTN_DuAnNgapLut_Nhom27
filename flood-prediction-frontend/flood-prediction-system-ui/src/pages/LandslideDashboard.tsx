@@ -45,6 +45,19 @@ export function LandslideDashboardPage() {
     { name: 'Nguy hiểm', value: stats.danger_count, color: '#e11d48' },
   ].filter(d => d.value > 0);
 
+  const combinedRainData: any[] = [];
+  if (stats?.rain_trend) {
+    stats.rain_trend.forEach((d: any) => combinedRainData.push({ day: d.day, past: d.mm }));
+  }
+  if (stats?.rain_forecast_3d && stats.rain_forecast_3d.length > 0) {
+    if (stats.rain_trend && stats.rain_trend.length > 0) {
+      const lastPast = stats.rain_trend[stats.rain_trend.length - 1];
+      const existing = combinedRainData.find(d => d.day === lastPast.day);
+      if (existing) existing.future = lastPast.mm;
+    }
+    stats.rain_forecast_3d.forEach((d: any) => combinedRainData.push({ day: d.day, future: d.mm }));
+  }
+
   return (
     <div className="space-y-5">
       {/* --- Top Banner Pulse (Conditional) --- */}
@@ -58,7 +71,7 @@ export function LandslideDashboardPage() {
             <div>
               <h3 className="text-lg font-bold text-white">CẢNH BÁO KHẨN CẤP</h3>
               <p className="text-sm font-medium text-rose-100">
-                Phát hiện {stats.danger_count.toLocaleString('vi-VN')} điểm có nguy cơ sạt lở RẤT CAO. Vui lòng kiểm tra chi tiết!
+                Phát hiện {stats.danger_count.toLocaleString('vi-VN')} điểm có nguy cơ sạt lở RẤT CAO (Dành cho hôm nay). Vui lòng kiểm tra chi tiết!
               </p>
             </div>
           </div>
@@ -72,7 +85,7 @@ export function LandslideDashboardPage() {
             Bảng điều khiển Sạt lở
           </h2>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            Giám sát rủi ro trượt lở đất diện rộng theo thời gian thực
+            Giám sát rủi ro trượt lở đất diện rộng theo thời gian thực (Dữ liệu mặc định hôm nay)
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -177,14 +190,14 @@ export function LandslideDashboardPage() {
         <Card>
           <CardHeader>
             <div>
-              <CardTitle>Xu hướng Mưa tích lũy 7 ngày qua</CardTitle>
+              <CardTitle>Xu hướng Mưa tích lũy (Quá khứ & Tương lai)</CardTitle>
               <CardMeta>API7d (Antecedent Precipitation Index)</CardMeta>
             </div>
           </CardHeader>
           <div className="h-64 p-2">
-            {stats.rain_trend && stats.rain_trend.length > 0 ? (
+            {combinedRainData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                <LineChart data={stats.rain_trend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <LineChart data={combinedRainData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
                   <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -192,7 +205,9 @@ export function LandslideDashboardPage() {
                     contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
                     itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
                   />
-                  <Line type="monotone" dataKey="mm" name="Lượng mưa (mm)" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4, fill: '#0ea5e9', strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+                  <Line type="monotone" dataKey="past" name="Quá khứ (mm)" stroke="#0ea5e9" strokeWidth={3} dot={{ r: 4, fill: '#0ea5e9', strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                  <Line type="monotone" dataKey="future" name="Dự báo (mm)" stroke="#8b5cf6" strokeDasharray="5 5" strokeWidth={3} dot={{ r: 4, fill: '#8b5cf6', strokeWidth: 2 }} activeDot={{ r: 6 }} />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
