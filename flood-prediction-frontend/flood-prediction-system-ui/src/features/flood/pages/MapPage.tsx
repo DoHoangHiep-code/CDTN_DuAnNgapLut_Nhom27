@@ -169,7 +169,7 @@ function FloodClustersLayer({
         const color = heatColor(p.depthCm)
         const radius = clamp(7 + p.depthCm * 0.22, 7, 24)
         
-        const markerIconHtml = `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>`
+        const markerIconHtml = `<div style="width:14px;height:14px;border-radius:50%;background:${color};box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>`
         const markerIcon = L.divIcon({ html: markerIconHtml, className: '', iconSize: [14, 14], iconAnchor: [7, 7] })
 
         return (

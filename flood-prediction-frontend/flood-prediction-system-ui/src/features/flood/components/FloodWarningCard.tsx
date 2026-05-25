@@ -248,7 +248,7 @@ export function FloodWarningCard({ lat, lon }: Props) {
       {/* ── Card nổi trên bản đồ ── */}
       <div
         className={cn(
-          'absolute bottom-16 left-4 z-[1000] w-72 overflow-hidden rounded-2xl shadow-2xl shadow-black/40',
+          'absolute bottom-16 right-4 z-[1000] w-72 overflow-hidden rounded-2xl shadow-2xl shadow-black/40',
           'border border-white/20 bg-gradient-to-br backdrop-blur-xl transition-all duration-500',
           bgClass,
         )}

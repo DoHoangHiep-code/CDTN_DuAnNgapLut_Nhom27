@@ -169,7 +169,8 @@ CREATE TABLE IF NOT EXISTS actual_flood_reports (
     description TEXT,
     image_url TEXT,
     verified BOOLEAN DEFAULT FALSE,
-    node_id BIGINT REFERENCES grid_nodes (node_id)
+    node_id BIGINT REFERENCES grid_nodes (node_id),
+    location_name VARCHAR(512)
 );
 
 CREATE INDEX IF NOT EXISTS idx_actual_flood_reports_geom_gist ON actual_flood_reports USING GIST (geom);
@@ -192,19 +193,12 @@ CREATE TABLE IF NOT EXISTS system_logs (
 
 -- MV: Dự báo mới nhất mỗi node
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_latest_flood_predictions AS
-SELECT DISTINCT
-    ON (node_id) prediction_id,
-    node_id,
-    time,
-    flood_depth_cm,
-    risk_level,
-    explanation,
-    date_only,
-    month,
-    hour,
-    rainy_season_flag
+SELECT DISTINCT ON (node_id)
+    prediction_id, node_id, time, flood_depth_cm, risk_level,
+    explanation, date_only, month, hour, rainy_season_flag
 FROM flood_predictions
-ORDER BY node_id, time DESC;
+WHERE time >= NOW() - INTERVAL '6 hours'
+ORDER BY node_id, time ASC;
 
 CREATE UNIQUE INDEX IF NOT EXISTS mv_latest_flood_predictions_pkey ON mv_latest_flood_predictions (prediction_id);
 

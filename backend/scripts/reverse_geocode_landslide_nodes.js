@@ -28,8 +28,8 @@ async function main() {
       fs.createReadStream(csvFilePath)
         .pipe(csv())
         .on('data', (row) => {
-          const lat = parseFloat(row.lat).toFixed(5)
-          const lon = parseFloat(row.lon).toFixed(5)
+          const lat = parseFloat(row.lat_x || row.lat).toFixed(5)
+          const lon = parseFloat(row.lon_x || row.lon).toFixed(5)
           if (row.province) {
             csvMap.set(`${lat}_${lon}`, row.province)
           }

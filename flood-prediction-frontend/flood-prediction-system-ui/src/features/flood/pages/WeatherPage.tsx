@@ -313,7 +313,7 @@ function Rain24hChart({ forecast24h }: {
         </div>
       </div>
       <div className="relative px-5 pb-4 pt-5 h-[160px]">
-        <ResponsiveContainer width="99%" height="100%">
+        <ResponsiveContainer width="99%" height="100%" minWidth={1} minHeight={1}>
           <BarChart data={forecast24h} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
             <XAxis dataKey={(d) => `${toVNHour(d.timeIso)}h`} tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -403,7 +403,7 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
         <div className="flex flex-col sm:flex-row items-center gap-6">
           {/* Doughnut Chart */}
           <div className="relative h-32 w-32 flex-shrink-0">
-            <ResponsiveContainer width="99%" height="100%">
+            <ResponsiveContainer width="99%" height="100%" minWidth={1} minHeight={1}>
               <PieChart>
                 <Pie 
                   data={pieData} 
