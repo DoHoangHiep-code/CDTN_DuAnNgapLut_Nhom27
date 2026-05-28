@@ -232,19 +232,19 @@ export function ProfilePage() {
           </div>
         </section>
 
-        <div className="space-y-6">
-          {/* BẢO MẬT & ĐỔI MẬT KHẨU */}
-          <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/50 dark:border-slate-800/80 dark:bg-slate-900/60 dark:shadow-none dark:backdrop-blur-xl">
-            <div className="absolute -left-20 -top-20 h-64 w-64 rounded-full bg-rose-500/10 blur-3xl dark:bg-rose-500/5"></div>
-            
-            <CardHeader className="mb-6 relative z-10">
-              <div>
-                <CardTitle className="text-xl">Bảo mật</CardTitle>
-                <CardMeta>Quản lý mật khẩu để bảo vệ tài khoản</CardMeta>
-              </div>
-            </CardHeader>
+        {/* BẢO MẬT & ĐỔI MẬT KHẨU */}
+        <section className="relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/50 dark:border-slate-800/80 dark:bg-slate-900/60 dark:shadow-none dark:backdrop-blur-xl h-full">
+          <div className="absolute -left-20 -top-20 h-64 w-64 rounded-full bg-rose-500/10 blur-3xl dark:bg-rose-500/5"></div>
+          
+          <CardHeader className="mb-6 relative z-10">
+            <div>
+              <CardTitle className="text-xl">Bảo mật</CardTitle>
+              <CardMeta>Quản lý mật khẩu để bảo vệ tài khoản</CardMeta>
+            </div>
+          </CardHeader>
 
-            <div className="relative z-10 space-y-5 rounded-xl bg-slate-50/50 p-5 border border-slate-100 dark:bg-slate-800/30 dark:border-slate-800/50">
+          <div className="relative z-10 flex-1 space-y-5 flex flex-col justify-between rounded-xl bg-slate-50/50 p-5 border border-slate-100 dark:bg-slate-800/30 dark:border-slate-800/50">
+            <div className="space-y-5">
               <Input
                 label="Mật khẩu hiện tại"
                 type="password"
@@ -266,39 +266,19 @@ export function ProfilePage() {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="••••••••"
               />
-
-              <div className="pt-4">
-                <Button
-                  onClick={handleChangePassword}
-                  disabled={changingPwd || !currentPassword || !newPassword || !confirmPassword}
-                  className="w-full sm:w-auto min-w-[10rem] shadow-md shadow-indigo-500/20"
-                >
-                  {changingPwd ? 'Đang xử lý...' : 'Đổi mật khẩu'}
-                </Button>
-              </div>
             </div>
-          </section>
 
-          {/* CHỈ SỐ THỐNG KÊ */}
-          <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/50 dark:border-slate-800/80 dark:bg-slate-900/60 dark:shadow-none dark:backdrop-blur-xl">
-            <CardHeader className="mb-6 relative z-10">
-              <div>
-                <CardTitle className="text-xl">Thống kê hoạt động</CardTitle>
-                <CardMeta>Hiệu suất sử dụng hệ thống của bạn</CardMeta>
-              </div>
-            </CardHeader>
-            <div className="relative z-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="group rounded-2xl border border-slate-100 bg-gradient-to-br from-sky-50 to-white p-5 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md dark:border-slate-800/80 dark:from-slate-800/50 dark:to-slate-800/10">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Báo cáo đã gửi</div>
-                <div className="mt-2 text-4xl font-black text-sky-600 dark:text-sky-400">12</div>
-              </div>
-              <div className="group rounded-2xl border border-slate-100 bg-gradient-to-br from-indigo-50 to-white p-5 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md dark:border-slate-800/80 dark:from-slate-800/50 dark:to-slate-800/10">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Lần chạy mô phỏng</div>
-                <div className="mt-2 text-4xl font-black text-indigo-600 dark:text-indigo-400">45</div>
-              </div>
+            <div className="pt-4 mt-auto">
+              <Button
+                onClick={handleChangePassword}
+                disabled={changingPwd || !currentPassword || !newPassword || !confirmPassword}
+                className="w-full sm:w-auto min-w-[10rem] shadow-md shadow-indigo-500/20"
+              >
+                {changingPwd ? 'Đang xử lý...' : 'Đổi mật khẩu'}
+              </Button>
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
       </div>
     </div>
   )
