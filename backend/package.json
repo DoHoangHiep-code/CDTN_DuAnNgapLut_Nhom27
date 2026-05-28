@@ -26,6 +26,8 @@
     "mathjs": "^15.2.0",
     "multer": "^2.0.2",
     "node-cache": "^5.1.2",
+    "node-cron": "^4.2.1",
+    "onnxruntime-node": "^1.20.1",
     "pg": "^8.13.1",
     "pg-hstore": "^2.3.4",
     "redis": "^5.12.1",

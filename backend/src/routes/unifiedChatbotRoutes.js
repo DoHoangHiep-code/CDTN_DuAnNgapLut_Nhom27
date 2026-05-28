@@ -19,6 +19,20 @@ try {
     console.warn('[UnifiedChatbot] floodCache không load được:', err.message, '– chạy không có in-memory cache.')
 }
 
+let landslideCache = null
+try {
+    landslideCache = require('../utils/landslideCache')
+} catch (err) {
+    console.warn('[UnifiedChatbot] landslideCache không load được:', err.message, '– chạy không có in-memory cache.')
+}
+
+let landslideService = null
+try {
+    landslideService = require('../modules/landslide/services/landslideService')
+} catch (err) {
+    console.warn('[UnifiedChatbot] landslideService không load được:', err.message)
+}
+
 // ── Markdown Formatter (2-Tier Templates) ─────────────────────────────────────
 const { formatCurrentStatus, formatTier1RiskExplanation, formatTier2ExpertAnalysis } = require('../utils/chatbotFormatter')
 
@@ -109,13 +123,16 @@ const RISK_LABEL_FULL = {
 function riskTag(level) { return `${RISK_EMOJI[level] ?? '⚪'} ${RISK_LABEL[level] ?? level}` }
 function riskTagFull(level) { return RISK_LABEL_FULL[level] ?? level ?? 'Không xác định' }
 
-// ─── Danh sách địa danh Hà Nội ───────────────────────────────────────────────
+// ─── Danh sách địa danh Hà Nội & Các khu vực sạt lở núi ─────────────────────
 const AREA_KEYWORDS = [
     'triều khúc', 'cầu giấy', 'hoàn kiếm', 'đống đa', 'hà đông', 'thanh xuân',
     'bắc từ liêm', 'nam từ liêm', 'tây hồ', 'long biên', 'hoàng mai', 'hai bà trưng',
     'ba đình', 'gia lâm', 'sóc sơn', 'đông anh', 'mê linh', 'thường tín',
     'phú xuyên', 'ứng hòa', 'mỹ đức', 'thanh oai', 'chương mỹ', 'quốc oai',
-    'thạch thất', 'phúc thọ', 'đan phượng', 'hoài đức', 'nguyễn tuân', 'nguyễn trãi'
+    'thạch thất', 'phúc thọ', 'đan phượng', 'hoài đức', 'nguyễn tuân', 'nguyễn trãi',
+    'sơn la', 'yên bái', 'hòa bình', 'lai châu', 'điện biên', 'lào cai', 'hà giang',
+    'quảng ninh', 'lạng sơn', 'cao bằng', 'bắc kạn', 'tuyên quang', 'phú thọ',
+    'thanh hóa', 'nghệ an', 'tân lang', 'phù yên'
 ]
 
 function extractArea(msg) {
@@ -124,8 +141,26 @@ function extractArea(msg) {
 }
 
 // ─── Intent Detection ─────────────────────────────────────────────────────────
-function detectIntent(msg) {
+function detectIntent(msg, domain) {
     const m = msg.toLowerCase()
+
+    // Kiểm tra các câu hỏi về sạt lở trước dựa trên domain hoặc từ khóa
+    const isLandslide = (domain === 'landslide') || /(sạt lở|lở đất|trượt lở|sạt lở đất|sạt núi)/.test(m)
+
+    if (isLandslide) {
+        let area = extractArea(m)
+        if (!area) {
+            const match = m.match(/(?:khu vực|tại|ở|tỉnh|huyện|xã)\s+([a-zàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹdđ\s]+)/i)
+            if (match) {
+                area = match[1].trim()
+            }
+        }
+        if (/(vì sao|tại sao|nguyên nhân|giải thích|lý do|sao lại|vì lý do gì)/.test(m))
+            return { intent: 'LANDSLIDE_EXPLAIN_RISK', area, timeOffset: 0 }
+        if (/(khu vực nào|đâu nguy hiểm|nặng nhất|nguy hiểm nhất|khu vực nguy hiểm|nguy hiểm|khu nào|nguy cơ cao nhất|nguy cơ cao|hotspot|điểm đen)/.test(m))
+            return { intent: 'LANDSLIDE_WORST_AREA', area: null, timeOffset: 0 }
+        return { intent: 'LANDSLIDE_CURRENT_STATUS', area, timeOffset: 0 }
+    }
 
     if (/(?:^|\s)(xin chào|hello|hi|chào bot|chào aqua)(?:\s|$)/.test(m))
         return { intent: 'GREETING', area: null, timeOffset: 0 }
@@ -840,7 +875,8 @@ router.post('/chatbot/ask', async (req, res) => {
             })
         }
 
-        const { intent, area, timeOffset } = detectIntent(message)
+        const domain = req.body?.domain
+        const { intent, area, timeOffset } = detectIntent(message, domain)
         let data = null
         let replyObj = null
 
@@ -850,6 +886,101 @@ router.post('/chatbot/ask', async (req, res) => {
 
         try {
             switch (intent) {
+                case 'LANDSLIDE_CURRENT_STATUS':
+                    {
+                        const lsCacheFresh = landslideCache && landslideCache.lastUpdated !== null
+                        if (lsCacheFresh && landslideCache.currentStatus.length > 0) {
+                            data = { data: landslideCache.currentStatus, fromCache: true }
+                        } else {
+                            try {
+                                const dbRows = await landslideService.queryCurrentStatus()
+                                data = { data: dbRows, fromCache: false }
+                            } catch (dbErr) {
+                                console.warn('[CHATBOT] queryCurrentStatus sạt lở lỗi, dùng cache stale:', dbErr.message)
+                                data = { data: (landslideCache ? landslideCache.currentStatus : []), fromCache: true }
+                            }
+                        }
+
+                        const replyText = landslideService.formatCurrentStatus(data.data)
+                        const expertNodes = data.data.slice(0, 3).map(r => ({
+                            node_id: r.node_id,
+                            location_name: r.location_name || `Khu vực tại (${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)})`,
+                            risk_level: r.risk_level === 'DANGER' ? 'severe' : 'high'
+                        }))
+
+                        replyObj = {
+                            text: replyText,
+                            suggestAreas: false,
+                            expertNodes
+                        }
+                    }
+                    break
+
+                case 'LANDSLIDE_WORST_AREA':
+                    {
+                        const lsCacheFresh = landslideCache && landslideCache.lastUpdated !== null
+                        if (lsCacheFresh && landslideCache.worstAreas.length > 0) {
+                            data = { data: landslideCache.worstAreas, fromCache: true }
+                        } else {
+                            try {
+                                const dbRows = await landslideService.queryWorstArea()
+                                data = { data: dbRows, fromCache: false }
+                            } catch (dbErr) {
+                                console.warn('[CHATBOT] queryWorstArea sạt lở lỗi, dùng cache stale:', dbErr.message)
+                                data = { data: (landslideCache ? landslideCache.worstAreas : []), fromCache: true }
+                            }
+                        }
+
+                        const result = landslideService.formatWorstArea(data.data)
+                        replyObj = {
+                            text: result.text,
+                            suggestAreas: false,
+                            expertNodes: result.expertNodes
+                        }
+                    }
+                    break
+
+                case 'LANDSLIDE_EXPLAIN_RISK':
+                    {
+                        if (area) {
+                            let nodeData = null
+                            try {
+                                if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(area)) {
+                                    nodeData = await landslideService.queryNodeById(area)
+                                } else {
+                                    nodeData = await landslideService.queryNodeByKeyword(area)
+                                }
+                            } catch (dbErr) {
+                                console.warn('[CHATBOT] queryNode sạt lở lỗi:', dbErr.message)
+                            }
+
+                            if (nodeData) {
+                                const result = await landslideService.formatExplainRisk(nodeData)
+                                replyObj = {
+                                    text: result.text,
+                                    suggestAreas: false,
+                                    expertNodes: [],
+                                    actionButton: result.actionButton
+                                }
+                            } else {
+                                replyObj = {
+                                    text: `🔍 Không tìm thấy dữ liệu sạt lở cho khu vực **${area}**. Vui lòng kiểm tra lại tên địa danh.`,
+                                    suggestAreas: true,
+                                    areaKeywords: ['Sơn La', 'Tân Lang', 'Yên Bái', 'Lai Châu', 'Hòa Bình'],
+                                    expertNodes: []
+                                }
+                            }
+                        } else {
+                            replyObj = {
+                                text: 'Bạn muốn xem giải thích nguy cơ sạt lở của khu vực nào? Vui lòng nhập tên địa danh hoặc chọn một khu vực đồi núi bên dưới:',
+                                suggestAreas: true,
+                                areaKeywords: ['Sơn La', 'Tân Lang', 'Yên Bái', 'Lai Châu', 'Hòa Bình'],
+                                expertNodes: []
+                            }
+                        }
+                    }
+                    break
+
                 case 'GREETING':
                     replyObj = replyGreeting()
                     break
@@ -988,11 +1119,17 @@ router.post('/chatbot/ask', async (req, res) => {
 
             // Nếu vẫn không có data → trả fallback message thân thiện (200 OK)
             if (!replyObj) {
+                const isLandslideIntent = intent && String(intent).startsWith('LANDSLIDE_')
                 const isTimeout = queryErr.code === 'TIMEOUT' || queryErr.code === 'QUERY_TIMEOUT'
-                const fallbackMsg = isTimeout
-                    ? `⏳ Hệ thống đang tải dữ liệu, vui lòng thử lại sau 30 giây. ` +
-                    `Bạn có thể hỏi về khu vực cụ thể: _"Triều Khúc"_, _"Hà Đông"_, _"Hoàn Kiếm"_...`
-                    : `⚠️ Hệ thống đang cập nhật dữ liệu. Vui lòng thử lại sau 30 giây hoặc hỏi về khu vực cụ thể.`
+                let fallbackMsg
+                if (isLandslideIntent) {
+                    fallbackMsg = 'Hiện tại hệ thống cảnh báo sạt lở đang cập nhật dữ liệu. Vui lòng thử lại sau ít phút.'
+                } else {
+                    fallbackMsg = isTimeout
+                        ? `⏳ Hệ thống đang tải dữ liệu, vui lòng thử lại sau 30 giây. ` +
+                          `Bạn có thể hỏi về khu vực cụ thể: _"Triều Khúc"_, _"Hà Đông"_, _"Hoàn Kiếm"_...`
+                        : `⚠️ Hệ thống đang cập nhật dữ liệu. Vui lòng thử lại sau 30 giây hoặc hỏi về khu vực cụ thể.`
+                }
                 replyObj = { text: fallbackMsg, suggestAreas: true, expertNodes: [] }
             }
         }
@@ -1013,9 +1150,14 @@ router.post('/chatbot/ask', async (req, res) => {
     } catch (err) {
         // Lỗi ngoài dự kiến (parse, logic...) – vẫn trả 200 OK
         console.error('[CHATBOT ERROR] Lỗi ngoài dự kiến:', err.message)
+        const isLandslide = req.body?.domain === 'landslide' || (req.body?.message && /(sạt lở|lở đất|trượt lở|sạt lở đất|sạt núi)/.test(req.body.message))
+        const friendlyReply = isLandslide 
+            ? 'Hiện tại hệ thống cảnh báo sạt lở đang cập nhật dữ liệu. Vui lòng thử lại sau ít phút.'
+            : '⚠️ Hiện tại hệ thống cảnh báo ngập lụt đang cập nhật dữ liệu. Vui lòng thử lại sau ít phút.'
+            
         return res.status(200).json({
-            success: false,
-            reply: '⚠️ Đã xảy ra sự cố không mong muốn. Vui lòng thử lại hoặc hỏi câu khác.',
+            success: true, // Trả 200 OK như yêu cầu
+            reply: friendlyReply,
             intent: 'ERROR',
             suggestAreas: true,
             expertNodes: [],
@@ -1053,6 +1195,40 @@ router.post('/chatbot/expert-detail', async (req, res) => {
                     return res.json({ success: true, data })
                 }
             } catch (_) { }
+        }
+
+        let isLandslideNode = false
+        let landslideFeature = null
+        if (landslideService) {
+            try {
+                landslideFeature = await landslideService.queryNodeById(node_id)
+                if (landslideFeature) {
+                    isLandslideNode = true
+                }
+            } catch (err) {
+                console.warn('[ExpertDetail] Lỗi check landslide node:', err.message)
+            }
+        }
+
+        if (isLandslideNode) {
+            const reportText = await landslideService.formatExpertAnalysis(landslideFeature)
+            const responseData = {
+                answer: reportText,
+                node_id,
+                risk_level: landslideFeature.risk_level === 'DANGER' ? 'severe' : (landslideFeature.risk_level === 'WARNING' ? 'high' : 'safe'),
+                flood_depth_cm: null,
+                location_name: landslideFeature.location_name,
+                source: 'landslide_ai'
+            }
+
+            if (redis) {
+                try {
+                    await redis.setEx(cacheKey, CACHE_TTL_EXPERT, JSON.stringify(responseData))
+                } catch (_) { }
+            }
+
+            responseData.elapsed_ms = Date.now() - startedAt
+            return res.json({ success: true, data: responseData })
         }
 
         let feature = null
@@ -1123,11 +1299,24 @@ router.post('/chatbot/expert-detail', async (req, res) => {
 
     } catch (err) {
         console.error('[ExpertDetail] lỗi:', err.message)
-        // Trả 200 với fallback thay vì 500 – giữ UI ổn định
+        const isLandslide = req.body?.domain === 'landslide' || 
+                            (req.body?.question && /(sạt lở|lở đất|trượt lở|sạt lở đất|sạt núi)/.test(req.body.question)) ||
+                            (req.body?.node_id && typeof req.body.node_id === 'string' && req.body.node_id.includes('-'))
+        
+        const fallbackAnswer = isLandslide
+            ? `Hiện tại hệ thống cảnh báo sạt lở đang cập nhật dữ liệu. Vui lòng thử lại sau ít phút.`
+            : `⚠️ Hiện tại hệ thống cảnh báo ngập lụt đang cập nhật dữ liệu. Vui lòng thử lại sau ít phút.`
+
+        // Trả 200 với fallback thay vì 500 – giữ UI ổn định và đúng yêu cầu
         return res.status(200).json({
-            success: false,
-            reply: `⚠️ Không thể phân tích chi tiết lúc này. Vui lòng thử lại sau.`,
-            data: null,
+            success: true, // Trả 200 OK như yêu cầu
+            data: {
+                answer: fallbackAnswer,
+                node_id: req.body?.node_id,
+                risk_level: null,
+                flood_depth_cm: null,
+                source: 'fallback'
+            },
             elapsed_ms: Date.now() - startedAt
         })
     }

@@ -412,6 +412,10 @@ async function runLandslideJob() {
       prediction_time: predictionTime
     })))
 
+    // Cập nhật cả chatbot cache
+    landslideCache.populateChatbotCache(pool).catch(err => console.error('[LandslideCron] populateChatbotCache error:', err.message))
+
+
     // Xóa cache API HTTP (node-cache) để bắt buộc tạo lại (Gọi Webhook sang tiến trình chính)
     try {
       const http = require('http')
