@@ -25,10 +25,11 @@ interface Props {
 // ─── Hàm helper thuần (không dùng state/ref) – đặt ngoài component là đúng ──
 
 async function askChatbot(
-  question: string
+  question: string,
+  domain?: 'flood' | 'landslide'
 ): Promise<{ reply: string; expertNodes?: any[]; suggestAreas?: boolean; areaKeywords?: string[]; area?: string; actionButton?: { label: string; payload: string } }> {
   try {
-    const res = await askChatbotApi(question)
+    const res = await askChatbotApi(question, domain)
     if (!res.success) throw new Error(res.error?.message ?? 'Không có phản hồi.')
 
     // Backend mới trả các field ở top-level (reply, intent, expertNodes…).
@@ -78,16 +79,7 @@ export function ChatInterface({ onClose }: Props) {
   
   const userAvatar = getAvatarUrl(user?.avatar_url)
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'welcome',
-      role: 'bot',
-      text: mode === 'landslide'
-        ? 'Xin chào! Tôi là trợ lý AI của hệ thống **Landslide Alert**. Bạn có thể hỏi tôi về nguy cơ sạt lở, độ ổn định sườn dốc, khu vực rủi ro, hoặc các lời khuyên an toàn. ⛰️'
-        : 'Xin chào! Tôi là trợ lý AI của hệ thống **AquaAlert**. Bạn có thể hỏi tôi về tình trạng ngập lụt, dự báo mưa, khu vực nguy hiểm, hoặc các lời khuyên an toàn. 💧',
-      ts: new Date(),
-    },
-  ])
+  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -175,6 +167,19 @@ export function ChatInterface({ onClose }: Props) {
   // ── Effects ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    setMessages([
+      {
+        id: `welcome-${mode}-${Date.now()}`,
+        role: 'bot',
+        text: mode === 'landslide'
+          ? 'Xin chào! Tôi là trợ lý AI của hệ thống AquaAlert. Bạn có thể hỏi tôi về tình trạng sạt lở, độ ổn định sườn dốc, khu vực nguy cơ cao, hoặc các lời khuyên an toàn. ⛰️'
+          : 'Xin chào! Tôi là trợ lý AI của hệ thống AquaAlert. Bạn có thể hỏi tôi về tình trạng ngập lụt, dự báo mưa, khu vực nguy hiểm, hoặc các lời khuyên an toàn. 💧',
+        ts: new Date(),
+      }
+    ])
+  }, [mode])
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
@@ -194,7 +199,7 @@ export function ChatInterface({ onClose }: Props) {
     setLoading(true)
 
     try {
-      const result = await askChatbot(text)
+      const result = await askChatbot(text, mode)
       const botMsg: Message = {
         id: `b-${Date.now()}`,
         role: 'bot',

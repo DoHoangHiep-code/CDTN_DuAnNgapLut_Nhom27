@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { X } from 'lucide-react'
+
 import { ChatInterface } from './ChatInterface'
 import { useDisasterMode } from '../../context/DisasterContext'
 

@@ -30,6 +30,12 @@ const _map = new Map()
 let _updatedAt = null
 let _isReady = false
 
+// Chatbot-specific cache fields
+let worstAreas = []
+let currentStatus = []
+let lastUpdated = null
+
+
 function invalidateCache() {
   try {
     const { invalidateCacheNamespace } = require('../middlewares/apiCache');
@@ -154,6 +160,11 @@ async function prewarmFromDb(pool) {
     const elapsed = Date.now() - t0
     console.log(`[LandslideCache] ✅ Pre-warm: ${_map.size.toLocaleString('vi-VN')} nodes | ${elapsed}ms`)
     _isReady = true
+    
+    // Khởi động nạp chatbot cache song song
+    lastUpdated = new Date()
+    populateChatbotCache(pool).catch(err => console.error('[LandslideCache] populateChatbotCache error:', err.message))
+
     invalidateCache()
     return { loaded: _map.size, elapsed }
   } catch (err) {
@@ -233,4 +244,65 @@ function getDashboardStats(offset = 0) {
   }
 }
 
-module.exports = { updateCache, getForNode, getStats, clearAll, prewarmFromDb, scanTop, getDashboardStats }
+/**
+ * Cập nhật chatbot cache (worstAreas, currentStatus) dựa trên dữ liệu sạt lở mới nhất.
+ */
+async function populateChatbotCache(pool) {
+  try {
+    // 1. Query top 10 current status danger/warning nodes
+    const sqlCurrent = `
+      SELECT sub.node_id, sub.prob_landslide, sub.risk_level, sub.prediction_time,
+             gn.location_name, gn.province, gn.lat, gn.lon, gn.slope, gn.elevation,
+             sub.rain_1d_accum, sub.rain_7d_accum, sub.api_7d, sub.api_14d, sub.soil_moisture_1d, sub.soil_moisture_7d
+      FROM (
+        SELECT DISTINCT ON (node_id) *
+        FROM landslide_predictions
+        WHERE prediction_time >= NOW() - INTERVAL '24 hours'
+          AND risk_level IN ('DANGER', 'WARNING')
+        ORDER BY node_id, prediction_time DESC
+      ) sub
+      JOIN landslide_grid_nodes gn ON gn.node_id = sub.node_id
+      ORDER BY sub.prob_landslide DESC
+      LIMIT 10
+    `
+    const resCurrent = await pool.query(sqlCurrent)
+    module.exports.currentStatus = resCurrent.rows
+
+    // 2. Query top 5 worst areas
+    const sqlWorst = `
+      SELECT sub.node_id, sub.prob_landslide, sub.risk_level, sub.prediction_time,
+             gn.location_name, gn.province, gn.lat, gn.lon, gn.slope, gn.elevation,
+             sub.rain_1d_accum, sub.rain_7d_accum, sub.api_7d, sub.api_14d, sub.soil_moisture_1d, sub.soil_moisture_7d
+      FROM (
+        SELECT DISTINCT ON (node_id) *
+        FROM landslide_predictions
+        WHERE prediction_time >= NOW() - INTERVAL '24 hours'
+        ORDER BY node_id, prob_landslide DESC, prediction_time DESC
+      ) sub
+      JOIN landslide_grid_nodes gn ON gn.node_id = sub.node_id
+      ORDER BY sub.prob_landslide DESC
+      LIMIT 5
+    `
+    const resWorst = await pool.query(sqlWorst)
+    module.exports.worstAreas = resWorst.rows
+
+    module.exports.lastUpdated = new Date()
+    console.log(`[LandslideCache] Chatbot cache populated: currentStatus=${module.exports.currentStatus.length}, worstAreas=${module.exports.worstAreas.length}`)
+  } catch (err) {
+    console.error('[LandslideCache] Failed to populate chatbot cache:', err.message)
+  }
+}
+
+module.exports = { 
+  updateCache, 
+  getForNode, 
+  getStats, 
+  clearAll, 
+  prewarmFromDb, 
+  scanTop, 
+  getDashboardStats,
+  worstAreas,
+  currentStatus,
+  lastUpdated,
+  populateChatbotCache
+}

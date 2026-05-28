@@ -161,10 +161,10 @@ async function postJson<T>(
  * Gọi chatbot nhanh:
  * POST /api/v1/chatbot/ask
  */
-export async function askChatbot(message: string): Promise<ChatbotResponse> {
+export async function askChatbot(message: string, domain?: 'flood' | 'landslide'): Promise<ChatbotResponse> {
   return postJson<ChatbotResponse>(
     `${BASE_URL}/chatbot/ask`,
-    { message },
+    { message, domain },
     CHATBOT_TIMEOUT_MS
   )
 }
