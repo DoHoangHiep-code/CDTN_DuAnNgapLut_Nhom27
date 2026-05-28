@@ -173,8 +173,8 @@ FEATURE_ORDER: list[str] = [
 
 
 # Ngưỡng để Stage 1 phân loại "có ngập" → kích hoạt Stage 2.
-# Dưới ngưỡng: trả thẳng 0 cm (không ngập).
-FLOOD_THRESHOLD_CM: float = 15.0
+# Dưới ngưỡng: trả thẳng 0 cm (không ngập). Hạ xuống 5cm để bắt các điểm ngập nhẹ gây ùn tắc cục bộ (như Mỹ Đình).
+FLOOD_THRESHOLD_CM: float = 5.0
 
 
 def depth_to_risk(depth_cm: float) -> str:
@@ -395,8 +395,17 @@ async def predict_flood_batch(request: Request):
         raise HTTPException(status_code=503, detail="Model chưa sẵn sàng.")
 
     try:
-        items: list[dict] = await request.json()
+        items = await request.json()
+        if isinstance(items, str):
+            import json
+            items = json.loads(items)
+        if isinstance(items, dict):
+            # Fallback if a single object is sent to the batch endpoint
+            items = [items]
+        if not isinstance(items, list):
+            raise ValueError("Payload must be a list of feature objects.")
     except Exception as e:
+        logger.error(f"Batch parse error. Type of items: {type(items) if 'items' in locals() else 'unknown'}")
         raise HTTPException(status_code=400, detail=f"JSON parse error: {e}")
 
     if not items:
@@ -417,3 +426,4 @@ async def predict_flood_batch(request: Request):
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+#

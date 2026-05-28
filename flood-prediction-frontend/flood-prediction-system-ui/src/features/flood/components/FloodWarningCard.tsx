@@ -40,6 +40,8 @@ type Props = {
   lat: number
   /** Kinh độ tâm bản đồ hiện tại */
   lon: number
+  /** Độ lệch ngày */
+  dayOffset?: number
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -139,7 +141,7 @@ function SourceBadge({ source }: { source: 'database' | 'realtime' }) {
 // ──────────────────────────────────────────────────────────────────────
 // Component chính: FloodWarningCard
 // ──────────────────────────────────────────────────────────────────────
-export function FloodWarningCard({ lat, lon }: Props) {
+export function FloodWarningCard({ lat, lon, dayOffset = 0 }: Props) {
   const [forecast, setForecast] = useState<ForecastData | null>(null)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState<string | null>(null)
@@ -166,7 +168,7 @@ export function FloodWarningCard({ lat, lon }: Props) {
     setError(null)
 
     try {
-      const result = await getForecastLatest(debouncedLat, debouncedLon, controller.signal)
+      const result = await getForecastLatest(debouncedLat, debouncedLon, dayOffset, controller.signal)
 
       // Kiểm tra request chưa bị hủy trước khi set state
       if (!controller.signal.aborted) {
@@ -196,7 +198,7 @@ export function FloodWarningCard({ lat, lon }: Props) {
         setLoading(false)
       }
     }
-  }, [debouncedLat, debouncedLon])
+  }, [debouncedLat, debouncedLon, dayOffset])
 
   useEffect(() => {
     fetchData()
@@ -248,7 +250,7 @@ export function FloodWarningCard({ lat, lon }: Props) {
       {/* ── Card nổi trên bản đồ ── */}
       <div
         className={cn(
-          'absolute bottom-16 left-4 z-[1000] w-72 overflow-hidden rounded-2xl shadow-2xl shadow-black/40',
+          'absolute bottom-16 right-4 z-[1000] w-72 overflow-hidden rounded-2xl shadow-2xl shadow-black/40',
           'border border-white/20 bg-gradient-to-br backdrop-blur-xl transition-all duration-500',
           bgClass,
         )}

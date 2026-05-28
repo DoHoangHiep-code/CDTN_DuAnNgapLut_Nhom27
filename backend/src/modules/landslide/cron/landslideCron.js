@@ -33,6 +33,7 @@ const { predictLandslide, getModelStatus } = require('../services/landslideInfer
 const { fetchWeatherForNode, clearCache, sleep } = require('../services/OpenMeteoService')
 const landslideCache = require('../../../utils/landslideCache')
 const { invalidateCacheNamespace } = require('../../../middlewares/apiCache')
+const { SystemLog } = require('../../../models')
 
 // ── Pool riêng cho cron (tách biệt với pool của server để không tranh connection) ──
 const pool = new Pool({
@@ -442,6 +443,18 @@ async function runLandslideJob() {
   console.log(`[LandslideCron] ✅ Hoàn tất: ${totalSuccess.toLocaleString('vi-VN')} OK | ${totalError.toLocaleString('vi-VN')} lỗi | ${elapsed}s`)
   console.log(`[LandslideCron] 📊 DANGER: ${dangerCount.toLocaleString('vi-VN')} | WARNING: ${warningCount.toLocaleString('vi-VN')}`)
   console.log(`${'═'.repeat(65)}\n`)
+
+  try {
+    await SystemLog.create({
+      admin_id:     null,
+      event_type:   'CRONJOB_LANDSLIDE',
+      event_source: 'modules/landslide/cron/landslideCron (ONNX in-process)',
+      message:      `Cronjob OK: total_nodes=${totalNodes}, success=${totalSuccess}, error=${totalError}, danger=${dangerCount}, warning=${warningCount}, elapsed=${elapsed}s`,
+      timestamp:    new Date(),
+    })
+  } catch (logErr) {
+    console.warn('[LandslideCron] Không ghi được SystemLog:', logErr.message)
+  }
 }
 
 /**

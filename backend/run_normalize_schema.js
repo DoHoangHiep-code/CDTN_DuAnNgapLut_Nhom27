@@ -30,11 +30,12 @@ async function main() {
 
   await sequelize.query(`
     CREATE MATERIALIZED VIEW mv_latest_flood_predictions AS
-    SELECT DISTINCT ON (node_id)
+    SELECT DISTINCT ON (node_id, date_only)
       prediction_id, node_id, time, flood_depth_cm, risk_level,
       explanation, date_only, month, hour, rainy_season_flag
     FROM flood_predictions
-    ORDER BY node_id, time DESC;
+    WHERE time >= date_trunc('day', NOW()) - INTERVAL '1 day'
+    ORDER BY node_id, date_only, flood_depth_cm DESC, time ASC;
   `)
   console.log('✅ Created new mv_latest_flood_predictions (without location_name)')
 

@@ -38,8 +38,8 @@ async function importStaticData() {
         batch.push({
           province: row.province || null,
           location_name: row.location_name || null,
-          lat: parseFloat(row.lat) || 0,
-          lon: parseFloat(row.lon) || 0,
+          lat: parseFloat(row.lat_x || row.lat) || 0,
+          lon: parseFloat(row.lon_x || row.lon) || 0,
           elevation: parseFloat(row.elevation) || 0,
           slope: parseFloat(row.slope) || 0,
           aspect: parseFloat(row.aspect) || 0,

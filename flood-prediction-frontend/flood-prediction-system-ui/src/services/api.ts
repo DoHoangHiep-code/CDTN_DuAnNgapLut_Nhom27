@@ -44,13 +44,15 @@ export async function getFloodPredictionByLocation(lat: number, lon: number) {
 //   usingLiveWeather: boolean
 //   source: 'database' | 'realtime'
 // }
-export async function getForecastLatest(lat: number, lon: number, signal?: AbortSignal) {
-  const res = await apiV1.get<any>('/forecasts/latest', { params: { lat, lon }, signal })
+export async function getForecastLatest(lat: number, lon: number, offset: number = 0, signal?: AbortSignal) {
+  const res = await apiV1.get<any>('/forecasts/latest', { params: { lat, lon, offset }, signal })
   return res.data ?? null
 }
 
-export async function getNodeCurrentData(nodeId: string) {
-  const res = await apiV1.get<any>(`/flood-prediction/nodes/${nodeId}/current`)
+export async function getNodeCurrentData(nodeId: string, offset: number = 0) {
+  const res = await apiV1.get<any>(`/flood-prediction/nodes/${nodeId}/current`, {
+    params: { offset }
+  })
   return res.data?.data ?? res.data
 }
 

@@ -165,14 +165,15 @@ async function prewarmFromDb(pool) {
 
 /**
  * Scan toàn bộ cache để tìm top N nodes nguy hiểm nhất.
- * Chỉ quét risk_level 'DANGER' hoặc 'WARNING' của HÔM NAY (offset=0).
+ * Chỉ quét risk_level 'DANGER' hoặc 'WARNING' của offset tương ứng.
  * @param {number} n
+ * @param {number} offset
  * @returns {string[]} Danh sách node_id
  */
-function scanTop(n) {
+function scanTop(n, offset = 0) {
   const candidates = []
   for (const [node_id, arr] of _map.entries()) {
-    const pred = arr[0]
+    const pred = arr[offset]
     if (pred && (pred.risk_level === 'DANGER' || pred.risk_level === 'WARNING')) {
       candidates.push({ node_id, prob: pred.prob_landslide ?? 0 })
     }

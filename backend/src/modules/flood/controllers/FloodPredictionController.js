@@ -75,6 +75,7 @@ class FloodPredictionController {
         parseInt(req.query.limit) || DEFAULT_LIMIT,
         MAX_LIMIT,
       )
+      const offset = parseInt(req.query.offset) || 0
 
       // Validate bbox hợp lý
       if (minLat >= maxLat || minLng >= maxLng) {
@@ -103,11 +104,11 @@ class FloodPredictionController {
            JOIN grid_nodes gn ON gn.node_id = fp.node_id
            WHERE gn.latitude  BETWEEN $1::numeric AND $2::numeric
              AND gn.longitude BETWEEN $3::numeric AND $4::numeric
-             AND fp.time >= NOW() - INTERVAL '24 hours'
-             AND fp.flood_depth_cm > 10
-           LIMIT $5`,
+             AND fp.date_only = CURRENT_DATE + ($5 || ' days')::interval
+             AND fp.flood_depth_cm > 5
+           LIMIT $6`,
           {
-            bind: [minLat, maxLat, minLng, maxLng, limit],
+            bind: [minLat, maxLat, minLng, maxLng, offset, limit],
             type: QueryTypes.SELECT,
           },
         )
