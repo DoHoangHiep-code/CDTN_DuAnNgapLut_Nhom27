@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { FloatingChatBotIcon } from '../components/common/FloatingChatBotIcon'
 import { HazardSwitcher } from '../components/common/HazardSwitcher'
 import { useDisasterMode } from '../context/DisasterContext'
-import { getDynamicAlerts } from '../services/api'
+import { getDynamicAlerts, getLandslideAlerts } from '../services/api'
 
 function buildTickerItems(alertsData: Array<{ district: string; max_depth: number; time: string }>): NewsTickerItem[] {
   if (!alertsData.length) {
@@ -32,28 +32,36 @@ function buildTickerItems(alertsData: Array<{ district: string; max_depth: numbe
   return items
 }
 
-const LANDSLIDE_TICKER_ITEMS: NewsTickerItem[] = [
-  {
-    id: 'ls_1',
-    severity: 'danger',
-    text: '⚠️ CẢNH BÁO ĐỎ: Nền đất tại Mù Cang Chải đã bão hòa nước — độ ẩm đất 88%. Nguy cơ sạt lở, trượt lở đất đá ở mức RẤT CAO trong 24h tới. Người dân vùng thấp cần di chuyển khẩn!',
-  },
-  {
-    id: 'ls_2',
-    severity: 'warning',
-    text: '🟠 Hoàng Su Phì (Hà Giang): Mưa lớn kéo dài 7 ngày liên tiếp (142mm). Cảnh báo trượt lở dọc Quốc lộ 34. Cẩn trọng khi lưu thông qua các đèo.',
-  },
-  {
-    id: 'ls_3',
-    severity: 'danger',
-    text: '🔴 Mường Tè (Lai Châu): Độ dốc địa hình 40°, phủ thực vật thưa (NDVI 0.35) kết hợp mưa lớn 163mm/7 ngày — rủi ro sạt lở nghiêm trọng. Bộ đội đang sẵn sàng ứng phó.',
-  },
-  {
-    id: 'ls_4',
-    severity: 'warning',
-    text: '🟠 Sa Pa (Lào Cai): Đất đã ngậm nước 71%, mưa tích lũy 118mm. Nguy cơ sụt lún đất trong các khu vực canh tác ruộng bậc thang. Theo dõi chặt tình hình.',
-  },
-]
+function buildLandslideTickerItems(alertsData: Array<{ district: string; prob_landslide: number; risk_level: string; soil_moisture: number; rain: number }>): NewsTickerItem[] {
+  if (!alertsData.length) {
+    const timeStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+    return [{
+      id: 'ls_safe_status',
+      severity: 'info',
+      text: `✅ Cập nhật ${timeStr}: Hệ thống hoạt động ổn định. Không có cảnh báo sạt lở nguy hiểm trong 24h tới.`
+    }]
+  }
+
+  return alertsData.map((item, idx) => {
+    const probStr = (item.prob_landslide * 100).toFixed(1);
+    const rainStr = item.rain ? item.rain.toFixed(1) : 0;
+    const soilStr = item.soil_moisture ? (item.soil_moisture * 100).toFixed(0) : 0;
+
+    if (item.risk_level === 'DANGER') {
+      return {
+        id: `ls_alert_${idx}`,
+        severity: 'danger',
+        text: `⚠️ CẢNH BÁO ĐỎ: Khu vực ${item.district} có nguy cơ sạt lở RẤT CAO (xác suất ${probStr}%) trong 24h tới. Lượng mưa 7 ngày đạt ${rainStr}mm, độ ẩm đất ${soilStr}%. Cần chú ý an toàn!`
+      }
+    } else {
+      return {
+        id: `ls_alert_${idx}`,
+        severity: 'warning',
+        text: `🟠 CẢNH BÁO: ${item.district} có nguy cơ sạt lở CAO. Độ ẩm đất đang ở mức ${soilStr}%, lượng mưa tích lũy ${rainStr}mm. Theo dõi chặt tình hình.`
+      }
+    }
+  })
+}
 
 export function MainLayout() {
   const { user, logout } = useAuth()
@@ -63,14 +71,20 @@ export function MainLayout() {
   const { t, i18n } = useTranslation()
   const { mode } = useDisasterMode()
 
-  const [alertsData, setAlertsData] = useState<Array<{ district: string; max_depth: number; time: string }>>([])
+  const [floodAlerts, setFloodAlerts] = useState<Array<{ district: string; max_depth: number; time: string }>>([])
+  const [landslideAlerts, setLandslideAlerts] = useState<Array<{ district: string; prob_landslide: number; risk_level: string; soil_moisture: number; rain: number }>>([])
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const data = await getDynamicAlerts()
-        if (!cancelled) setAlertsData(data)
+        if (mode === 'landslide') {
+          const data = await getLandslideAlerts()
+          if (!cancelled) setLandslideAlerts(data)
+        } else {
+          const data = await getDynamicAlerts()
+          if (!cancelled) setFloodAlerts(data)
+        }
       } catch {
         // Không crash layout nếu API lỗi
       }
@@ -78,14 +92,12 @@ export function MainLayout() {
     load()
     const id = window.setInterval(load, 5 * 60 * 1000)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [])
+  }, [mode])
 
   const newsItems: NewsTickerItem[] =
     mode === 'landslide'
-      ? LANDSLIDE_TICKER_ITEMS
-      : alertsData
-        ? buildTickerItems(alertsData)
-        : []
+      ? buildLandslideTickerItems(landslideAlerts)
+      : buildTickerItems(floodAlerts)
 
   const getAvatarUrl = (url?: string) => {
     if (!url) return null

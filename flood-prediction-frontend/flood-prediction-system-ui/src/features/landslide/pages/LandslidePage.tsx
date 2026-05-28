@@ -290,16 +290,16 @@ export function LandslidePage() {
         </div>
 
         {/* Sidebar */}
-        <div className="col-span-12 flex flex-col gap-3 overflow-y-auto lg:col-span-4">
+        <div className="col-span-12 flex flex-col gap-3 overflow-hidden lg:col-span-4 h-full">
 
           {/* Hotspot panel */}
           <div
-            className="overflow-hidden rounded-2xl border"
+            className="flex flex-col flex-1 overflow-hidden rounded-2xl border"
             style={{ background: LS.panelBg, borderColor: LS.panelBorder, boxShadow: '0 8px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03) inset' }}
           >
             {/* Panel header */}
             <div
-              className="flex items-center justify-between px-4 py-3"
+              className="flex items-center justify-between px-4 py-3 shrink-0"
               style={{ borderBottom: '1px solid rgba(217,119,6,0.14)', background: 'rgba(255,255,255,0.02)' }}
             >
               <div className="flex items-center gap-2.5">
@@ -326,7 +326,7 @@ export function LandslidePage() {
             </div>
 
             {/* Cards */}
-            <div className="space-y-1.5 p-3">
+            <div className="space-y-1.5 p-3 flex-1 overflow-y-auto min-h-0 custom-scrollbar">
               {loadingHotspots ? (
                 <div className="flex flex-col items-center justify-center gap-3 py-10">
                   <div className="relative h-8 w-8">
@@ -350,63 +350,6 @@ export function LandslidePage() {
                   />
                 ))
               )}
-            </div>
-          </div>
-
-          {/* Model info panel — stone/amber theme */}
-          <div
-            className="rounded-2xl border p-4 space-y-3"
-            style={{ background: 'rgba(28,22,16,0.97)', borderColor: 'rgba(120,113,108,0.25)', boxShadow: '0 4px 20px rgba(0,0,0,0.35)' }}
-          >
-            <div className="flex items-center gap-2">
-              <div
-                className="grid h-7 w-7 place-items-center rounded-lg text-sm"
-                style={{ background: 'rgba(217,119,6,0.15)', border: '1px solid rgba(217,119,6,0.3)' }}
-              >
-                📊
-              </div>
-              <span className="text-[13px] font-bold text-stone-200">Thông tin Mô hình</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              {([
-                { label: 'Phiên bản', value: 'ML v7 (RF)', icon: '🤖', c: 'rgba(139,92,246,0.15)', tc: '#c4b5fd', bc: 'rgba(139,92,246,0.25)' },
-                { label: 'Nodes',     value: '425.180',    icon: '📍', c: 'rgba(59,130,246,0.15)',  tc: '#93c5fd', bc: 'rgba(59,130,246,0.25)' },
-                { label: 'Threshold', value: '0.0937',     icon: '⚖️', c: 'rgba(217,119,6,0.15)',  tc: '#fcd34d', bc: 'rgba(217,119,6,0.25)' },
-                { label: 'Cập nhật',  value: '0h & 12h',   icon: '🕐', c: 'rgba(16,185,129,0.15)', tc: '#6ee7b7', bc: 'rgba(16,185,129,0.25)' },
-              ] as const).map(item => (
-                <div
-                  key={item.label}
-                  className="flex flex-col gap-1 rounded-xl p-2.5"
-                  style={{ background: item.c, border: `1px solid ${item.bc}` }}
-                >
-                  <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: item.tc }}>
-                    {item.icon} {item.label}
-                  </span>
-                  <span className="text-sm font-black text-stone-100">{item.value}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="space-y-2">
-              <div
-                className="flex items-start gap-2 rounded-xl p-3"
-                style={{ background: 'rgba(217,119,6,0.1)', border: '1px solid rgba(217,119,6,0.2)' }}
-              >
-                <span className="mt-px flex-shrink-0 text-sm">💡</span>
-                <p className="text-xs leading-relaxed text-amber-300/80">
-                  <strong className="text-amber-300">Mẹo:</strong> Dùng bộ lọc trên bản đồ để chỉ hiển thị vùng NGUY HIỂM hoặc CẢNH BÁO.
-                </p>
-              </div>
-              <div
-                className="flex items-start gap-2 rounded-xl p-3"
-                style={{ background: 'rgba(120,113,108,0.12)', border: '1px solid rgba(120,113,108,0.2)' }}
-              >
-                <span className="mt-px flex-shrink-0 text-sm">🖱</span>
-                <p className="text-xs leading-relaxed text-stone-400">
-                  <strong className="text-stone-300">Click node</strong> trên bản đồ để xem chi tiết: xác suất, lượng mưa, độ ẩm đất.
-                </p>
-              </div>
             </div>
           </div>
 

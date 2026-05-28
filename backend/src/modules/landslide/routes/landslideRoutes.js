@@ -154,7 +154,7 @@ router.get('/nodes', cacheResponse(12 * 3600, 'landslide_api'), async (req, res,
     const max_lat     = parseFloat(req.query.max_lat)  || 90
     const min_lng     = parseFloat(req.query.min_lng)  || 0
     const max_lng     = parseFloat(req.query.max_lng)  || 180
-    const limit       = Math.min(parseInt(req.query.limit, 10) || 3000, 5000)
+    const limit       = Math.min(parseInt(req.query.limit, 10) || 100000, 100000)
     const risk_filter = req.query.risk_filter || 'ALL'
 
     const offset      = Math.min(Math.max(parseInt(req.query.offset, 10) || 0, 0), 3)
@@ -169,61 +169,14 @@ router.get('/nodes', cacheResponse(12 * 3600, 'landslide_api'), async (req, res,
     }
 
     // ── ⚡ FAST PATH: Cache đã sẵn sàng ──────────────────────────────────────
-    // Bước 1: Lấy nodes trong bbox từ landslide_grid_nodes (chỉ cột địa hình)
-      // Query này rất nhanh — chỉ cần lat/lon range scan, không join predictions
-      const [gridNodes] = await sequelize.query(
-        `SELECT node_id, lat, lon, province, location_name, slope, twi, elevation, ndvi
-         FROM landslide_grid_nodes
-         WHERE lat BETWEEN :min_lat AND :max_lat
-           AND lon BETWEEN :min_lng AND :max_lng
-         LIMIT :bbox_limit`,
-        {
-          replacements: {
-            min_lat, max_lat, min_lng, max_lng,
-            // Lấy nhiều hơn limit để sau khi filter risk vẫn đủ kết quả
-            bbox_limit: Math.min(limit * 3, 15000),
-          },
-        }
-      )
-
-      // Bước 2: In-memory join với cache (O(n) lookups, không cần DB)
-      const nodes = []
-      for (const n of gridNodes) {
-        const pred = landslideCache.getForNode(n.node_id, offset)
-        if (!pred) continue  // node này chưa có dự báo
-
-        // Risk filter
-        if (risk_filter === 'DANGER'  && pred.risk_level !== 'DANGER') continue
-        if (risk_filter === 'WARNING' && !['WARNING', 'DANGER'].includes(pred.risk_level)) continue
-
-        nodes.push({
-          node_id:          n.node_id,
-          lat:              parseFloat(n.lat),
-          lon:              parseFloat(n.lon),
-          province:         n.province,
-          location_name:    n.location_name,
-          slope:            n.slope    != null ? parseFloat(n.slope)    : null,
-          twi:              n.twi      != null ? parseFloat(n.twi)      : null,
-          elevation:        n.elevation!= null ? parseFloat(n.elevation): null,
-          ndvi:             n.ndvi     != null ? parseFloat(n.ndvi)     : null,
-          prob_landslide:   pred.prob_landslide,
-          risk_level:       pred.risk_level,
-          rain_7d_accum:    pred.rain_7d_accum,
-          api_7d:           pred.api_7d,
-          soil_moisture_1d: pred.soil_moisture_1d,
-          prediction_time:  pred.prediction_time,
-        })
-      }
-
-      // Bước 3: Sort theo prob giảm dần, cắt limit
-      nodes.sort((a, b) => (b.prob_landslide ?? 0) - (a.prob_landslide ?? 0))
-
-        return res.status(200).json({
-          success: true,
-          source:  'cache',
-          cache_size: cacheStats.size,
-          nodes:   nodes.slice(0, limit),
-        })
+    const nodes = landslideCache.getNodesInBbox(min_lat, max_lat, min_lng, max_lng, offset, risk_filter, limit)
+    
+    return res.status(200).json({
+      success: true,
+      source:  'cache',
+      cache_size: cacheStats.size,
+      nodes:   nodes,
+    })
     // NOTE: The SLOW PATH DB fallback was removed here because cacheStats.ready is strictly enforced above.
 
   } catch (err) {
@@ -439,5 +392,17 @@ router.get('/nearest-node', async (req, res, next) => {
     return next(err);
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/v1/landslide/alerts (News Ticker)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/alerts', (req, res) => {
+  try {
+    const alerts = landslideCache.getDynamicAlerts()
+    return res.status(200).json({ success: true, data: alerts })
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message })
+  }
+})
 
 module.exports = { landslideRouter: router }
