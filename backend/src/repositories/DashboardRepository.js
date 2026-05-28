@@ -418,7 +418,7 @@ class DashboardRepository {
         to_char(fp.time AT TIME ZONE :tz, 'HH24:MI DD/MM') AS time
       FROM flood_predictions fp
       JOIN grid_nodes gn ON fp.node_id = gn.node_id
-      WHERE fp.time >= now() AND fp.time <= now() + interval '24 hours'
+      WHERE fp.time >= date_trunc('hour', now()) AND fp.time <= date_trunc('hour', now()) + interval '6 hours'
         AND (fp.target = 1 OR fp.risk_level IN ('high', 'severe'))
         AND gn.district_name IS NOT NULL
       ORDER BY gn.district_name, fp.flood_depth_cm DESC

@@ -93,17 +93,24 @@ function LandslideClustersLayer({
       properties: { ...n, cluster: false as const },
     })), [nodes])
 
-  useEffect(() => {
-    const sc = new Supercluster<NodePoint, ClusterProps>({ radius: 55, maxZoom: 18 })
+  const scIndex = useMemo(() => {
+    const sc = new Supercluster<NodePoint, any>({ 
+      radius: 55, 
+      maxZoom: 18,
+      map: (props) => ({
+        dangerCount: props.risk_level === 'DANGER' ? 1 : 0
+      }),
+      reduce: (accumulated, props) => {
+        accumulated.dangerCount += props.dangerCount;
+      }
+    })
     sc.load(features)
-    indexRef.current = sc
+    return sc
   }, [features])
 
   const clusters = useMemo(() => {
-    const idx = indexRef.current
-    if (!idx) return [] as Array<PointFeature | ClusterFeature>
-    return idx.getClusters(view.bbox, Math.round(view.zoom)) as Array<PointFeature | ClusterFeature>
-  }, [view])
+    return scIndex.getClusters(view.bbox, Math.round(view.zoom)) as Array<PointFeature | ClusterFeature>
+  }, [view, scIndex])
 
   return (
     <>
@@ -114,17 +121,24 @@ function LandslideClustersLayer({
         if (isCluster) {
           const p = f as ClusterFeature
           const count = p.properties.point_count
+          const hasDanger = (p.properties as any).dangerCount > 0
           const size = clamp(32 + Math.log2(Math.max(2, count)) * 9, 32, 60)
+          
+          const ringClass = hasDanger ? 'bg-red-500' : 'bg-orange-500'
+          const borderClass = hasDanger ? 'bg-red-500/20 border-red-400/30' : 'bg-orange-500/20 border-orange-400/30'
+          const gradientClass = hasDanger ? 'from-red-400 to-red-600' : 'from-orange-400 to-orange-600'
+          const hexShadow = hasDanger ? 'rgba(239,68,68,0.8)' : 'rgba(249,115,22,0.8)'
+
           const icon = L.divIcon({
             className: 'bg-transparent border-none',
             html: `
               <div style="width:${size}px; height:${size}px;" class="relative flex items-center justify-center">
                 <!-- Vòng ngoài cùng toả ra (ping) -->
-                <div class="absolute inset-0 rounded-full bg-orange-500 opacity-30 animate-ping" style="animation-duration: 2s;"></div>
+                <div class="absolute inset-0 rounded-full ${ringClass} opacity-30 animate-ping" style="animation-duration: 2s;"></div>
                 <!-- Vòng viền giữa mờ mờ -->
-                <div class="absolute inset-1 rounded-full bg-orange-500/20 border-2 border-orange-400/30"></div>
+                <div class="absolute inset-1 rounded-full ${borderClass} border-2"></div>
                 <!-- Khối cầu trung tâm -->
-                <div class="relative z-10 w-[75%] h-[75%] rounded-full bg-gradient-to-br from-orange-400 to-orange-600 border border-white/40 shadow-[0_0_12px_rgba(249,115,22,0.8)] flex items-center justify-center text-white font-black" style="font-size: ${size > 40 ? '13px' : '11px'};">
+                <div class="relative z-10 w-[75%] h-[75%] rounded-full bg-gradient-to-br ${gradientClass} border border-white/40 shadow-[0_0_12px_${hexShadow}] flex items-center justify-center text-white font-black" style="font-size: ${size > 40 ? '13px' : '11px'};">
                   ${count}
                 </div>
               </div>
@@ -139,13 +153,15 @@ function LandslideClustersLayer({
               icon={icon}
               eventHandlers={{
                 click: () => {
-                  const idx = indexRef.current
-                  if (!idx) return
-                  const nextZoom = Math.min(
-                    idx.getClusterExpansionZoom((p.properties as any).cluster_id),
-                    18
-                  )
-                  onFlyToCluster(lat, lng, nextZoom)
+                  try {
+                    const nextZoom = Math.min(
+                      scIndex.getClusterExpansionZoom((p.properties as any).cluster_id),
+                      18
+                    )
+                    onFlyToCluster(lat, lng, nextZoom)
+                  } catch (err) {
+                    onFlyToCluster(lat, lng, Math.min(map.getZoom() + 2, 18))
+                  }
                 },
               }}
             />
@@ -413,12 +429,19 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, d
         maxLat: bounds.getNorth(),
         minLng: bounds.getWest(),
         maxLng: bounds.getEast(),
-        limit: 3000,
+        limit: 100000,
         riskFilter,
         offset: dayOffset,
       }, ctrl.signal)
       // Filter out nodes with <= 0% probability to improve performance
-      setNodes(data.filter((n) => (n.prob_landslide ?? 0) > 0))
+      // AND enforce strict riskFilter locally (since backend might include SAFE or mix DANGER/WARNING)
+      setNodes(data.filter((n) => {
+        if ((n.prob_landslide ?? 0) <= 0) return false
+        if (n.risk_level === 'SAFE') return false
+        if (riskFilter === 'DANGER' && n.risk_level !== 'DANGER') return false
+        if (riskFilter === 'WARNING' && n.risk_level !== 'WARNING') return false
+        return true
+      }))
     } catch (err) {
       if (!axios.isCancel(err)) console.warn('[LandslideMap] fetch error:', err)
     } finally {

@@ -174,6 +174,11 @@ export async function getDynamicAlerts() {
   return (res.data?.data ?? []) as Array<{ district: string; max_depth: number; time: string }>
 }
 
+export async function getLandslideAlerts() {
+  const res = await apiV1.get<any>('/landslide/alerts')
+  return (res.data?.data ?? []) as Array<{ district: string; prob_landslide: number; risk_level: string; soil_moisture: number; rain: number }>
+}
+
 export async function getHotspots() {
   const res = await apiV1.get<any>('/reports/hotspots')
   return res.data?.data ?? []

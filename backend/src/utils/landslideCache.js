@@ -62,14 +62,20 @@ function updateCache(predictions) {
     // Trong trường hợp cron truyền mảng đã filter offset=0, nó sẽ đè lên index 0
     const offset = p.offset !== undefined ? p.offset : 0;
     
+    const existing = arr[offset] || {};
     arr[offset] = {
-      prob_landslide:   p.prob_landslide   ?? null,
-      risk_level:       p.risk_level       ?? null,
-      rain_7d_accum:    p.rain_7d_accum    ?? null,
-      api_7d:           p.api_7d           ?? null,
-      soil_moisture_1d: p.soil_moisture_1d ?? null,
-      prediction_time:  p.prediction_time  ?? null,
-      province:         p.province         ?? null,
+      prob_landslide:   p.prob_landslide   ?? existing.prob_landslide ?? null,
+      risk_level:       p.risk_level       ?? existing.risk_level ?? null,
+      rain_7d_accum:    p.rain_7d_accum    ?? existing.rain_7d_accum ?? null,
+      api_7d:           p.api_7d           ?? existing.api_7d ?? null,
+      soil_moisture_1d: p.soil_moisture_1d ?? existing.soil_moisture_1d ?? null,
+      prediction_time:  p.prediction_time  ?? existing.prediction_time ?? null,
+      province:         p.province         ?? existing.province ?? null,
+      lat:              existing.lat ?? null,
+      lon:              existing.lon ?? null,
+      location_name:    existing.location_name ?? null,
+      slope:            existing.slope ?? null,
+      elevation:        existing.elevation ?? null,
     }
     _map.set(p.node_id, arr)
   }
@@ -85,6 +91,75 @@ function updateCache(predictions) {
 function getForNode(node_id, offset = 0) {
   const arr = _map.get(node_id)
   return arr ? (arr[offset] || arr[0] || null) : null
+}
+
+/**
+ * Lấy các điểm nằm trong bounding box từ In-Memory Cache (siêu tốc)
+ */
+function getNodesInBbox(minLat, maxLat, minLng, maxLng, offset = 0, riskFilter = 'ALL', limit = 3000) {
+  const nodes = [];
+  for (const [node_id, arr] of _map.entries()) {
+    const pred = arr[offset] || arr[0];
+    if (!pred) continue;
+    
+    if (pred.lat >= minLat && pred.lat <= maxLat && pred.lon >= minLng && pred.lon <= maxLng) {
+      if (riskFilter === 'DANGER' && pred.risk_level !== 'DANGER') continue;
+      if (riskFilter === 'WARNING' && !['WARNING', 'DANGER'].includes(pred.risk_level)) continue;
+      
+      nodes.push({
+        node_id,
+        lat: pred.lat,
+        lon: pred.lon,
+        province: pred.province,
+        location_name: pred.location_name,
+        slope: pred.slope,
+        elevation: pred.elevation,
+        prob_landslide: pred.prob_landslide,
+        risk_level: pred.risk_level,
+        rain_7d_accum: pred.rain_7d_accum,
+        api_7d: pred.api_7d,
+        soil_moisture_1d: pred.soil_moisture_1d,
+        prediction_time: pred.prediction_time
+      });
+    }
+  }
+  nodes.sort((a, b) => (b.prob_landslide || 0) - (a.prob_landslide || 0));
+  return nodes.slice(0, limit);
+}
+
+/**
+ * Lấy danh sách cảnh báo động (thanh tin tức chạy) cho Landslide
+ */
+function getDynamicAlerts() {
+  const alerts = [];
+  for (const arr of _map.values()) {
+    const p = arr[0]; // Chỉ lấy mốc T0 (hôm nay)
+    if (!p) continue;
+    if (p.risk_level === 'DANGER' || p.risk_level === 'WARNING') {
+      alerts.push({
+        district: p.location_name || p.province,
+        prob_landslide: p.prob_landslide,
+        risk_level: p.risk_level,
+        soil_moisture: p.soil_moisture_1d,
+        rain: p.rain_7d_accum,
+      });
+    }
+  }
+  // Sort by probability DESC
+  alerts.sort((a, b) => b.prob_landslide - a.prob_landslide);
+  // Get top 10 unique locations
+  const unique = [];
+  const seen = new Set();
+  for (const a of alerts) {
+    const loc = (a.district || '').split(',').slice(-1)[0].trim() || a.district;
+    if (!seen.has(loc)) {
+      seen.add(loc);
+      a.district = loc;
+      unique.push(a);
+      if (unique.length >= 10) break;
+    }
+  }
+  return unique;
 }
 
 /**
@@ -125,7 +200,7 @@ async function prewarmFromDb(pool) {
          ORDER BY prediction_time DESC 
          LIMIT 4
        )
-       SELECT p.node_id, p.prob_landslide, p.risk_level, p.rain_7d_accum, p.api_7d, p.soil_moisture_1d, p.prediction_time, n.province
+       SELECT p.node_id, p.prob_landslide, p.risk_level, p.rain_7d_accum, p.api_7d, p.soil_moisture_1d, p.prediction_time, n.province, n.lat, n.lon, n.location_name, n.slope, n.elevation
        FROM landslide_predictions p
        JOIN landslide_grid_nodes n ON p.node_id = n.node_id
        JOIN LatestTimes lt ON p.prediction_time = lt.prediction_time
@@ -152,6 +227,11 @@ async function prewarmFromDb(pool) {
         soil_moisture_1d: p.soil_moisture_1d ?? null,
         prediction_time:  p.prediction_time  ?? null,
         province:         p.province         ?? null,
+        lat:              p.lat !== undefined ? parseFloat(p.lat) : null,
+        lon:              p.lon !== undefined ? parseFloat(p.lon) : null,
+        location_name:    p.location_name    ?? null,
+        slope:            p.slope !== undefined ? parseFloat(p.slope) : null,
+        elevation:        p.elevation !== undefined ? parseFloat(p.elevation) : null,
       }
       _map.set(p.node_id, arr)
     }
@@ -295,7 +375,9 @@ async function populateChatbotCache(pool) {
 
 module.exports = { 
   updateCache, 
-  getForNode, 
+  getForNode,
+  getNodesInBbox,
+  getDynamicAlerts,
   getStats, 
   clearAll, 
   prewarmFromDb, 
