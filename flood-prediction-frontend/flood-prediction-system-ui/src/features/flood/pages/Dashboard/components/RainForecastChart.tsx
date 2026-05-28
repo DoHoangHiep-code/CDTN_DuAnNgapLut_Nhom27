@@ -32,7 +32,7 @@ export function RainForecastChart({ points }: { points: DashboardForecastPoint[]
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
             <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
             <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} domain={[0, 'auto']} />
             <Tooltip
               contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#f8fafc' }}
               itemStyle={{ fontSize: '13px', color: '#e2e8f0' }}
@@ -40,7 +40,7 @@ export function RainForecastChart({ points }: { points: DashboardForecastPoint[]
               formatter={(value, name) => {
                 const v = Number(value ?? 0)
                 if (name === 'Lượng mưa (mm)') return [`${v.toFixed(1)} mm`, name]
-                return [`${v.toFixed(0)} cm`, name]
+                return [`${v.toFixed(1)} cm`, name]
               }}
             />
             <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />

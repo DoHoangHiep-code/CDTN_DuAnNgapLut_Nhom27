@@ -242,6 +242,7 @@ router.get('/nodes', cacheResponse(12 * 3600, 'landslide_api'), async (req, res,
 router.get('/hotspots', cacheResponse(12 * 3600, 'landslide_api'), async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50)
+    const offset = Math.min(Math.max(parseInt(req.query.offset, 10) || 0, 0), 3)
     const cacheStats = landslideCache.getStats()
 
     if (!cacheStats.ready) {
@@ -258,8 +259,8 @@ router.get('/hotspots', cacheResponse(12 * 3600, 'landslide_api'), async (req, r
       // landslideCache không expose raw Map, cần query grid nodes với province info
       // Dùng DB query chỉ cho grid_nodes (không cần predictions)
       // Lấy top 200 hotspot node_ids từ cache trước
-      // Hotspot mặc định lấy cho offset=0 (hôm nay) để hiển thị Dashboard
-      const topNodeIds = getTopNodeIdsFromCache(limit * 20) // lấy nhiều để có đủ sau khi join
+      // Hotspot lấy cho offset tương ứng để hiển thị đồng bộ với Map
+      const topNodeIds = getTopNodeIdsFromCache(limit * 20, offset) // lấy nhiều để có đủ sau khi join
 
       if (topNodeIds.length > 0) {
         // Query thông tin địa lý cho các node đó
@@ -275,7 +276,7 @@ router.get('/hotspots', cacheResponse(12 * 3600, 'landslide_api'), async (req, r
         )
 
         for (const n of gridNodes) {
-          const pred = landslideCache.getForNode(n.node_id, 0)
+          const pred = landslideCache.getForNode(n.node_id, offset)
           if (!pred || !['DANGER', 'WARNING'].includes(pred.risk_level)) continue
           candidates.push({
             node_id: n.node_id, lat: parseFloat(n.lat), lon: parseFloat(n.lon),
@@ -312,15 +313,16 @@ router.get('/hotspots', cacheResponse(12 * 3600, 'landslide_api'), async (req, r
  *
  * Hiệu suất: Map.entries() trên 425K entries mất ~5-15ms (chấp nhận được cho hotspots).
  * @param {number} n
+ * @param {number} offset
  * @returns {string[]}
  */
-function getTopNodeIdsFromCache(n) {
+function getTopNodeIdsFromCache(n, offset = 0) {
   // Truy cập internal state của landslideCache
   // landslideCache không expose raw Map, nên dùng getForNode scan approach khác:
   // Ta build array từ cache bằng cách đọc qua module internal
   // SOLUTION: Export thêm hàm scanTop từ landslideCache
   if (typeof landslideCache.scanTop === 'function') {
-    return landslideCache.scanTop(n)
+    return landslideCache.scanTop(n, offset)
   }
   return []
 }

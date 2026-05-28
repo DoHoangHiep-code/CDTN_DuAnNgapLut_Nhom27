@@ -574,6 +574,7 @@ function FloodMapContent() {
             <FloodWarningCard
               lat={mapCenter.lat}
               lon={mapCenter.lon}
+              dayOffset={dayOffset}
             />
 
             {/* ── Loading overlay khi đang fetch BBox ── */}
@@ -658,8 +659,7 @@ function FloodMapContent() {
                   map?.flyTo(p.position, 15, { animate: true, duration: 0.6 })
                   setSelectedNodeData({ ...p, loading: true })
                   try {
-                    // GỌI API THEO YÊU CẦU CỦA USER: lấy data thật từ DB
-                    const data = await getNodeCurrentData(p.id)
+                    const data = await getNodeCurrentData(p.id, dayOffset)
                     console.log('[Node Details API Result]', data)
                     setSelectedNodeData({ ...p, loading: false, details: data })
                   } catch (err) {

@@ -173,8 +173,8 @@ FEATURE_ORDER: list[str] = [
 
 
 # Ngưỡng để Stage 1 phân loại "có ngập" → kích hoạt Stage 2.
-# Dưới ngưỡng: trả thẳng 0 cm (không ngập).
-FLOOD_THRESHOLD_CM: float = 15.0
+# Dưới ngưỡng: trả thẳng 0 cm (không ngập). Hạ xuống 5cm để bắt các điểm ngập nhẹ gây ùn tắc cục bộ (như Mỹ Đình).
+FLOOD_THRESHOLD_CM: float = 5.0
 
 
 def depth_to_risk(depth_cm: float) -> str:

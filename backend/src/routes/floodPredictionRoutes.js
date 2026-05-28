@@ -26,14 +26,19 @@ router.get('/nodes/:id/current', async (req, res, next) => {
     const nodeIdStr = req.params.id
     const nodeId = nodeIdStr.replace('node_', '')
 
-    // 1. Lấy độ ngập mới nhất của node
+    const offset = parseInt(req.query.offset) || 0
+
+    // 1. Lấy độ ngập CAO NHẤT trong ngày đó
     const [predRows] = await sequelize.query(`
-      SELECT flood_depth_cm, risk_level, explanation, time
-      FROM flood_predictions
-      WHERE node_id = :nodeId
-      ORDER BY time DESC
+      SELECT fp.flood_depth_cm, fp.risk_level, fp.explanation, fp.time,
+             gn.latitude, gn.longitude, gn.location_name
+      FROM flood_predictions fp
+      JOIN grid_nodes gn ON gn.node_id = fp.node_id
+      WHERE fp.node_id = :nodeId
+        AND fp.date_only = CURRENT_DATE + (:offset || ' days')::interval
+      ORDER BY fp.flood_depth_cm DESC, fp.time ASC
       LIMIT 1
-    `, { replacements: { nodeId } })
+    `, { replacements: { nodeId, offset } })
 
     // 2. Lấy station_id của node
     const [nodeRows] = await sequelize.query(`
@@ -211,6 +216,7 @@ router.get('/forecasts/latest', async (req, res, next) => {
   try {
     const lat = Number(req.query.lat)
     const lon = Number(req.query.lon)
+    const offset = parseInt(req.query.offset) || 0
 
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
       return res.status(400).json({
@@ -252,7 +258,7 @@ router.get('/forecasts/latest', async (req, res, next) => {
     const nearestNode = nearestRows[0]
     const nodeId = nearestNode.node_id
 
-    // ── Bước 2: Lấy bản ghi dự báo sát NOW() nhất từ DB ─────────────────────
+    // ── Bước 2: Lấy bản ghi dự báo MAX của ngày tương ứng ─────────────────────
     const [predRows] = await sequelize.query(
       `SELECT
          fp.prediction_id,
@@ -262,11 +268,10 @@ router.get('/forecasts/latest', async (req, res, next) => {
          fp.explanation
        FROM flood_predictions fp
        WHERE fp.node_id = :nodeId
-         AND fp.time BETWEEN NOW() - INTERVAL '4 hours'
-                        AND NOW() + INTERVAL '4 hours'
-       ORDER BY ABS(EXTRACT(EPOCH FROM (fp.time - NOW())))
+         AND fp.date_only = CURRENT_DATE + (:offset || ' days')::interval
+       ORDER BY fp.flood_depth_cm DESC, fp.time ASC
        LIMIT 1`,
-      { replacements: { nodeId } }
+      { replacements: { nodeId, offset } }
     )
 
     // ── Bước 3: IDW Inference (sliding window + virtual stations) ─────────────

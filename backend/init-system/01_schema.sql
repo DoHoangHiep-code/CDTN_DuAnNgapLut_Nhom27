@@ -193,12 +193,12 @@ CREATE TABLE IF NOT EXISTS system_logs (
 
 -- MV: Dự báo mới nhất mỗi node
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_latest_flood_predictions AS
-SELECT DISTINCT ON (node_id)
-    prediction_id, node_id, time, flood_depth_cm, risk_level,
-    explanation, date_only, month, hour, rainy_season_flag
+SELECT DISTINCT ON (node_id, date_only)
+  prediction_id, node_id, time, flood_depth_cm, risk_level,
+  explanation, date_only, month, hour, rainy_season_flag
 FROM flood_predictions
-WHERE time >= NOW() - INTERVAL '6 hours'
-ORDER BY node_id, time ASC;
+WHERE time >= date_trunc('day', NOW()) - INTERVAL '1 day'
+ORDER BY node_id, date_only, flood_depth_cm DESC, time ASC;
 
 CREATE UNIQUE INDEX IF NOT EXISTS mv_latest_flood_predictions_pkey ON mv_latest_flood_predictions (prediction_id);
 
