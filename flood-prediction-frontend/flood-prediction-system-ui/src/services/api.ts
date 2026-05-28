@@ -44,13 +44,15 @@ export async function getFloodPredictionByLocation(lat: number, lon: number) {
 //   usingLiveWeather: boolean
 //   source: 'database' | 'realtime'
 // }
-export async function getForecastLatest(lat: number, lon: number) {
-  const res = await apiV1.get<any>('/forecasts/latest', { params: { lat, lon } })
+export async function getForecastLatest(lat: number, lon: number, offset: number = 0, signal?: AbortSignal) {
+  const res = await apiV1.get<any>('/forecasts/latest', { params: { lat, lon, offset }, signal })
   return res.data ?? null
 }
 
-export async function getNodeCurrentData(nodeId: string) {
-  const res = await apiV1.get<any>(`/flood-prediction/nodes/${nodeId}/current`)
+export async function getNodeCurrentData(nodeId: string, offset: number = 0) {
+  const res = await apiV1.get<any>(`/flood-prediction/nodes/${nodeId}/current`, {
+    params: { offset }
+  })
   return res.data?.data ?? res.data
 }
 
@@ -63,6 +65,7 @@ export async function getFloodPredictionBbox(bbox: {
   minLng: number
   maxLng: number
   limit?: number
+  offset?: number
 }, signal?: AbortSignal) {
   const res = await apiV1.get<any>('/flood-prediction', {
     params: {
@@ -71,6 +74,7 @@ export async function getFloodPredictionBbox(bbox: {
       min_lng: bbox.minLng,
       max_lng: bbox.maxLng,
       limit: bbox.limit ?? 200,
+      offset: bbox.offset ?? 0,
     },
     signal,
   })
@@ -115,6 +119,21 @@ export async function getForecast7d(lat?: number, lon?: number) {
   }>
 }
 
+// ── Dự báo 7 ngày Live (OWM) không lưu DB ──
+export async function getWeather7Days(lat?: number, lon?: number) {
+  const res = await apiV1.get<any>('/weather/7-days', { params: { lat, lon } })
+  return (res.data?.data ?? []) as Array<{
+    dateIso: string
+    minTempC: number
+    maxTempC: number
+    rainfallMm: number
+    humidityPct: number
+    icon: string
+    description: string
+  }>
+}
+
+
 export async function getReports(params?: {
   date?: string
   district?: string
@@ -150,6 +169,16 @@ export async function getDashboardAutocomplete(q: string) {
   return (res.data?.data ?? res.data) as import('../utils/types').DashboardAutocompleteItem[]
 }
 
+export async function getDynamicAlerts() {
+  const res = await apiV1.get<any>('/dashboard/alerts')
+  return (res.data?.data ?? []) as Array<{ district: string; max_depth: number; time: string }>
+}
+
+export async function getHotspots() {
+  const res = await apiV1.get<any>('/reports/hotspots')
+  return res.data?.data ?? []
+}
+
 export async function exportData(_format: 'csv' | 'excel' | 'pdf', payload: unknown) {
   const res = await apiV1.post<{ ok: boolean }>('/export', payload)
   return res.data
@@ -173,6 +202,11 @@ export async function authRegister(payload: { username?: string; email: string; 
 
 export async function authForgotPassword(payload: { email: string }) {
   const res = await apiV1.post<{ success: boolean; message: string }>('/auth/forgot-password', payload)
+  return res.data
+}
+
+export async function authCheckEmail(payload: { email: string }) {
+  const res = await apiV1.post<{ success: boolean; message: string; resetToken: string }>('/auth/check-email', payload)
   return res.data
 }
 
@@ -225,14 +259,14 @@ export async function adminCreateUser(payload: {
 }
 
 export async function adminUpdateUser(
-  userId: number,
+  userId: number | string,
   patch: { username?: string; email?: string; password?: string; full_name?: string; role?: 'admin' | 'expert' | 'user' },
 ) {
   const res = await apiV1.put<any>(`/admin/users/${userId}`, patch)
   return res.data?.data ?? res.data
 }
 
-export async function adminDeleteUser(userId: number) {
+export async function adminDeleteUser(userId: number | string) {
   const res = await apiV1.delete<any>(`/admin/users/${userId}`)
   return res.data
 }
@@ -254,3 +288,98 @@ export async function updateUserSettings(payload: UserSettingsPayload) {
   const res = await apiV1.put<{ success: boolean; message?: string }>('/users/settings', payload)
   return res.data
 }
+
+// ── Lấy logs hệ thống ──
+export async function getSystemLogs(limit = 100) {
+  const res = await apiV1.get<any>('/system-logs', { params: { limit } })
+  return res.data?.data ?? []
+}
+
+// ══════════════════════════════════════════════════════
+// LANDSLIDE API
+// ══════════════════════════════════════════════════════
+
+export type LandslideNode = {
+  node_id: string
+  lat: number
+  lon: number
+  province: string
+  location_name?: string
+  slope: number | null
+  twi: number | null
+  elevation: number | null
+  ndvi: number | null
+  prob_landslide: number | null
+  risk_level: 'SAFE' | 'WARNING' | 'DANGER' | null
+  rain_7d_accum: number | null
+  api_7d: number | null
+  soil_moisture_1d: number | null
+  prediction_time: string | null
+}
+
+/**
+ * Lấy danh sách nodes sạt lở trong BBox viewport hiện tại.
+ * Endpoint: GET /api/v1/landslide/nodes?min_lat=&max_lat=&min_lng=&max_lng=&limit=&risk_filter=
+ */
+export async function getLandslideBbox(bbox: {
+  minLat: number
+  maxLat: number
+  minLng: number
+  maxLng: number
+  limit?: number
+  riskFilter?: 'ALL' | 'WARNING' | 'DANGER'
+  offset?: number
+}, signal?: AbortSignal) {
+  const res = await apiV1.get<any>('/landslide/nodes', {
+    params: {
+      min_lat: bbox.minLat,
+      max_lat: bbox.maxLat,
+      min_lng: bbox.minLng,
+      max_lng: bbox.maxLng,
+      limit: bbox.limit ?? 2000,
+      risk_filter: bbox.riskFilter ?? 'ALL',
+      offset: bbox.offset ?? 0,
+    },
+    signal,
+  })
+  return (res.data?.data ?? res.data?.nodes ?? []) as LandslideNode[]
+}
+
+/**
+ * Lấy top hotspot sạt lở (DANGER + WARNING) để hiển thị trong Hotspot Cards.
+ * Endpoint: GET /api/v1/landslide/hotspots?limit=10
+ */
+export async function getLandslideHotspots(limit = 10, offset = 0) {
+  const res = await apiV1.get<any>('/landslide/hotspots', { params: { limit, offset } })
+  return (res.data?.data ?? res.data?.nodes ?? []) as LandslideNode[]
+}
+
+/**
+ * Tìm kiếm các điểm sạt lở theo tên địa danh.
+ * Endpoint: GET /api/v1/landslide/search?q=...
+ */
+export async function searchLandslideLocations(query: string, limit = 10) {
+  if (!query) return []
+  const res = await apiV1.get<any>('/landslide/search', { params: { q: query, limit } })
+  return (res.data?.data ?? res.data?.nodes ?? []) as LandslideNode[]
+}
+
+/**
+ * Lấy node sạt lở gần nhất với toạ độ cho trước
+ * Endpoint: GET /api/v1/landslide/nearest-node?lat=...&lon=...
+ */
+export async function getNearestLandslideNode(lat: number, lon: number) {
+  const res = await apiV1.get<any>('/landslide/nearest-node', { params: { lat, lon } })
+  return (res.data?.data ?? res.data?.node ?? null) as LandslideNode | null
+}
+
+/**
+ * Lấy số liệu thống kê cho Dashboard sạt lở
+ * Endpoint: GET /api/v1/landslide/dashboard
+ */
+export async function getLandslideDashboardStats(offset: number = 0) {
+  const res = await apiV1.get<any>('/landslide/dashboard', { params: { offset } })
+  return res.data?.data
+}
+
+

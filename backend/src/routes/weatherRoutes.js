@@ -26,30 +26,15 @@ router.get('/weather/forecast24h', async (req, res, next) => {
   const HANOI_LAT = 21.0285
   const HANOI_LON = 105.8542
   try {
-    const lat = Number.isFinite(Number(req.query.lat)) ? Number(req.query.lat) : HANOI_LAT
-    const lng = Number.isFinite(Number(req.query.lng)) ? Number(req.query.lng) : HANOI_LON
-
-    const nodeId = await weatherRepository.findNearestNodeId({ lat, lng }).catch(() => null)
-    if (!nodeId) {
+    const nearest = await weatherRepository.findNearestNode({ lat, lng }).catch(() => null)
+    if (!nearest || !nearest.st1_id) {
       return res.status(200).json({ success: true, source: 'empty', data: [] })
     }
 
-    const rows = await weatherRepository.getHourlyForecast24h(nodeId).catch(() => [])
+    const rows = await weatherRepository.getHourlyForecast24h(nearest.st1_id).catch(() => [])
 
-    // Nếu DB không có dữ liệu tương lai → fallback sang OWM forecast (3h intervals)
     if (!rows || rows.length === 0) {
-      const owmPoints = await getOWMForecast5d(lat, lng).catch(() => null)
-      if (!owmPoints || !owmPoints.length) {
-        return res.status(200).json({ success: true, source: 'empty', data: [] })
-      }
-      const data = owmPoints.slice(0, 8).map(p => ({
-        timeIso:    new Date(p.timeUtc).toISOString(),
-        rainfallMm: Math.round(p.rain3h * 10) / 10,
-        tempC:      Math.round(p.temp * 10) / 10,
-        humidity:   p.humidity,
-        cloudsPct:  0,
-      }))
-      return res.status(200).json({ success: true, source: 'live-owm', data })
+      return res.status(200).json({ success: true, source: 'empty', data: [] })
     }
 
     const data = rows.map(r => ({
@@ -60,7 +45,7 @@ router.get('/weather/forecast24h', async (req, res, next) => {
       cloudsPct:  Number(r.clouds) || 0,
     }))
 
-    return res.status(200).json({ success: true, source: 'database', nodeId, data })
+    return res.status(200).json({ success: true, source: 'database', nodeId: nearest.node_id, data })
   } catch (err) {
     return next(err)
   }
@@ -120,10 +105,12 @@ router.get('/weather/forecast7d', async (req, res, next) => {
     const lat = Number.isFinite(Number(req.query.lat)) ? Number(req.query.lat) : HANOI_LAT
     const lon = Number.isFinite(Number(req.query.lon)) ? Number(req.query.lon) : HANOI_LON
 
-    // ── Phase 1: Thử đọc từ DB (CockroachDB cache bởi Cronjob) ──────────────────
-    const cacheThreshold = new Date(Date.now() - CACHE_MAX_AGE_H * 3600 * 1000)
+    const nearest = await weatherRepository.findNearestNode({ lat, lng: lon }).catch(() => null)
+    if (!nearest || !nearest.node_id || !nearest.st1_id) {
+      return res.status(404).json({ success: false, error: { message: 'Không tìm thấy trạm đo tương ứng' } })
+    }
 
-    // Lấy 7 ngày tới từ flood_predictions (DB đã có dữ liệu thật từ Cronjob, có thể tối đa 5 ngày, sẽ pad)
+    // Lấy 7 ngày tới từ flood_predictions cho grid node
     const today     = new Date().toISOString().slice(0, 10)
     const day7Limit = new Date(Date.now() + 7 * 86400 * 1000).toISOString().slice(0, 10)
 
@@ -137,6 +124,7 @@ router.get('/weather/forecast7d', async (req, res, next) => {
         [sequelize.fn('MAX', sequelize.col('updated_at')),     'last_update'],
       ],
       where: {
+        node_id: nearest.node_id,
         time: {
           [Op.gte]: new Date(today + 'T00:00:00Z'),
           [Op.lte]: new Date(day7Limit + 'T23:59:59Z'),
@@ -164,6 +152,7 @@ router.get('/weather/forecast7d', async (req, res, next) => {
           [sequelize.fn('AVG', sequelize.col('rhum')),  'avg_humidity'],
         ],
         where: {
+          node_id: nearest.st1_id,
           time: {
             [Op.gte]: new Date(today + 'T00:00:00Z'),
             [Op.lte]: new Date(day7Limit + 'T23:59:59Z'),
@@ -216,121 +205,10 @@ router.get('/weather/forecast7d', async (req, res, next) => {
       })
     }
 
-    // ── Phase 2: Fallback → gọi OWM Forecast 5d live ─────────────────────────
-    console.log('[WeatherRoute/forecast5d] Cache DB miss hoặc quá cũ → gọi OWM live...')
-    const owmPoints = await getOWMForecast5d(lat, lon)
-
-    if (!owmPoints || !owmPoints.length) {
-      return res.status(503).json({
-        success: false,
-        error: { message: 'Không thể lấy dự báo thời tiết. OWM không phản hồi và DB cache đã quá cũ.' },
-      })
-    }
-
-    // Aggregate thành daily
-    const dailySummaries = aggregateToDaily(owmPoints, 5)
-    const rainyMonths    = [5, 6, 7, 8, 9, 10]
-
-    // Build AI features từ 40 data points OWM cho mỗi ngày
-    // Dùng điểm đại diện 12:00 của từng ngày để gọi AI (1 call/ngày = 5 calls)
-    const featuresArray = dailySummaries.map((day) => {
-      // Lấy data point gần 12h nhất trong ngày
-      const noonPoint = day.points.reduce((best, p) => {
-        const ict  = new Date(p.timeUtc.getTime() + 7 * 3600 * 1000)
-        const diff = Math.abs(ict.getHours() - 12)
-        return diff < Math.abs(new Date(best.timeUtc.getTime() + 7 * 3600 * 1000).getHours() - 12) ? p : best
-      }, day.points[0])
-
-      const dt        = new Date(noonPoint.timeUtc.getTime() + 7 * 3600 * 1000)
-      const hour      = 12
-      const month     = dt.getMonth() + 1
-      const dayofweek = dt.getDay() === 0 ? 6 : dt.getDay() - 1
-      const start     = new Date(dt.getFullYear(), 0, 0)
-      const dayofyear = Math.floor((dt - start) / 86400000)
-
-      // Tính prcp windows từ 3h data points của ngày (cộng dồn từng step)
-      const prcp     = noonPoint.rain3h
-      // Lấy tất cả points trong ngày + ngày trước để tính window
-      const allPts   = owmPoints   // full array để tính window
-      const noonIdx  = allPts.findIndex(p => p.timeUtc.getTime() === noonPoint.timeUtc.getTime())
-      const rain = (stepsBack) => {
-        let total = 0
-        for (let j = 0; j < stepsBack && noonIdx - j >= 0; j++) {
-          total += allPts[noonIdx - j]?.rain3h ?? 0
-        }
-        return total
-      }
-      const prcp_3h  = rain(1)   // = prcp (1 step × 3h)
-      const prcp_6h  = rain(2)   // 2 steps × 3h
-      const prcp_12h = rain(4)   // 4 steps × 3h
-      const prcp_24h = rain(8)   // 8 steps × 3h
-
-      return {
-        prcp, prcp_3h, prcp_6h, prcp_12h, prcp_24h,
-        temp:                noonPoint.temp,
-        rhum:                noonPoint.humidity,
-        wspd:                noonPoint.windSpeed,   // m/s — đúng đơn vị AI expect
-        pres:                noonPoint.pressure,
-        pressure_change_24h: 0,
-        max_prcp_3h:         prcp_3h,
-        max_prcp_6h:         prcp_6h,
-        max_prcp_12h:        prcp_12h,
-        elevation:           5,    // default Hà Nội trung bình
-        slope:               1,
-        impervious_ratio:    0.65,
-        dist_to_drain_km:    0.4,
-        dist_to_river_km:    1.0,
-        dist_to_pump_km:     0.8,
-        dist_to_main_road_km: 0.2,
-        dist_to_park_km:     0.5,
-        hour, dayofweek, month, dayofyear,
-        hour_sin:  Math.sin((2 * Math.PI * hour) / 24),
-        hour_cos:  Math.cos((2 * Math.PI * hour) / 24),
-        month_sin: Math.sin((2 * Math.PI * month) / 12),
-        month_cos: Math.cos((2 * Math.PI * month) / 12),
-        rainy_season_flag: rainyMonths.includes(month) ? 1 : 0,
-      }
-    })
-
-    // Gọi AI batch
-    const aiResults = await predictionService._callAIBatch(featuresArray).catch(() => null)
-
-    // Build response
-    let data = dailySummaries.map((day, i) => {
-      const rawDepth    = Number(aiResults?.[i]?.flood_depth_cm ?? 0)
-      // No-rain override: Nếu tổng mưa ngày = 0 và độ ẩm thấp → depth = 0
-      const noRain      = day.rainfallMm === 0 && day.humidityPct < 90
-      const finalDepth  = Math.round(Math.max(0, noRain ? 0 : rawDepth) * 10) / 10
-      const risk        = finalDepth < 15 ? 'safe' : finalDepth < 30 ? 'medium' : finalDepth < 60 ? 'high' : 'severe'
-
-      return {
-        dateIso:        day.dateIso,
-        minTempC:       day.minTempC,
-        maxTempC:       day.maxTempC,
-        rainfallMm:     day.rainfallMm,
-        humidityPct:    day.humidityPct,
-        flood_depth_cm: finalDepth,
-        risk_level:     risk,
-        usingAI:        aiResults !== null,
-        source:         'live-owm',
-      }
-    })
-
-    // Pad to 7 days
-    while (data.length > 0 && data.length < 7) {
-      const last = data[data.length - 1]
-      const nextDate = new Date(last.dateIso)
-      nextDate.setDate(nextDate.getDate() + 1)
-      data.push({
-        ...last,
-        dateIso: nextDate.toISOString().slice(0, 10),
-      })
-    }
-
     return res.status(200).json({
       success: true,
-      source:  aiResults ? 'live-owm-ai' : 'live-owm',
-      data,
+      source:  'database',
+      data: dbRows.length > 0 ? data : [],
     })
   } catch (err) {
     return next(err)

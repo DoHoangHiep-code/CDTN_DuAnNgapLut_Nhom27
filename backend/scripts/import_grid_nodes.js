@@ -24,15 +24,15 @@
 
 require('dotenv').config()
 
-const fs      = require('fs')
-const path    = require('path')
-const csv     = require('csv-parser')
+const fs = require('fs')
+const path = require('path')
+const csv = require('csv-parser')
 const { sequelize } = require('../src/db/sequelize')
-const { GridNode }  = require('../src/models')
+const { GridNode } = require('../src/models')
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const DEFAULT_CSV = path.resolve(__dirname, '../data/Hanoi_Grid_Features_Final_v2.csv')
-const CHUNK_SIZE  = 5000   // rows per bulkCreate batch
+const DEFAULT_CSV = path.resolve(__dirname, '../init-system/02_static_data/Hanoi_Grid_Features_Final_v2.csv')
+const CHUNK_SIZE = 5000   // rows per bulkCreate batch
 const UPDATE_COLS = [      // columns to overwrite on conflict (lat/lon unique)
   'grid_id',
   'dist_to_park_km', 'dist_to_drain_km', 'dist_to_river_km',
@@ -53,7 +53,7 @@ function resolveCsvPath() {
   }
   if (!fs.existsSync(DEFAULT_CSV)) {
     console.error(`[Import] ❌ Không tìm thấy file mặc định:\n  ${DEFAULT_CSV}`)
-    console.error('[Import] Hãy đặt file CSV vào: backend/data/Hanoi_Grid_Features_Final_v2.csv')
+    console.error('[Import] Hãy đặt file CSV vào: backend/init-system/02_static_data/Hanoi_Grid_Features_Final_v2.csv')
     console.error('[Import] Hoặc truyền tham số: node scripts/import_grid_nodes.js --file=<path>')
     process.exit(1)
   }
@@ -80,17 +80,17 @@ async function updateGeometries(nodeIds) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   const csvPath = resolveCsvPath()
-  const stats   = fs.statSync(csvPath)
+  const stats = fs.statSync(csvPath)
   console.log(`\n[Import] 📂 File CSV: ${path.basename(csvPath)} (${(stats.size / 1024 / 1024).toFixed(1)} MB)`)
   console.log(`[Import] Chunk size : ${CHUNK_SIZE.toLocaleString('vi-VN')} rows/batch`)
   console.log('[Import] Bắt đầu stream...\n')
 
-  const startTime   = Date.now()
-  let chunk         = []
+  const startTime = Date.now()
+  let chunk = []
   let totalInserted = 0
-  let totalSkipped  = 0
-  let chunkNum      = 0
-  let globalRowIdx  = 0   // global counter → dùng làm node_id
+  let totalSkipped = 0
+  let chunkNum = 0
+  let globalRowIdx = 0   // global counter → dùng làm node_id
 
   // Lấy max node_id hiện tại để tránh conflict với hotspot 39 dòng đang có
   const [[{ maxId }]] = await sequelize.query('SELECT COALESCE(MAX(node_id), 0) AS "maxId" FROM grid_nodes')
@@ -101,22 +101,22 @@ async function main() {
   async function flushChunk(rows, startId) {
     chunkNum++
     const records = rows.map((r, i) => ({
-      node_id:   startId + i,   // Gán ID tuần tự
+      node_id: startId + i,   // Gán ID tuần tự
       // lat/lon – bắt buộc
-      latitude:  safeFloat(r.latitude),
+      latitude: safeFloat(r.latitude),
       longitude: safeFloat(r.longitude),
       // grid_id
-      grid_id:   r.grid_id ?? `Grid_${totalInserted + i}`,
+      grid_id: r.grid_id ?? `Grid_${totalInserted + i}`,
       // Đặc trưng địa lý
-      elevation:        safeFloat(r.elevation),       // tên CSV: elevation
-      slope:            safeFloat(r.slope),
+      elevation: safeFloat(r.elevation),       // tên CSV: elevation
+      slope: safeFloat(r.slope),
       impervious_ratio: safeFloat(r.impervious_ratio),
       // Khoảng cách đến hạ tầng
-      dist_to_drain_km:     safeFloat(r.dist_to_drain_km),
-      dist_to_river_km:     safeFloat(r.dist_to_river_km),
-      dist_to_pump_km:      safeFloat(r.dist_to_pump_km),
+      dist_to_drain_km: safeFloat(r.dist_to_drain_km),
+      dist_to_river_km: safeFloat(r.dist_to_river_km),
+      dist_to_pump_km: safeFloat(r.dist_to_pump_km),
       dist_to_main_road_km: safeFloat(r.dist_to_main_road_km),
-      dist_to_park_km:      safeFloat(r.dist_to_park_km),
+      dist_to_park_km: safeFloat(r.dist_to_park_km),
       // IDW fields – sẽ được điền bởi calculate_idw_weights.js
       is_out_of_bounds: false,
       // Geometry – sẽ build sau
@@ -155,15 +155,15 @@ async function main() {
     const stream = fs.createReadStream(csvPath, { encoding: 'utf8' })
       .pipe(csv({
         mapHeaders: ({ header }) => header.trim(),
-        mapValues:  ({ value  }) => value?.trim(),
+        mapValues: ({ value }) => value?.trim(),
       }))
 
     stream.on('data', (row) => {
       chunk.push(row)
       if (chunk.length >= CHUNK_SIZE) {
-        const toFlush    = chunk.splice(0, CHUNK_SIZE)
+        const toFlush = chunk.splice(0, CHUNK_SIZE)
         const chunkStart = nextId
-        nextId          += toFlush.length
+        nextId += toFlush.length
 
         // Pause stream → flush → resume (đúng backpressure pattern)
         stream.pause()

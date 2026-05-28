@@ -47,6 +47,7 @@ class ProfileController {
     this.getProfile = this.getProfile.bind(this)
     this.updateProfile = this.updateProfile.bind(this)
     this.uploadAvatar = this.uploadAvatar.bind(this)
+    this.changePassword = this.changePassword.bind(this)
   }
 
   // GET /api/v1/users/profile
@@ -99,6 +100,24 @@ class ProfileController {
       // Trả avatar_url
       return res.status(200).json({ success: true, data: result })
     } catch (err) {
+      return next(err)
+    }
+  }
+
+  // POST /api/v1/users/profile/password
+  async changePassword(req, res, next) {
+    try {
+      const userId = req.user.user_id
+      const { currentPassword, newPassword } = req.body
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ success: false, error: { message: 'Thiếu thông tin mật khẩu' } })
+      }
+      const result = await this.profileService.changePassword({ userId, currentPassword, newPassword })
+      return res.status(200).json({ success: true, message: result.message })
+    } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ success: false, error: { message: err.message } })
+      }
       return next(err)
     }
   }

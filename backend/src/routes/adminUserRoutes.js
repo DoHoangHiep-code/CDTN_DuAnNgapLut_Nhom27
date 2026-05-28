@@ -1,5 +1,5 @@
 const express = require('express') // Import express để tạo router
-const { verifyToken, isAdmin } = require('../middlewares/auth.middleware') // Middleware xác thực + kiểm tra quyền admin
+const { verifyToken, isAdmin } = require('../common/middlewares/auth.middleware') // Middleware xác thực + kiểm tra quyền admin
 const { AdminUserController } = require('../controllers/AdminUserController') // Controller admin user
 
 const router = express.Router() // Router cho /api/v1/admin/users

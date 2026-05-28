@@ -8,7 +8,7 @@
 require('dotenv').config()
 const { sequelize } = require('../db/sequelize')
 const { WeatherRepository } = require('../repositories/WeatherRepository')
-const { PredictionService } = require('../services/PredictionService')
+const { PredictionService } = require('../modules/flood/services/PredictionService')
 
 async function main() {
   const weatherRepository = new WeatherRepository({ sequelize })

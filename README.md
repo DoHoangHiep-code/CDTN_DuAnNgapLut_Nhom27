@@ -72,6 +72,16 @@ PORT=3002
 JWT_SECRET=dev_secret_change_me
 ```
 
+### 4.3 Hướng dẫn Setup DB (Tự động hóa 100%)
+
+Để dựng toàn bộ hệ thống Database bao gồm Schema, Stations, và Geocoding Data (được chuẩn hóa theo bản đồ hành chính 2025), bạn chỉ cần chạy một lệnh duy nhất tại thư mục `backend`:
+
+```powershell
+npm run setup:db
+```
+
+**Lưu ý:** Lệnh này tự động chạy cơ chế **Administrative Interceptor**. Nó sẽ quét và ánh xạ tọa độ GPS sang các địa danh thông qua OpenStreetMap, sau đó ép kiểu dữ liệu đi qua một Mapping Dictionary (Từ điển Phường/Xã) để cập nhật tên gọi mới nhất áp dụng từ ngày 01/07/2025 của Thủ đô Hà Nội. Chi tiết xem tại `docs/ADMINISTRATIVE_2025.md`.
+
 ## 5) Chay Backend (API)
 
 ### 5.1 Cai thu vien backend

@@ -27,7 +27,8 @@ flood_predictions (53.330 × N giờ dự báo)
 **Nguyên tắc cốt lõi:**
 - Cronjob chỉ gọi API cho **88 trạm** → lưu **88 rows** vào `weather_measurements`
 - Tuyệt đối **KHÔNG fan-out** (nhân bản) data thời tiết ra 53.000 node
-- Mỗi `grid_node` có trường `weather_station_id` trỏ đến trạm đại diện gần nhất
+- Mỗi `grid_node` có các trường `st1_id`, `st2_id`, `st3_id` để trỏ đến các trạm ảo lân cận.
+- **Point-to-Station Mapping:** Khi hệ thống (hoặc Frontend) yêu cầu dữ liệu thời tiết cho một vị trí tọa độ cụ thể (Node), Backend sẽ truy vấn bảng `grid_nodes` để tìm `st1_id` gần nhất, sau đó dùng `st1_id` này để tra cứu dữ liệu 72h trong bảng `weather_measurements`. Tuyệt đối không gọi live API từ OWM khi cache không có hoặc quá hạn, nhằm tránh sập rate-limit và làm phình hệ thống.
 
 ---
 

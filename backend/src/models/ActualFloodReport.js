@@ -8,6 +8,7 @@ module.exports = (sequelize) => {
       user_id: { type: DataTypes.BIGINT, allowNull: true },
       latitude: { type: DataTypes.DECIMAL(9, 6), allowNull: false },
       longitude: { type: DataTypes.DECIMAL(9, 6), allowNull: false },
+      node_id: { type: DataTypes.BIGINT, allowNull: true },
       geom: { type: DataTypes.GEOMETRY('POINT', 4326), allowNull: false },
       reported_level: { type: DataTypes.ENUM('Khô ráo', '<15cm', '15-30cm', '>30cm'), allowNull: false },
       created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },

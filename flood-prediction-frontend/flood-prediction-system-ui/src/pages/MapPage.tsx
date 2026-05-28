@@ -6,7 +6,7 @@ import axios from 'axios'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import toast from 'react-hot-toast'
-import { Card, CardHeader, CardMeta, CardTitle } from '../components/Card'
+import { Waves, Maximize, Navigation, MapPin } from 'lucide-react'
 import { Spinner } from '../components/Spinner'
 import { ErrorState } from '../components/ErrorState'
 import { RiskBadge } from '../components/Badge'
@@ -457,231 +457,228 @@ export function MapPage() {
   if (!flood.data)   return null
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-          {t('floodMap.title')}
-        </h2>
-        <p className="text-sm text-slate-600 dark:text-slate-300">{t('floodMap.hint')}</p>
-      </div>
-
-      <div className="grid grid-cols-12 gap-4">
-        <div className="col-span-12 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 lg:col-span-8">
-          <div className="relative">
-            {/* ── Thanh tìm kiếm nổi trên bản đồ ── */}
-            <div className="absolute top-4 left-4 z-[1000] w-full max-w-sm pointer-events-auto">
-              <LocationSearch
-                districts={flood.data.districts}
-                placeholder={t('floodMap.searchDistrict')}
-                value={searchInput}
-                onChange={setSearchInput}
-                onFilterChange={setFilterTerm}
-                onSelectDistrict={(d) => {
-                  // Chọn quận từ dữ liệu nội bộ → fly đến centroid
-                  const c = centroid(d.polygon) as [number, number]
-                  setSelectedLocation({ lat: c[0], lng: c[1] })
-                  // Xoá pulse marker cũ (không cần cho quận nội bộ)
-                  setPulseMarker(null)
-                }}
-                onSelectGeoResult={handleGeoResult}
-              />
+    <div className="relative h-[calc(100vh-7.5rem)] w-full overflow-hidden rounded-3xl border-[6px] border-white/80 shadow-[0_20px_60px_-15px_rgba(2,132,199,0.3)] dark:border-slate-800 dark:shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)]">
+      
+      {/* ── Overlay Elements (Nổi lên trên bản đồ) ── */}
+      
+      {/* Góc trên Trái: Title & Search */}
+      <div className="absolute left-4 top-4 z-[1000] flex w-full max-w-[340px] flex-col gap-3 pointer-events-none">
+        {/* Title Glass Card */}
+        <div className="pointer-events-auto rounded-2xl bg-white/90 p-4 shadow-xl backdrop-blur-xl border border-sky-100 dark:bg-slate-900/80 dark:border-sky-900/50">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 text-white shadow-inner">
+              <Waves className="h-6 w-6 drop-shadow-md" />
             </div>
-
-            {/* ── Nút Reset về mặc định ── */}
-            <button
-              type="button"
-              onClick={handleResetView}
-              className="absolute top-4 right-4 z-[1000] cursor-pointer rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-bold text-slate-800 shadow-sm backdrop-blur hover:bg-white dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100"
-            >
-              {t('floodMap.resetView')}
-            </button>
-
-            {/* ── Nút mở modal Báo cáo ngập (bottom-right của bản đồ) ── */}
-            <button
-              type="button"
-              onClick={() => setReportModalOpen(true)}
-              className="absolute bottom-5 right-4 z-[1000] flex cursor-pointer items-center gap-2 rounded-2xl border border-rose-200 bg-rose-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg backdrop-blur transition hover:bg-rose-700 active:scale-95 dark:border-rose-700"
-            >
-              {/* Icon cảnh báo ngập */}
-              <span className="text-base leading-none">🚨</span>
-              Báo cáo ngập
-            </button>
-
-            {/* ── FloodWarningCard: Bảng dự đoán nổi góc dưới trái ── */}
-            <FloodWarningCard
-              lat={mapCenter.lat}
-              lon={mapCenter.lon}
-            />
-
-            {/* ── Loading overlay khi đang fetch BBox ── */}
-            {isFetchingBbox && (
-              <div className="absolute top-4 left-1/2 z-[1000] -translate-x-1/2 flex items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-md backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
-                <span className="h-3 w-3 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
-                Đang tải dữ liệu khu vực…
-              </div>
-            )}
-
-            {/* ── Empty State: Không có nguy cơ ngập ── */}
-            {!isFetchingBbox && bboxData.districts.length === 0 && (
-              <div className="absolute top-16 left-1/2 z-[1000] -translate-x-1/2 flex items-center gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/95 px-5 py-3 shadow-lg backdrop-blur dark:border-emerald-800 dark:bg-emerald-950/90">
-                <div className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-full bg-emerald-100 dark:bg-emerald-900/50">
-                  <span className="text-lg">✅</span>
-                </div>
-                <div>
-                  <div className="text-sm font-bold text-emerald-800 dark:text-emerald-200">Không có nguy cơ ngập lụt</div>
-                  <div className="text-[11px] text-emerald-600 dark:text-emerald-400">Hệ thống ghi nhận hiện tại không có khu vực nào có nguy cơ ngập trong vùng hiển thị.</div>
-                </div>
-              </div>
-            )}
-
-            {/* ── Leaflet MapContainer ── */}
-            <MapContainer
-              center={center}
-              zoom={12}
-              scrollWheelZoom
-              preferCanvas
-              className="h-[32rem] w-full"
-            >
-              <TileLayer
-                attribution={TILE_ATTRIBUTIONS[mapStyle]}
-                url={TILE_URLS[mapStyle]}
-              />
-
-              {/* Cầu nối để lấy Leaflet map instance và theo dõi center map */}
-              <MapBridge
-                onMap={setMap}
-                onCenter={(lat, lon) => setMapCenter({ lat, lon })}
-              />
-
-              {/* Fly đến vị trí đã chọn (cả quận nội bộ lẫn Nominatim) */}
-              <FlyToSelectedLocation target={selectedLocation} />
-
-              {/* Marker pulse tại điểm tìm kiếm Nominatim */}
-              {pulseMarker && <SearchPulseMarker position={pulseMarker} />}
-
-              {/* Reverse geocoding: click bản đồ → hiện địa chỉ + báo cáo */}
-              <ReverseGeocodeLayer onOpenReport={() => setReportModalOpen(true)} />
-
-              {/* Các điểm ngập (có clustering) — ẩn khi tắt showFloodMarkers */}
-              {/* Dùng bboxData (dynamic) thay vì floodPoints (static toàn bộ) */}
-              {showFloodMarkers && (
-                <FloodClustersLayer
-                  points={showRiskOverlay ? bboxData.districts : []}
-                  onSelectPoint={async (p) => {
-                    map?.flyTo(p.position, 15, { animate: true, duration: 0.6 })
-                    setSelectedNodeData({ ...p, loading: true })
-                    try {
-                      // GỌI API THEO YÊU CẦU CỦA USER: lấy data thật từ DB (không phải mock 1.1cm / 0 nữa)
-                      const data = await getNodeCurrentData(p.id)
-                      console.log('[Node Details API Result]', data)
-                      setSelectedNodeData({ ...p, loading: false, details: data })
-                    } catch (err) {
-                      console.error(err)
-                      setSelectedNodeData({ ...p, loading: false, error: true })
-                    }
-                  }}
-                  onSelectCluster={(lat, lng, nextZoom) => {
-                    map?.flyTo([lat, lng], nextZoom, { animate: true, duration: 0.4 })
-                  }}
-                />
-              )}
-
-              {/* Thẻ Popup hiển thị chi tiết điểm ngập và thời tiết thật (thay thế thẻ màu xanh lá hardcode) */}
-              {selectedNodeData && (
-                <Popup
-                  position={selectedNodeData.position as LatLngExpression}
-                  closeButton
-                  autoClose={false}
-                  closeOnClick={false}
-                  eventHandlers={{ remove: () => setSelectedNodeData(null) }}
-                >
-                  <div className="w-[260px] space-y-2">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-100 pb-1">
-                      {selectedNodeData.name}
-                    </div>
-
-                    {selectedNodeData.loading ? (
-                       <div className="flex items-center gap-2 py-3 text-sm text-slate-600">
-                         <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
-                         Đang tải dữ liệu thực tế...
-                       </div>
-                    ) : selectedNodeData.error ? (
-                       <div className="text-sm text-rose-600 py-2">Không thể lấy dữ liệu điểm này.</div>
-                    ) : (
-                       <div className="space-y-2">
-                         {/* Thẻ báo ngập chính */}
-                         <div className={cn(
-                           "flex items-center justify-between p-2 rounded-lg font-bold text-white shadow-sm",
-                           selectedNodeData.details?.flood?.risk_level === 'safe' || !selectedNodeData.details?.flood?.flood_depth_cm 
-                             ? "bg-emerald-600" 
-                             : "bg-rose-600"
-                         )}>
-                           <span className="text-xs">{selectedNodeData.details?.flood?.risk_level === 'safe' || !selectedNodeData.details?.flood?.flood_depth_cm ? '✅ AN TOÀN' : '⚠️ CÓ NGẬP'}</span>
-                           <span className="text-sm">{selectedNodeData.details?.flood?.flood_depth_cm ?? 0} cm</span>
-                         </div>
-                         
-                         <div className="text-[10px] text-slate-500">
-                           {selectedNodeData.details?.flood?.explanation}
-                         </div>
-
-                         {/* Dữ liệu thời tiết lấy theo station_id */}
-                         <div className="grid grid-cols-2 gap-1.5 pt-1">
-                           <div className="flex flex-col items-center bg-slate-50 dark:bg-slate-800 p-1.5 rounded-md border border-slate-100 dark:border-slate-700">
-                             <span className="text-[10px] text-slate-400">Nhiệt độ</span>
-                             <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{selectedNodeData.details?.weather?.temp ?? '--'}°C</span>
-                           </div>
-                           <div className="flex flex-col items-center bg-slate-50 dark:bg-slate-800 p-1.5 rounded-md border border-slate-100 dark:border-slate-700">
-                             <span className="text-[10px] text-slate-400">Độ ẩm</span>
-                             <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{selectedNodeData.details?.weather?.rhum ?? '--'}%</span>
-                           </div>
-                           <div className="flex flex-col items-center bg-sky-50 dark:bg-sky-900/30 p-1.5 rounded-md border border-sky-100 dark:border-sky-800/50">
-                             <span className="text-[10px] text-sky-500">Lượng mưa</span>
-                             <span className="text-xs font-bold text-sky-700 dark:text-sky-300">{selectedNodeData.details?.weather?.prcp ?? '--'} mm</span>
-                           </div>
-                           <div className="flex flex-col items-center bg-slate-50 dark:bg-slate-800 p-1.5 rounded-md border border-slate-100 dark:border-slate-700">
-                             <span className="text-[10px] text-slate-400">Mây che phủ</span>
-                             <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{selectedNodeData.details?.weather?.clouds ?? '--'}%</span>
-                           </div>
-                         </div>
-                       </div>
-                    )}
-                  </div>
-                </Popup>
-              )}
-            </MapContainer>
+            <div>
+              <h2 className="text-base font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+                {t('floodMap.title')}
+              </h2>
+              <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                Hệ thống Giám sát & Dự báo Ngập lụt
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* ── Chú thích mức độ rủi ro ── */}
-        <Card className="h-fit col-span-12 lg:col-span-4">
-          <CardHeader>
-            <div>
-              <CardTitle>{t('floodMap.legend')}</CardTitle>
-              <CardMeta>{t('floodMap.riskZones')}</CardMeta>
-            </div>
-          </CardHeader>
-          <div className="space-y-2 text-sm">
+        {/* Thanh tìm kiếm nổi */}
+        <div className="pointer-events-auto drop-shadow-lg">
+          <LocationSearch
+            districts={flood.data.districts}
+            placeholder={t('floodMap.searchDistrict')}
+            value={searchInput}
+            onChange={setSearchInput}
+            onFilterChange={setFilterTerm}
+            onSelectDistrict={(d) => {
+              const c = centroid(d.polygon) as [number, number]
+              setSelectedLocation({ lat: c[0], lng: c[1] })
+              setPulseMarker(null)
+            }}
+            onSelectGeoResult={handleGeoResult}
+          />
+        </div>
+
+        {/* Button Controls */}
+        <div className="flex gap-2 pointer-events-auto">
+          <button
+            type="button"
+            onClick={handleResetView}
+            className="flex items-center gap-1.5 rounded-xl border border-sky-100 bg-white/95 px-3 py-2 text-xs font-bold text-sky-700 shadow-md backdrop-blur transition-all hover:bg-sky-50 active:scale-95 dark:border-sky-900/50 dark:bg-slate-900/90 dark:text-sky-400 dark:hover:bg-slate-800"
+          >
+            <Maximize className="h-4 w-4" />
+            {t('floodMap.resetView')}
+          </button>
+        </div>
+      </div>
+
+      {/* Góc trên Phải: Chú giải (Legend) */}
+      <div className="absolute right-4 top-4 z-[1000] pointer-events-auto hidden md:block">
+        <div className="w-[280px] rounded-2xl bg-white/90 p-5 shadow-xl backdrop-blur-xl border border-sky-100 dark:bg-slate-900/80 dark:border-sky-900/50">
+          <div className="mb-4">
+            <h3 className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-slate-100">{t('floodMap.legend')}</h3>
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{t('floodMap.riskZones')}</p>
+          </div>
+          <div className="space-y-2.5 text-sm">
             <LegendRow label={t('floodMap.safe')} level="safe" />
             <LegendRow label={t('floodMap.mediumRisk')} level="medium" />
             <LegendRow label={t('floodMap.highRisk')} level="high" />
             <LegendRow label={t('floodMap.severeRisk')} level="severe" />
           </div>
 
-          {/* Gợi ý tính năng cho người dùng */}
-          <div className="mt-4 space-y-2">
-            <div className="rounded-xl bg-sky-50 p-3 text-xs text-sky-700 dark:bg-sky-950/30 dark:text-sky-300">
-              💡 <strong>Tìm kiếm:</strong> Nhập tên địa điểm để lọc bản đồ và fly đến tọa độ.
+          <div className="mt-5 space-y-2">
+            <div className="flex gap-2 rounded-xl bg-sky-50/80 p-2.5 text-[11px] text-sky-800 dark:bg-sky-900/20 dark:text-sky-300">
+              <Navigation className="h-4 w-4 shrink-0 text-sky-500" />
+              <span><strong>Tìm kiếm:</strong> Nhập tên địa điểm để fly đến tọa độ tương ứng.</span>
             </div>
-            <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600 dark:bg-slate-950/40 dark:text-slate-300">
-              🖱 <strong>Click bản đồ:</strong> Xem địa chỉ và báo cáo tình trạng thực tế.
+            <div className="flex gap-2 rounded-xl bg-slate-50/80 p-2.5 text-[11px] text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">
+              <MapPin className="h-4 w-4 shrink-0 text-slate-400" />
+              <span><strong>Click bản đồ:</strong> Xem địa chỉ thực tế và báo cáo tình trạng.</span>
             </div>
           </div>
-
-          <div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-950/40 dark:text-slate-400">
-            Geocoding: OpenStreetMap Nominatim API
-          </div>
-        </Card>
+        </div>
       </div>
+
+      {/* Nút Báo cáo ngập nổi (Góc dưới phải) */}
+      <div className="absolute bottom-6 right-6 z-[1000] pointer-events-auto">
+        <button
+          type="button"
+          onClick={() => setReportModalOpen(true)}
+          className="group flex cursor-pointer items-center gap-2 rounded-full border border-rose-400/50 bg-gradient-to-r from-rose-500 to-red-600 px-6 py-3 text-sm font-extrabold text-white shadow-[0_8px_20px_-6px_rgba(225,29,72,0.6)] transition-all hover:scale-105 active:scale-95"
+        >
+          <span className="text-lg leading-none transition-transform group-hover:rotate-12">🚨</span>
+          Báo cáo ngập lụt
+        </button>
+      </div>
+
+      {/* Warning Card nổi (Góc dưới trái) */}
+      <div className="absolute bottom-6 left-6 z-[1000] pointer-events-auto hidden md:block">
+        <div className="drop-shadow-2xl">
+          <FloodWarningCard lat={mapCenter.lat} lon={mapCenter.lon} />
+        </div>
+      </div>
+
+      {/* Loading Overlay nổi (Trung tâm) */}
+      {isFetchingBbox && (
+        <div className="absolute top-6 left-1/2 z-[1000] -translate-x-1/2 pointer-events-none">
+          <div className="flex items-center gap-2.5 rounded-full bg-slate-900/80 px-4 py-2 text-xs font-bold text-white shadow-xl backdrop-blur-md">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+            Đang quét dữ liệu AI…
+          </div>
+        </div>
+      )}
+
+      {/* Empty State Overlay */}
+      {!isFetchingBbox && bboxData.districts.length === 0 && (
+        <div className="absolute top-20 left-1/2 z-[1000] -translate-x-1/2 pointer-events-none">
+          <div className="flex items-center gap-3 rounded-2xl border border-emerald-400/30 bg-emerald-900/80 px-5 py-3 shadow-xl backdrop-blur-md">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-emerald-500 text-white shadow-inner">
+              <span className="text-sm">✓</span>
+            </div>
+            <div>
+              <div className="text-sm font-bold text-emerald-50">Không có điểm ngập</div>
+              <div className="text-[11px] text-emerald-200/80">Khu vực hiện tại hoàn toàn an toàn.</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bản Đồ Leaflet ── */}
+      <MapContainer
+        center={center}
+        zoom={12}
+        scrollWheelZoom
+        preferCanvas
+        className="h-full w-full bg-sky-50 dark:bg-slate-950"
+      >
+        <TileLayer
+          attribution={TILE_ATTRIBUTIONS[mapStyle]}
+          url={TILE_URLS[mapStyle]}
+        />
+        <MapBridge onMap={setMap} onCenter={(lat, lon) => setMapCenter({ lat, lon })} />
+        <FlyToSelectedLocation target={selectedLocation} />
+        {pulseMarker && <SearchPulseMarker position={pulseMarker} />}
+        <ReverseGeocodeLayer onOpenReport={() => setReportModalOpen(true)} />
+
+        {showFloodMarkers && (
+          <FloodClustersLayer
+            points={showRiskOverlay ? bboxData.districts : []}
+            onSelectPoint={async (p) => {
+              map?.flyTo(p.position, 15, { animate: true, duration: 0.6 })
+              setSelectedNodeData({ ...p, loading: true })
+              try {
+                const data = await getNodeCurrentData(p.id)
+                setSelectedNodeData({ ...p, loading: false, details: data })
+              } catch (err) {
+                console.error(err)
+                setSelectedNodeData({ ...p, loading: false, error: true })
+              }
+            }}
+            onSelectCluster={(lat, lng, nextZoom) => {
+              map?.flyTo([lat, lng], nextZoom, { animate: true, duration: 0.4 })
+            }}
+          />
+        )}
+
+        {selectedNodeData && (
+          <Popup
+            position={selectedNodeData.position as LatLngExpression}
+            closeButton
+            autoClose={false}
+            closeOnClick={false}
+            eventHandlers={{ remove: () => setSelectedNodeData(null) }}
+            className="custom-flood-popup"
+          >
+            <div className="w-[260px] space-y-2">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-100 pb-1">
+                {selectedNodeData.name}
+              </div>
+
+              {selectedNodeData.loading ? (
+                  <div className="flex items-center gap-2 py-3 text-sm text-slate-600">
+                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+                    Đang tải dữ liệu thực tế...
+                  </div>
+              ) : selectedNodeData.error ? (
+                  <div className="text-sm text-rose-600 py-2">Không thể lấy dữ liệu điểm này.</div>
+              ) : (
+                  <div className="space-y-2">
+                    <div className={cn(
+                      "flex items-center justify-between p-2 rounded-lg font-bold text-white shadow-sm",
+                      selectedNodeData.details?.flood?.risk_level === 'safe' || !selectedNodeData.details?.flood?.flood_depth_cm 
+                        ? "bg-gradient-to-r from-emerald-500 to-emerald-600" 
+                        : "bg-gradient-to-r from-rose-500 to-rose-600"
+                    )}>
+                      <span className="text-xs">{selectedNodeData.details?.flood?.risk_level === 'safe' || !selectedNodeData.details?.flood?.flood_depth_cm ? '✅ AN TOÀN' : '⚠️ CÓ NGẬP'}</span>
+                      <span className="text-sm">{selectedNodeData.details?.flood?.flood_depth_cm ?? 0} cm</span>
+                    </div>
+                    
+                    <div className="text-[10px] text-slate-500">
+                      {selectedNodeData.details?.flood?.explanation}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1.5 pt-1">
+                      <div className="flex flex-col items-center bg-slate-50 dark:bg-slate-800/50 p-1.5 rounded-md border border-slate-100 dark:border-slate-700/50">
+                        <span className="text-[10px] text-slate-400">Nhiệt độ</span>
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{selectedNodeData.details?.weather?.temp ?? '--'}°C</span>
+                      </div>
+                      <div className="flex flex-col items-center bg-slate-50 dark:bg-slate-800/50 p-1.5 rounded-md border border-slate-100 dark:border-slate-700/50">
+                        <span className="text-[10px] text-slate-400">Độ ẩm</span>
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{selectedNodeData.details?.weather?.rhum ?? '--'}%</span>
+                      </div>
+                      <div className="flex flex-col items-center bg-sky-50 dark:bg-sky-900/30 p-1.5 rounded-md border border-sky-100 dark:border-sky-800/50">
+                        <span className="text-[10px] text-sky-500">Lượng mưa</span>
+                        <span className="text-xs font-bold text-sky-700 dark:text-sky-300">{selectedNodeData.details?.weather?.prcp ?? '--'} mm</span>
+                      </div>
+                      <div className="flex flex-col items-center bg-slate-50 dark:bg-slate-800/50 p-1.5 rounded-md border border-slate-100 dark:border-slate-700/50">
+                        <span className="text-[10px] text-slate-400">Mây che phủ</span>
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{selectedNodeData.details?.weather?.clouds ?? '--'}%</span>
+                      </div>
+                    </div>
+                  </div>
+              )}
+            </div>
+          </Popup>
+        )}
+      </MapContainer>
 
       {/* ── Modal Báo cáo ngập lụt ── */}
       {/* Render ngoài luồng DOM bình thường nhờ fixed positioning trong FloodReportModal */}

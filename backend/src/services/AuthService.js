@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs') // Dùng bcryptjs để hash/compare mật khẩu an toàn
 const jwt = require('jsonwebtoken') // Dùng JWT để phát hành token đăng nhập / reset password
 const { User } = require('../models') // Import model User để thao tác DB bằng Sequelize
-const { JWT_SECRET } = require('../middlewares/auth.middleware') // Dùng chung secret để verify/issue JWT
+const { JWT_SECRET } = require('../common/middlewares/auth.middleware') // Dùng chung secret để verify/issue JWT
 
 // Hàm helper: loại bỏ các trường nhạy cảm trước khi trả về client (tránh lộ password_hash)
 function sanitizeUser(userInstance) {
@@ -13,6 +13,11 @@ function sanitizeUser(userInstance) {
 
   // Xóa trường password_hash để tránh lộ hash ra ngoài (hash vẫn là thông tin nhạy cảm)
   delete u.password_hash
+
+  // Đảm bảo user_id là chuỗi (nếu DB driver trả về BigInt, JSON.stringify sẽ lỗi 500)
+  if (u.user_id) {
+    u.user_id = String(u.user_id)
+  }
 
   // Trả object an toàn
   return u
@@ -66,8 +71,9 @@ class AuthService {
       throw err
     }
 
-    // Tạo JWT payload tối thiểu (principle of least privilege) để hạn chế lộ thông tin
-    const payload = { user_id: user.user_id, role: user.role, username: user.username, email: user.email }
+    // Tạo JWT payload tối thiểu (principle of least privilege) để hạn chế lộ thông tin.
+    // Lưu ý: Ép kiểu user_id sang string để tránh lỗi 500 khi jwt.sign (JSON.stringify) gặp kiểu BigInt
+    const payload = { user_id: String(user.user_id), role: user.role, username: user.username, email: user.email }
 
     // Issue access token 24h theo yêu cầu
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' })
@@ -82,6 +88,25 @@ class AuthService {
     return { message: 'Đăng xuất thành công. Vui lòng xóa JWT token phía client.' }
   }
 
+  // Check email (DEV Mode Bypass): Kiểm tra email và trả về resetToken trực tiếp
+  async checkEmail({ email }) {
+    // Tìm user theo email
+    const user = await User.findOne({ where: { email } })
+
+    // Nếu không tồn tại: báo lỗi 404
+    if (!user) {
+      const err = new Error('Email không tồn tại trong hệ thống')
+      err.statusCode = 404
+      throw err
+    }
+
+    // Nếu tồn tại: tạo token chứa email (chỉ sống 15 phút)
+    const payload = { email: user.email, purpose: 'reset_password' }
+    const resetToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' })
+
+    return { message: 'Kiểm tra email thành công', resetToken }
+  }
+
   // Forgot password: tạo resetToken JWT 15 phút, mock email bằng console.log
   async forgotPassword({ email }) {
     // Tìm user theo email để đảm bảo đúng flow reset theo mail
@@ -92,8 +117,8 @@ class AuthService {
       return { message: 'Nếu email tồn tại, hệ thống đã gửi link đặt lại mật khẩu.' }
     }
 
-    // Payload chỉ chứa user_id để tối thiểu quyền và giảm rủi ro token bị lộ
-    const payload = { user_id: user.user_id, purpose: 'reset_password' }
+    // Payload chỉ chứa user_id (ép kiểu string) để tối thiểu quyền và giảm rủi ro token bị lộ
+    const payload = { user_id: String(user.user_id), purpose: 'reset_password' }
 
     // Token chỉ sống 15 phút để giảm rủi ro bị lộ link
     const resetToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' })
@@ -121,10 +146,10 @@ class AuthService {
     // Hash mật khẩu mới trước khi lưu
     const password_hash = await bcrypt.hash(newPassword, 10)
 
-    // Update DB theo user_id trong token (không tin tưởng user_id từ body)
+    // Update DB theo email trong token (không tin tưởng email từ body)
     const [updated] = await User.update(
       { password_hash },
-      { where: { user_id: decoded.user_id } },
+      { where: { email: decoded.email } },
     )
 
     // Nếu không update được (user bị xóa) thì trả lỗi nhẹ

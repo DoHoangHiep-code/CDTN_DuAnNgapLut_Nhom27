@@ -5,7 +5,7 @@ import { authLogin, getMyProfile } from '../services/api'
 import { clearToken, getToken, setToken } from '../utils/axiosConfig'
 
 export type UserProfile = {
-  user_id: number
+  user_id: string | number
   full_name: string
   email: string
   role: Role
@@ -30,7 +30,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 function normalizeUser(u: any): UserProfile {
   return {
-    user_id: Number(u.user_id),
+    user_id: String(u.user_id),
     full_name: String(u.full_name ?? u.name ?? ''),
     email: String(u.email ?? ''),
     role: u.role as Role,

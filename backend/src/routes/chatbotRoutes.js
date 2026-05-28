@@ -3,7 +3,7 @@
 const express = require('express')
 const { QueryTypes } = require('sequelize')
 const { sequelize } = require('../db/sequelize')
-const redis = require('../services/redisClient')
+const redis = require('../common/services/redisClient')
 
 const router = express.Router()
 
@@ -37,11 +37,11 @@ async function cached(key, ttl, fn) {
     try {
       const hit = await redis.get(key)
       if (hit) return JSON.parse(hit)
-    } catch (_) {}
+    } catch (_) { }
   }
   const result = await fn()
   if (redis && redis.isReady) {
-    try { await redis.setEx(key, ttl, JSON.stringify(result)) } catch (_) {}
+    try { await redis.setEx(key, ttl, JSON.stringify(result)) } catch (_) { }
   }
   return result
 }

@@ -1,0 +1,56 @@
+{
+  "model_info": {
+    "version": "v7",
+    "model_type": "RF",
+    "calibration": "sigmoid",
+    "export_date": "2026-05-19",
+    "description": "Full pipeline: interactions + imputer + model, all baked into ONNX"
+  },
+  "threshold": {
+    "optimal": 0.093742,
+    "recall_at_threshold": 0.8631,
+    "precision_at_threshold": 0.5823,
+    "description": "proba[:,1] >= threshold → landslide=1"
+  },
+  "input": {
+    "name": "float_input",
+    "shape": [
+      null,
+      16
+    ],
+    "dtype": "float32",
+    "nan_policy": "NaN được xử lý tự động bên trong ONNX — không cần impute thủ công",
+    "feature_names": [
+      "slope",
+      "twi",
+      "curvature_plan",
+      "elevation",
+      "aspect",
+      "api_7d",
+      "rain_3d_accum",
+      "max_rain_1d_in_7d",
+      "soil_moisture_1d",
+      "rain_intensity_ratio",
+      "ndvi",
+      "lulc_group",
+      "dist_to_road_km",
+      "dist_to_river_km",
+      "twi_x_rain7d",
+      "slope_x_deforestation"
+    ],
+    "feature_count": 16,
+    "note": "Truyền đúng 16 features theo thứ tự này. NaN/null truyền thẳng là được."
+  },
+  "output": {
+    "names": [
+      "label",
+      "probabilities"
+    ],
+    "probabilities": "shape [batch, 2] — index 1 là P(landslide)",
+    "label": "shape [batch] — đã áp threshold 0.5 mặc định của sklearn"
+  },
+  "interactions_baked": {
+    "slope_x_api7d": "slope (col 0) × api_7d (col 5)",
+    "twi_x_soil": "twi (col 1) × soil_moisture_1d (col 8)"
+  }
+}

@@ -166,7 +166,7 @@ export function FloodWarningCard({ lat, lon }: Props) {
     setError(null)
 
     try {
-      const result = await getForecastLatest(debouncedLat, debouncedLon)
+      const result = await getForecastLatest(debouncedLat, debouncedLon, controller.signal)
 
       // Kiểm tra request chưa bị hủy trước khi set state
       if (!controller.signal.aborted) {
@@ -177,14 +177,19 @@ export function FloodWarningCard({ lat, lon }: Props) {
         }
       }
     } catch (err: any) {
+      // Ignore abort errors — expected when map pans rapidly
+      if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return
       if (!controller.signal.aborted) {
-        // 404 = chưa có data trong DB (cron chưa chạy)
-        if (err?.response?.status === 404) {
+        const apiError = err?.response?.data?.error?.message
+        if (apiError) {
+          setError(apiError)
+        } else if (err?.response?.status === 404) {
           setError('Chưa có dữ liệu dự báo. Vui lòng kích hoạt Cronjob.')
         } else {
-          setError('Không thể tải dữ liệu dự đoán.')
+          const detail = err?.message ?? 'unknown'
+          setError(`Không thể tải dữ liệu dự đoán (${detail})`)
         }
-        console.error('[FloodWarningCard] Fetch error:', err.message)
+        console.error('[FloodWarningCard] Fetch error:', err?.message, err?.response?.status, err?.code)
       }
     } finally {
       if (!controller.signal.aborted) {

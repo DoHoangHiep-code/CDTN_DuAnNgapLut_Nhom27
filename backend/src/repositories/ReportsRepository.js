@@ -18,70 +18,48 @@ class ReportsRepository {
 
   // GET danh sách báo cáo thực tế, có phân trang + filter (location, dateFrom, dateTo)
   async listActualFloodReports({ page = 1, limit = 50, location, dateFrom, dateTo } = {}) {
+    const { ActualFloodReport, GridNode, User } = require('../models')
+    const { Op, Sequelize } = require('sequelize')
+
     const safeLimit = Math.min(Math.max(parseInt(limit) || 50, 1), 200)
-    const safePage  = Math.max(parseInt(page) || 1, 1)
-    const offset    = (safePage - 1) * safeLimit
-    const replacements = { limit: safeLimit, offset }
+    const safePage = Math.max(parseInt(page) || 1, 1)
+    const offset = (safePage - 1) * safeLimit
 
-    // Build optional WHERE clauses
-    const clauses = []
+    const where = {}
 
-    // Filter theo location: tìm node gần nhất trong bán kính 5km rồi lấy reports trong bbox
     if (location && location.trim()) {
-      clauses.push(`
-        ST_DWithin(
-          afr.geom::geography,
-          (SELECT geom::geography FROM grid_nodes WHERE location_name ILIKE :locPattern OR district_name ILIKE :locPattern ORDER BY node_id LIMIT 1),
-          5000
-        )
-      `)
-      replacements.locPattern = `%${location.trim()}%`
+      // Vì location có thể là chuỗi, ta vẫn có thể dùng ST_DWithin với geometry của grid_nodes
+      // Tuy nhiên nếu dùng include GridNode, việc ST_DWithin từ node ra GridNode hơi vòng vèo.
+      // Do yêu cầu dùng include, ta filter location_name qua GridNode.
+      where['$GridNode.location_name$'] = { [Op.iLike]: `%${location.trim()}%` }
     }
 
-    if (dateFrom) {
-      clauses.push(`afr.created_at >= :dateFrom`)
-      replacements.dateFrom = new Date(dateFrom + 'T00:00:00+07:00').toISOString()
+    if (dateFrom || dateTo) {
+      where.created_at = {}
+      if (dateFrom) where.created_at[Op.gte] = new Date(dateFrom + 'T00:00:00+07:00')
+      if (dateTo) where.created_at[Op.lte] = new Date(dateTo + 'T23:59:59+07:00')
     }
 
-    if (dateTo) {
-      clauses.push(`afr.created_at <= :dateTo`)
-      replacements.dateTo = new Date(dateTo + 'T23:59:59+07:00').toISOString()
-    }
+    const { count, rows } = await ActualFloodReport.findAndCountAll({
+      where,
+      limit: safeLimit,
+      offset,
+      order: [['created_at', 'DESC']],
+      include: [
+        {
+          model: GridNode,
+          attributes: ['location_name', 'district_name']
+        },
+        {
+          model: User,
+          attributes: ['full_name']
+        }
+      ]
+    })
 
-    const whereStr = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
-
-    const sql = `
-      SELECT
-        afr.report_id,
-        afr.created_at,
-        afr.latitude,
-        afr.longitude,
-        afr.reported_level,
-        afr.user_id,
-        u.full_name            AS user_full_name,
-        -- De-normalize nearest node info to avoid slow reverse-geocode on FE
-        (SELECT gn.location_name FROM grid_nodes gn
-         ORDER BY ST_Distance(gn.geom::geography, afr.geom::geography) LIMIT 1) AS location_name,
-        (SELECT gn.district_name FROM grid_nodes gn
-         ORDER BY ST_Distance(gn.geom::geography, afr.geom::geography) LIMIT 1) AS district_name,
-        COUNT(*) OVER() AS total_count
-      FROM actual_flood_reports afr
-      LEFT JOIN users u ON u.user_id = afr.user_id
-      ${whereStr}
-      ORDER BY afr.created_at DESC
-      LIMIT :limit OFFSET :offset;
-    `
-    const rows = await this._withStatementTimeout(8000, (t) =>
-      this.sequelize.query(sql, {
-        type: QueryTypes.SELECT,
-        replacements,
-        transaction: t,
-      }),
-    )
-    const total = rows.length > 0 ? Number(rows[0].total_count) : 0
     return {
-      rows,
-      pagination: { page: safePage, limit: safeLimit, total, totalPages: Math.ceil(total / safeLimit) },
+      rows: rows.map(r => r.toJSON()), // Chuyển thành plain object
+      pagination: { page: safePage, limit: safeLimit, total: count, totalPages: Math.ceil(count / safeLimit) },
     }
   }
 
@@ -109,26 +87,49 @@ class ReportsRepository {
   }
 
   // POST tạo báo cáo mới: tạo geom bằng PostGIS từ lat/lng (không xử lý geometry bằng JSON)
-  async createActualFloodReport({ userId, latitude, longitude, reported_level }) {
+  async createActualFloodReport({ userId, latitude, longitude, reported_level, node_id }) {
     const sql = `
-      INSERT INTO actual_flood_reports (user_id, latitude, longitude, geom, reported_level, created_at)
+      INSERT INTO actual_flood_reports (user_id, latitude, longitude, geom, reported_level, created_at, node_id)
       VALUES (
         :userId,
         :latitude,
         :longitude,
         ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326),
         :reported_level,
-        NOW()
+        NOW(),
+        :node_id
       )
-      RETURNING report_id, created_at, latitude, longitude, reported_level, user_id;
+      RETURNING report_id, created_at, latitude, longitude, reported_level, user_id, node_id;
     `
     return this._withStatementTimeout(7000, (t) =>
       this.sequelize.query(sql, {
         type: QueryTypes.SELECT,
-        replacements: { userId, latitude, longitude, reported_level },
+        replacements: { userId, latitude, longitude, reported_level, node_id },
         transaction: t,
       }).then((rows) => rows?.[0] ?? null),
     )
+  }
+
+  async getHotspots() {
+    const tz = 'Asia/Ho_Chi_Minh'
+    const query = `
+      SELECT DISTINCT ON (gn.district_name)
+        gn.district_name,
+        gn.latitude,
+        gn.longitude,
+        wm.temp,
+        wm.rhum,
+        wm.prcp,
+        COALESCE(fp.flood_depth_cm, 0) as flood_depth_cm
+      FROM grid_nodes gn
+      LEFT JOIN weather_measurements wm ON gn.st1_id = wm.node_id
+        AND wm.time <= NOW() AND wm.time >= NOW() - interval '2 hours'
+      LEFT JOIN flood_predictions fp ON gn.node_id = fp.node_id
+        AND fp.time >= NOW() AND fp.time <= NOW() + interval '2 hours'
+      WHERE gn.district_name IN ('Phường Cầu Giấy', 'Phường Hoàn Kiếm', 'Phường Đống Đa', 'Phường Hà Đông')
+      ORDER BY gn.district_name, wm.time DESC, fp.time ASC
+    `
+    return this.sequelize.query(query, { type: QueryTypes.SELECT })
   }
 }
 

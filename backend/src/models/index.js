@@ -18,6 +18,9 @@ FloodPrediction.belongsTo(GridNode, { foreignKey: 'node_id', targetKey: 'node_id
 User.hasMany(ActualFloodReport, { foreignKey: 'user_id', sourceKey: 'user_id' })
 ActualFloodReport.belongsTo(User, { foreignKey: 'user_id', targetKey: 'user_id' })
 
+GridNode.hasMany(ActualFloodReport, { foreignKey: 'node_id', sourceKey: 'node_id' })
+ActualFloodReport.belongsTo(GridNode, { foreignKey: 'node_id', targetKey: 'node_id' })
+
 User.hasMany(SystemLog, { foreignKey: 'admin_id', sourceKey: 'user_id' })
 SystemLog.belongsTo(User, { foreignKey: 'admin_id', targetKey: 'user_id' })
 

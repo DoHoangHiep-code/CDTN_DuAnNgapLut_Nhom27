@@ -13,6 +13,9 @@ router.post('/login', controller.login)
 // Đăng xuất: stateless JWT -> instruct client clear token
 router.post('/logout', controller.logout)
 
+// Kiểm tra email (DEV Mode)
+router.post('/check-email', controller.checkEmail)
+
 // Quên mật khẩu: tạo resetToken 15 phút, mock gửi mail bằng console.log
 router.post('/forgot-password', controller.forgotPassword)
 

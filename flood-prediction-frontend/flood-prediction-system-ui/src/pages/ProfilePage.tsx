@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { UserCircle2 } from 'lucide-react'
-import { CardHeader, CardMeta, CardTitle } from '../components/Card'
-import { Input } from '../components/Input'
-import { Button } from '../components/Button'
+import { CardHeader, CardMeta, CardTitle } from '../components/common/Card'
+import { Input } from '../components/common/Input'
+import { Button } from '../components/common/Button'
 import { useAuth } from '../context/AuthContext'
 import { useTranslation } from 'react-i18next'
 import { cn } from '../utils/cn'
@@ -57,7 +57,8 @@ export function ProfilePage() {
     if (user.avatar_url.startsWith('http')) {
       return user.avatar_url
     }
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3002'
+    const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3002/api/v1'
+    const baseUrl = apiUrl.replace(/\/api\/v1\/?$/, '')
     return `${baseUrl.replace(/\/+$/, '')}${user.avatar_url}`
   }, [avatarPreview, user])
 
@@ -136,15 +137,17 @@ export function ProfilePage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* THÔNG TIN CÁ NHÂN */}
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-md dark:border-slate-800 dark:bg-slate-900">
-          <CardHeader className="mb-4">
+        <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/50 dark:border-slate-800/80 dark:bg-slate-900/60 dark:shadow-none dark:backdrop-blur-xl">
+          <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-sky-500/10 blur-3xl dark:bg-sky-500/5"></div>
+          
+          <CardHeader className="mb-6 relative z-10">
             <div>
-              <CardTitle>{t('profile.personalInfo')}</CardTitle>
-              <CardMeta>{t('profile.accountHint')}</CardMeta>
+              <CardTitle className="text-xl">Hồ sơ cá nhân</CardTitle>
+              <CardMeta>Cập nhật ảnh đại diện và thông tin cơ bản</CardMeta>
             </div>
           </CardHeader>
 
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+          <div className="relative z-10 flex flex-col items-center gap-6 sm:flex-row sm:items-start">
             {/* Input file ẩn, chỉ hiện Avatar clickable */}
             <input
               type="file"
@@ -155,38 +158,41 @@ export function ProfilePage() {
             />
 
             <div
-              className="group relative grid h-28 w-28 shrink-0 cursor-pointer place-items-center rounded-2xl bg-gradient-to-br from-sky-100 to-indigo-100 shadow-inner ring-2 ring-white dark:from-sky-950/40 dark:to-indigo-950/40 dark:ring-slate-700 overflow-hidden"
+              className="group relative grid h-32 w-32 shrink-0 cursor-pointer place-items-center rounded-full bg-gradient-to-br from-indigo-100 via-sky-50 to-white shadow-inner ring-4 ring-white transition-all hover:shadow-lg dark:from-indigo-900/50 dark:via-slate-800 dark:to-slate-900 dark:ring-slate-800 overflow-hidden"
               onClick={() => fileInputRef.current?.click()}
             >
               {displayAvatar ? (
                 <img
                   src={displayAvatar}
                   alt="avatar"
-                  className="h-full w-full object-cover transition-opacity duration-300 group-hover:opacity-75"
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                 />
               ) : (
-                <UserCircle2 className="h-20 w-20 text-sky-700 opacity-90 transition-transform duration-300 group-hover:scale-110 dark:text-sky-300" strokeWidth={1.25} />
+                <UserCircle2 className="h-20 w-20 text-indigo-400 opacity-90 transition-transform duration-500 group-hover:scale-110 dark:text-indigo-500" strokeWidth={1} />
               )}
               {/* Overlay chỉ hiện khi hover */}
-              <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-                <span className="text-xs font-semibold text-white">Thay đổi</span>
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-900/40 opacity-0 backdrop-blur-sm transition-opacity duration-300 group-hover:opacity-100">
+                <span className="text-xs font-bold uppercase tracking-wider text-white">Thay ảnh</span>
               </div>
             </div>
 
-            <div className="min-w-0 flex-1 space-y-3 text-center sm:text-left">
+            <div className="min-w-0 flex-1 space-y-3 text-center sm:text-left pt-2">
               <div>
-                <div className="text-lg font-extrabold text-slate-900 dark:text-slate-100">{user.full_name}</div>
-                <div className="text-sm text-slate-600 dark:text-slate-400">{user.email}</div>
+                <div className="text-2xl font-black tracking-tight text-slate-900 dark:text-slate-100">{user.full_name}</div>
+                <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{user.email}</div>
               </div>
-              <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
-                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{t('profile.role')}:</span>
+              <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start pt-1">
                 <RoleBadge role={user.role} />
               </div>
             </div>
           </div>
 
-          <div className="mt-6 space-y-4 border-t border-slate-200 pt-6 dark:border-slate-800">
-            <Input label={t('profile.name')} value={name} onChange={(e) => setName(e.target.value)} />
+          <div className="relative z-10 mt-8 space-y-5 rounded-xl bg-slate-50/50 p-5 border border-slate-100 dark:bg-slate-800/30 dark:border-slate-800/50">
+            <Input 
+              label={t('profile.name')} 
+              value={name} 
+              onChange={(e) => setName(e.target.value)} 
+            />
 
             {/* Trường Email bị khóa */}
             <div>
@@ -196,96 +202,83 @@ export function ProfilePage() {
                 onChange={() => { }}
                 disabled
                 readOnly
-                className="cursor-not-allowed bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                className="cursor-not-allowed opacity-70"
               />
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Email không thể thay đổi
+              <p className="mt-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                <UserCircle2 className="h-3 w-3" /> Email cố định, không thể thay đổi
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2 pt-2">
+            <div className="flex flex-wrap gap-3 pt-4">
               <Button
-                className="min-w-[8rem]"
+                className="min-w-[10rem] shadow-md shadow-indigo-500/20"
                 disabled={saving || (name.trim() === user.full_name && !avatarFile)}
                 onClick={handleSaveProfile}
               >
-                {saving ? 'Đang lưu…' : t('profile.saveChanges')}
+                {saving ? 'Đang lưu…' : 'Lưu thay đổi'}
               </Button>
               <Button
                 variant="ghost"
+                className="hover:bg-slate-200/50 dark:hover:bg-slate-800"
                 onClick={() => {
                   setName(user.full_name)
                   setAvatarFile(null)
                   if (fileInputRef.current) fileInputRef.current.value = ''
                 }}
               >
-                {t('profile.reset')}
+                Hủy bỏ
               </Button>
             </div>
           </div>
         </section>
 
-        <div className="space-y-6">
-          {/* BẢO MẬT & ĐỔI MẬT KHẨU */}
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-md dark:border-slate-800 dark:bg-slate-900">
-            <CardHeader className="mb-4">
-              <div>
-                <CardTitle>Bảo mật</CardTitle>
-                <CardMeta>Quản lý mật khẩu và tài khoản</CardMeta>
-              </div>
-            </CardHeader>
+        {/* BẢO MẬT & ĐỔI MẬT KHẨU */}
+        <section className="relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/50 dark:border-slate-800/80 dark:bg-slate-900/60 dark:shadow-none dark:backdrop-blur-xl h-full">
+          <div className="absolute -left-20 -top-20 h-64 w-64 rounded-full bg-rose-500/10 blur-3xl dark:bg-rose-500/5"></div>
+          
+          <CardHeader className="mb-6 relative z-10">
+            <div>
+              <CardTitle className="text-xl">Bảo mật</CardTitle>
+              <CardMeta>Quản lý mật khẩu để bảo vệ tài khoản</CardMeta>
+            </div>
+          </CardHeader>
 
-            <div className="space-y-4">
+          <div className="relative z-10 flex-1 space-y-5 flex flex-col justify-between rounded-xl bg-slate-50/50 p-5 border border-slate-100 dark:bg-slate-800/30 dark:border-slate-800/50">
+            <div className="space-y-5">
               <Input
                 label="Mật khẩu hiện tại"
                 type="password"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="••••••••"
               />
               <Input
                 label="Mật khẩu mới"
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="••••••••"
               />
               <Input
                 label="Xác nhận mật khẩu mới"
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="••••••••"
               />
-
-              <div className="pt-2">
-                <Button
-                  onClick={handleChangePassword}
-                  disabled={changingPwd || !currentPassword || !newPassword || !confirmPassword}
-                >
-                  {changingPwd ? 'Đang cập nhật...' : 'Đổi mật khẩu'}
-                </Button>
-              </div>
             </div>
-          </section>
 
-          {/* CHỈ SỐ THỐNG KÊ */}
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-md dark:border-slate-800 dark:bg-slate-900">
-            <CardHeader className="mb-4">
-              <div>
-                <CardTitle>{t('profile.statsTitle')}</CardTitle>
-                <CardMeta>{t('profile.accountHint')}</CardMeta>
-              </div>
-            </CardHeader>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
-                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{t('profile.reportsSent')}</div>
-                <div className="mt-1 text-2xl font-extrabold text-sky-700 dark:text-sky-300">12</div>
-              </div>
-              <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
-                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{t('profile.aiRuns')}</div>
-                <div className="mt-1 text-2xl font-extrabold text-indigo-700 dark:text-indigo-300">45</div>
-              </div>
+            <div className="pt-4 mt-auto">
+              <Button
+                onClick={handleChangePassword}
+                disabled={changingPwd || !currentPassword || !newPassword || !confirmPassword}
+                className="w-full sm:w-auto min-w-[10rem] shadow-md shadow-indigo-500/20"
+              >
+                {changingPwd ? 'Đang xử lý...' : 'Đổi mật khẩu'}
+              </Button>
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
       </div>
     </div>
   )
