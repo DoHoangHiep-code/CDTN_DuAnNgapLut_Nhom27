@@ -5,7 +5,7 @@ import {
   TrendingUp, Gauge, Cloud, Zap,
 } from 'lucide-react'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie, ReferenceLine
 } from 'recharts'
 import type { LatLngExpression } from 'leaflet'
 import { useTranslation } from 'react-i18next'
@@ -15,7 +15,7 @@ import { MiniFloodMap } from '../components/MiniFloodMap'
 import { LocationSearch } from '../components/LocationSearch'
 import type { NominatimResult } from '../components/LocationSearch'
 import { useAsync } from '../../../hooks/useAsync'
-import { getWeather, getWeather7Days, getWeatherForecast24h } from '../../../services/api'
+import { getFloodPrediction, getWeather, getWeather7Days, getWeatherForecast24h } from '../../../services/api'
 import { useDisasterMode } from '../../../context/DisasterContext'
 import { WeatherTerrainPage } from '../../../pages/WeatherTerrain'
 
@@ -289,6 +289,7 @@ function HourlyForecast({ forecast24h }: {
 function Rain24hChart({ forecast24h }: {
   forecast24h: Array<{ timeIso: string; rainfallMm: number; cloudsPct?: number }>
 }) {
+  const currentHourStr = `${toVNHour(new Date().toISOString())}h`
   if (!forecast24h.length) return null
   const maxVal = Math.max(...forecast24h.map((p) => p.rainfallMm), 1)
   const totalMm = forecast24h.reduce((s, p) => s + p.rainfallMm, 0)
@@ -314,7 +315,7 @@ function Rain24hChart({ forecast24h }: {
       </div>
       <div className="relative px-5 pb-4 pt-5 h-[160px]">
         <ResponsiveContainer width="99%" height="100%" minWidth={1} minHeight={1}>
-          <BarChart data={forecast24h} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <BarChart data={forecast24h} margin={{ top: 25, right: 10, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
             <XAxis dataKey={(d) => `${toVNHour(d.timeIso)}h`} tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -324,6 +325,7 @@ function Rain24hChart({ forecast24h }: {
               formatter={(val) => [`${Number(val ?? 0)} mm`, 'Lượng mưa']}
               labelFormatter={(label) => `Thời gian: ${label}`}
             />
+            <ReferenceLine x={currentHourStr} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Hiện tại', fill: '#ef4444', fontSize: 10 }} />
             <Bar dataKey="rainfallMm" radius={[4, 4, 0, 0]}>
               {forecast24h.map((entry, index) => {
                 const pct = (entry.rainfallMm / maxVal) * 100
@@ -362,9 +364,9 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
     districts.forEach((d) => { c[d.risk as keyof typeof c] = (c[d.risk as keyof typeof c] ?? 0) + 1 })
     return c
   }, [districts])
-  const total = districts.length || 1
-  const safePct = Math.round((counts.safe / total) * 100)
-  const dangerPct = Math.round(((counts.high + counts.severe) / total) * 100)
+  const total = districts.length
+  const safePct = total === 0 ? 0 : Math.round((counts.safe / total) * 100)
+  const dangerPct = total === 0 ? 0 : Math.round(((counts.high + counts.severe) / total) * 100)
 
   const items = [
     { key: 'severe', label: 'Nguy hiểm', color: 'bg-rose-500',    text: 'text-rose-600 dark:text-rose-400',     count: counts.severe, icon: '🔴' },
@@ -457,7 +459,7 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
         <Gauge className="h-3.5 w-3.5 text-slate-400" />
         <span className="text-[11px] text-slate-400 dark:text-slate-500">
           Chỉ số nguy cơ trung bình: <span className="font-bold text-slate-600 dark:text-slate-300">
-            {(districts.reduce((s, d) => s + d.flood_depth_cm, 0) / total).toFixed(1)}cm
+            {(total > 0 ? districts.reduce((s, d) => s + d.flood_depth_cm, 0) / total : 0).toFixed(1)}cm
           </span>
         </span>
       </div>
@@ -484,7 +486,7 @@ function FloodWeatherPage() {
   const [districtInput, setDistrictInput] = useState('')
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null)
   const [mapFlyTo, setMapFlyTo] = useState<LatLngExpression | null>(null)
-  const [searchMarker, setSearchMarker] = useState<LatLngExpression | null>(null)
+  const [searchMarker, setSearchMarker] = useState<LatLngExpression | null>([21.0278, 105.8342])
 
   const forecastScrollRef = useRef<HTMLDivElement>(null)
 
@@ -516,6 +518,8 @@ function FloodWeatherPage() {
     () => getWeatherForecast24h(...forecast24hParams),
     [forecast24hParams],
   )
+
+  const floodData = useAsync(() => getFloodPrediction(), [])
 
   // ── Handle geo-search result ──
   const handleGeoResult = useCallback((r: NominatimResult) => {
@@ -623,7 +627,7 @@ function FloodWeatherPage() {
                 <div className="text-[11px] font-bold uppercase tracking-widest text-white/60">Thời tiết hiện tại</div>
                 <div className="mt-1.5 flex items-center gap-1.5 text-sm font-semibold text-white/90">
                   <MapPin className="h-3.5 w-3.5 flex-shrink-0" />
-                  <span className="truncate max-w-[160px]">{locationLabel}</span>
+                  <span className="line-clamp-2 leading-snug pr-4">{locationLabel}</span>
                 </div>
               </div>
               <div className="rounded-2xl bg-white/20 p-3 backdrop-blur-sm ring-1 ring-white/20">
@@ -720,7 +724,7 @@ function FloodWeatherPage() {
             <div className="min-w-0 flex-1">
               <LocationSearch
                 id="weather-location-search"
-                districts={[]}
+                districts={floodData.data?.districts || []}
                 label={t('weather.searchDistrict')}
                 placeholder={t('floodMap.searchDistrict')}
                 value={districtInput}
@@ -786,7 +790,7 @@ function FloodWeatherPage() {
       {/* ── Hàng 2: Biểu đồ mưa 24h + Tổng quan rủi ro ── */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Rain24hChart forecast24h={chartForecast24h} />
-        <RiskOverview districts={[]} />
+        <RiskOverview districts={floodData.data?.districts || []} />
       </div>
 
       {/* ── 7-day forecast ── */}

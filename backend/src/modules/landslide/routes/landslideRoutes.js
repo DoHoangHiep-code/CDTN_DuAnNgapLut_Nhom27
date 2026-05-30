@@ -230,7 +230,7 @@ router.get('/hotspots', cacheResponse(12 * 3600, 'landslide_api'), async (req, r
 
         for (const n of gridNodes) {
           const pred = landslideCache.getForNode(n.node_id, offset)
-          if (!pred || !['DANGER', 'WARNING'].includes(pred.risk_level)) continue
+          if (!pred) continue
           candidates.push({
             node_id: n.node_id, lat: parseFloat(n.lat), lon: parseFloat(n.lon),
             province: n.province, location_name: n.location_name, slope: n.slope, twi: n.twi, elevation: n.elevation, ndvi: n.ndvi,

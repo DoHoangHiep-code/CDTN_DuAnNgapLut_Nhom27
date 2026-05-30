@@ -265,8 +265,8 @@ function scanTop(n, offset = 0) {
   const candidates = []
   for (const [node_id, arr] of _map.entries()) {
     const pred = arr[offset]
-    if (pred && (pred.risk_level === 'DANGER' || pred.risk_level === 'WARNING')) {
-      candidates.push({ node_id, prob: pred.prob_landslide ?? 0 })
+    if (pred && pred.prob_landslide != null) {
+      candidates.push({ node_id, prob: pred.prob_landslide })
     }
   }
   candidates.sort((a, b) => b.prob - a.prob)

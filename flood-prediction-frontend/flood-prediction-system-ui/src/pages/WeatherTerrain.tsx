@@ -305,7 +305,7 @@ export function WeatherTerrainPage() {
                   }}
                 />
               </div>
-              <LandslideMap mapRef={mapRef} tileStyle="terrain" hideHUD={true} />
+              <LandslideMap mapRef={mapRef} tileStyle="terrain" hideHUD={true} hideDangerPoints={true} searchMarker={[currentCoords.lat, currentCoords.lon]} />
             </div>
           </Card>
 

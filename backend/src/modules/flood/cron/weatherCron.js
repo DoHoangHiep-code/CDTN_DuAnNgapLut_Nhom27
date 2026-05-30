@@ -466,7 +466,13 @@ async function processStationNodes(stationNodes, sharedFeatures, stationName) {
     const result = aiResults[idx]
     const meta   = megaMeta[idx]
     if (!meta || !result || result.flood_depth_cm == null) continue
-    const depthCm   = Number(result.flood_depth_cm)
+    let depthCm   = Number(result.flood_depth_cm)
+    
+    // Áp dụng logic No-Rain Override: nếu không có mưa thì độ ngập = 0
+    if (meta.prcp === 0 && meta.prcp_3h === 0 && meta.prcp_6h === 0 && meta.prcp_12h === 0 && meta.prcp_24h === 0) {
+      depthCm = 0;
+    }
+
     const riskLevel = calcRiskLevel(depthCm)
     allPredRecords.push({
       node_id:        meta.node_id,

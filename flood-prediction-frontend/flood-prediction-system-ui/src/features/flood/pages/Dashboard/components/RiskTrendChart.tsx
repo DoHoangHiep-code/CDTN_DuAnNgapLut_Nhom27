@@ -6,6 +6,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  ReferenceLine,
 } from 'recharts'
 import type { DashboardRiskTrendDay } from '../../../../../utils/types'
 import { ChartWrapper } from './ChartWrapper'
@@ -21,6 +22,22 @@ const riskLabels = ['An toàn', 'Trung bình', 'Cao', 'Nghiêm trọng']
 
 export function RiskTrendChart({ days }: { days: DashboardRiskTrendDay[] }) {
   const hasData = days && days.length > 0
+  let currentDateStr = ''
+  if (hasData) {
+    const now = new Date()
+    let minDiff = Infinity
+    days.forEach(d => {
+      if (!d.date) return
+      const [day, month] = d.date.split('/')
+      if (!day || !month) return
+      const pDate = new Date(now.getFullYear(), Number(month) - 1, Number(day))
+      const diff = Math.abs(pDate.getTime() - now.getTime())
+      if (diff < minDiff) {
+        minDiff = diff
+        currentDateStr = d.date
+      }
+    })
+  }
 
   const chartData = hasData ? days.map(d => {
     let value = 0
@@ -55,7 +72,7 @@ export function RiskTrendChart({ days }: { days: DashboardRiskTrendDay[] }) {
             width={width}
             height={height}
             data={chartData}
-            margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+            margin={{ top: 25, right: 10, left: -20, bottom: 0 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
             <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -73,6 +90,7 @@ export function RiskTrendChart({ days }: { days: DashboardRiskTrendDay[] }) {
               labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
               formatter={(value) => [riskLabels[Number(value)] ?? '', 'Mức nguy cơ ngập']}
             />
+            <ReferenceLine x={currentDateStr} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Hôm nay', fill: '#ef4444', fontSize: 10 }} />
             <Bar dataKey="value" radius={[4, 4, 0, 0]} barSize={30}>
               {chartData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.color} />

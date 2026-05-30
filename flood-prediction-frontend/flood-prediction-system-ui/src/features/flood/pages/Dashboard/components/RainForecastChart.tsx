@@ -7,12 +7,31 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  ReferenceLine,
 } from 'recharts'
 import type { DashboardForecastPoint } from '../../../../../utils/types'
 import { ChartWrapper } from './ChartWrapper'
 
 export function RainForecastChart({ points }: { points: DashboardForecastPoint[] }) {
   const hasData = points && points.length > 0
+  let currentStr = ''
+  if (hasData) {
+    const now = new Date()
+    let minDiff = Infinity
+    points.forEach(p => {
+      if (!p.time) return
+      const parts = p.time.split(' ')
+      if (parts.length !== 2) return
+      const [day, month] = parts[0].split('/')
+      const [hour, minute] = parts[1].split(':')
+      const pDate = new Date(now.getFullYear(), Number(month) - 1, Number(day), Number(hour), Number(minute))
+      const diff = Math.abs(pDate.getTime() - now.getTime())
+      if (diff < minDiff) {
+        minDiff = diff
+        currentStr = p.time
+      }
+    })
+  }
 
   return (
     <ChartWrapper className="relative h-full w-full">
@@ -27,7 +46,7 @@ export function RainForecastChart({ points }: { points: DashboardForecastPoint[]
             width={width}
             height={height}
             data={hasData ? points : []}
-            margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+            margin={{ top: 25, right: 10, left: -20, bottom: 0 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
             <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -44,6 +63,7 @@ export function RainForecastChart({ points }: { points: DashboardForecastPoint[]
               }}
             />
             <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+            <ReferenceLine x={currentStr} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Hiện tại', fill: '#ef4444', fontSize: 10 }} />
             <Bar yAxisId="left" dataKey="prcp" name="Lượng mưa (mm)" fill="#0ea5e9" radius={[4, 4, 0, 0]} barSize={20} />
             <Line yAxisId="right" type="monotone" dataKey="flood_depth_cm" name="Độ ngập (cm)" stroke="#e11d48" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
           </ComposedChart>

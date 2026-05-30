@@ -26,7 +26,7 @@ const { QueryTypes } = require('sequelize')
 const GRID_SIZE = 0.012
 
 // Số records tối đa có thể yêu cầu (chặn client gửi limit=99999)
-const MAX_LIMIT = 5000
+const MAX_LIMIT = 60000
 const DEFAULT_LIMIT = 2000
 
 /**
@@ -100,10 +100,10 @@ class FloodPredictionController {
              fp.flood_depth_cm,
              fp.time        AS prediction_time,
              fp.explanation
-           FROM mv_latest_flood_predictions fp
-           JOIN grid_nodes gn ON gn.node_id = fp.node_id
-           WHERE gn.latitude  BETWEEN $1::numeric AND $2::numeric
-             AND gn.longitude BETWEEN $3::numeric AND $4::numeric
+           FROM grid_nodes gn
+           JOIN mv_latest_flood_predictions fp ON fp.node_id = gn.node_id
+           WHERE gn.latitude >= $1::numeric AND gn.latitude <= $2::numeric
+             AND gn.longitude >= $3::numeric AND gn.longitude <= $4::numeric
              AND fp.date_only = CURRENT_DATE + ($5 || ' days')::interval
              AND fp.flood_depth_cm > 5
            LIMIT $6`,

@@ -400,7 +400,7 @@ export function MapPage() {
           maxLat: b.getNorth(),
           minLng: b.getWest(),
           maxLng: b.getEast(),
-          limit: 2000,  // chỉ nhận điểm ngập (flood_depth_cm > 10) → 2000 điểm vẫn nhẹ
+          limit: 5000,
         }, controller.signal)
         const pts: FloodPoint[] = (result?.districts ?? []).map((d) => ({
           id:                   d.id,
@@ -462,7 +462,7 @@ export function MapPage() {
       {/* ── Overlay Elements (Nổi lên trên bản đồ) ── */}
       
       {/* Góc trên Trái: Title & Search */}
-      <div className="absolute left-4 top-4 z-[1000] flex w-full max-w-[340px] flex-col gap-3 pointer-events-none">
+      <div className="absolute left-4 top-4 z-[650] flex w-full max-w-[340px] flex-col gap-3 pointer-events-none">
         {/* Title Glass Card */}
         <div className="pointer-events-auto rounded-2xl bg-white/90 p-4 shadow-xl backdrop-blur-xl border border-sky-100 dark:bg-slate-900/80 dark:border-sky-900/50">
           <div className="flex items-center gap-3">
@@ -511,7 +511,7 @@ export function MapPage() {
       </div>
 
       {/* Góc trên Phải: Chú giải (Legend) */}
-      <div className="absolute right-4 top-4 z-[1000] pointer-events-auto hidden md:block">
+      <div className="absolute right-4 top-4 z-[650] pointer-events-auto hidden md:block">
         <div className="w-[280px] rounded-2xl bg-white/90 p-5 shadow-xl backdrop-blur-xl border border-sky-100 dark:bg-slate-900/80 dark:border-sky-900/50">
           <div className="mb-4">
             <h3 className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-slate-100">{t('floodMap.legend')}</h3>
@@ -550,15 +550,18 @@ export function MapPage() {
       </div>
 
       {/* Warning Card nổi (Góc dưới trái) */}
-      <div className="absolute bottom-6 left-6 z-[1000] pointer-events-auto hidden md:block">
+      <div className="absolute bottom-6 left-6 z-[650] pointer-events-auto hidden md:block">
         <div className="drop-shadow-2xl">
-          <FloodWarningCard lat={mapCenter.lat} lon={mapCenter.lon} />
+          <FloodWarningCard 
+            lat={selectedNodeData ? (selectedNodeData.position as [number, number])[0] : mapCenter.lat} 
+            lon={selectedNodeData ? (selectedNodeData.position as [number, number])[1] : mapCenter.lon} 
+          />
         </div>
       </div>
 
       {/* Loading Overlay nổi (Trung tâm) */}
       {isFetchingBbox && (
-        <div className="absolute top-6 left-1/2 z-[1000] -translate-x-1/2 pointer-events-none">
+        <div className="absolute top-6 left-1/2 z-[650] -translate-x-1/2 pointer-events-none">
           <div className="flex items-center gap-2.5 rounded-full bg-slate-900/80 px-4 py-2 text-xs font-bold text-white shadow-xl backdrop-blur-md">
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
             Đang quét dữ liệu AI…

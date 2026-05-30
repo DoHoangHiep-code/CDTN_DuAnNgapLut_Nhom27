@@ -26,9 +26,9 @@ type RiskKey = keyof typeof RISK_PALETTE
 
 // Tile URLs — dùng chung với MapPage
 const TILE_URLS = {
-  terrain:   'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  streets:   'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  terrain:   'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}&hl=vi',
+  satellite: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=vi',
+  streets:   'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=vi',
 }
 
 // ── Bounding box bao phủ toàn bộ Miền Bắc ────────────────────────────────────
@@ -395,9 +395,13 @@ interface LandslideMapProps {
   dayOffset?: number
   /** Callback khi người dùng kéo Time Slider */
   onChangeOffset?: (offset: number) => void
+  /** Ẩn các điểm nguy hiểm (cho màn hình weather mini map) */
+  hideDangerPoints?: boolean
+  /** Hiển thị marker vị trí tìm kiếm/hiện tại */
+  searchMarker?: LatLngExpression | null
 }
 
-export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, dayOffset = 0, onChangeOffset }: LandslideMapProps) {
+export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, dayOffset = 0, onChangeOffset, hideDangerPoints = false, searchMarker = null }: LandslideMapProps) {
   const [map, setMap] = useState<L.Map | null>(null)
   const [nodes, setNodes] = useState<LandslideNode[]>([])
   const [isFetching, setIsFetching] = useState(false)
@@ -418,6 +422,7 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, d
 
   // ── Fetch landslide nodes khi bounds thay đổi ─────────────────────────────
   const fetchNodes = useCallback(async (bounds: L.LatLngBounds) => {
+    if (hideDangerPoints) return
     if (abortRef.current) abortRef.current.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -478,7 +483,9 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, d
         center={NORTH_VN_CENTER}
         zoom={NORTH_VN_ZOOM}
         maxZoom={18}
-        scrollWheelZoom
+        scrollWheelZoom={true}
+        dragging={true}
+        zoomControl={true}
         preferCanvas
         className="h-full w-full"
         style={{ minHeight: '520px' }}
@@ -496,16 +503,27 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, d
 
         <FlyToTarget target={flyTarget} />
 
-        <LandslideClustersLayer
-          nodes={nodes}
-          onSelectNode={(n) => {
-            setSelectedNode(n)
-            setFlyTarget({ lat: n.lat, lng: n.lon, zoom: 14 })
-          }}
-          onFlyToCluster={(lat, lng, zoom) =>
-            setFlyTarget({ lat, lng, zoom })
-          }
-        />
+        {!hideDangerPoints && (
+          <LandslideClustersLayer
+            nodes={nodes}
+            onSelectNode={(n) => {
+              setSelectedNode(n)
+              setFlyTarget({ lat: n.lat, lng: n.lon, zoom: 14 })
+            }}
+            onFlyToCluster={(lat, lng, zoom) =>
+              setFlyTarget({ lat, lng, zoom })
+            }
+          />
+        )}
+
+        {searchMarker && (
+          <Marker position={searchMarker} icon={L.divIcon({
+            className: '',
+            html: `<div style="width:16px;height:16px;border-radius:50%;background:#0ea5e9;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>`,
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
+          })} />
+        )}
 
         <NodePopup node={selectedNode} onClose={() => setSelectedNode(null)} />
       </MapContainer>
