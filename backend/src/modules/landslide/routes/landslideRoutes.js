@@ -34,7 +34,15 @@ router.post('/clear-cache', async (_req, res) => {
   try {
     invalidateCacheNamespace('landslide_api')
     // Trigger in-memory map reload async
-    landslideCache.loadCache().catch(e => console.error('[LandslideCache] Reload error:', e))
+    const { pool } = require('../../../db/sequelize');
+    // Using pg pool directly or sequelize.connectionManager.pool?
+    // Actually, in server.js it passes a pg Pool to prewarmFromDb.
+    // Let's just create a pool to be safe.
+    const { Pool } = require('pg');
+    const pgPool = new Pool({ connectionString: process.env.DATABASE_URL_POOLER || process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    landslideCache.prewarmFromDb(pgPool)
+      .then(() => pgPool.end())
+      .catch(e => { console.error('[LandslideCache] Reload error:', e); pgPool.end(); })
     return res.status(200).json({ success: true, message: 'Đã xóa HTTP Cache và nạp lại in-memory Cache Sạt lở.' })
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message })

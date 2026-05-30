@@ -163,6 +163,17 @@ async function main() {
   geocoder.unref()
   console.log(`  ✅ Geocoding chạy ngầm (PID: ${geocoder.pid}).`)
 
+  // ── Step 9: Geocoding Landslide (chạy ngầm, không block) ────────────────────
+  step(9, 'Geocoding landslide_location (chạy ngầm ~60 phút)')
+  const landslideGeocoder = spawn('node', [path.join(SCRIPTS_DIR, 'fix_landslide_location.js')], {
+    cwd: BACKEND_DIR,
+    stdio: 'ignore',
+    detached: true,
+    env: process.env,
+  })
+  landslideGeocoder.unref()
+  console.log(`  ✅ Geocoding Landslide chạy ngầm (PID: ${landslideGeocoder.pid}).`)
+
 
   // ── Step 10: Seed Landslide Pipeline (Open-Meteo) ───────────────────────────
   step(10, 'Khởi tạo dữ liệu sạt lở động (CSV + Open-Meteo API)')

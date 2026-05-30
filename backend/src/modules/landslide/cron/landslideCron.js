@@ -376,7 +376,16 @@ async function runLandslideJob() {
           let prediction
           try {
             prediction = await predictLandslide(rawFeatures)
-            batchResults.push({ node_id: node.node_id, province: node.province, rawFeatures, prediction, predDate, offset })
+            batchResults.push({ 
+              node_id: node.node_id, 
+              province: node.province, 
+              lat: parseFloat(node.lat),
+              lon: parseFloat(node.lon),
+              location_name: node.location_name,
+              slope: parseFloat(node.slope),
+              elevation: parseFloat(node.elevation),
+              rawFeatures, prediction, predDate, offset 
+            })
           } catch (modelErr) {
             totalError++
             continue
@@ -405,6 +414,11 @@ async function runLandslideJob() {
     landslideCache.updateCache(allPredictions.map(r => ({
       node_id: r.node_id,
       province: r.province,
+      lat: r.lat,
+      lon: r.lon,
+      location_name: r.location_name,
+      slope: r.slope,
+      elevation: r.elevation,
       prob_landslide: r.prediction.probability,
       risk_level: r.prediction.risk_level,
       rain_7d_accum: r.rawFeatures.rain_7d_accum,

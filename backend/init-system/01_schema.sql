@@ -10,16 +10,9 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 -- =============================================================================
 -- ENUM TYPES
 -- =============================================================================
-DO $$ BEGIN
-  CREATE TYPE risk_level_enum AS ENUM ('safe', 'medium', 'high', 'severe');
+CREATE TYPE risk_level_enum AS ENUM ('safe', 'medium', 'high', 'severe');
 
-EXCEPTION WHEN duplicate_object THEN NULL;
-
-END $$;
-
-DO $$ BEGIN
-  CREATE TYPE user_role_enum AS ENUM ('admin', 'expert', 'user');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+CREATE TYPE user_role_enum AS ENUM ('admin', 'expert', 'user');
 
 -- =============================================================================
 -- TABLE: users

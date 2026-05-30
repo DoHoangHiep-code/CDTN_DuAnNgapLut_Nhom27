@@ -71,11 +71,11 @@ function updateCache(predictions) {
       soil_moisture_1d: p.soil_moisture_1d ?? existing.soil_moisture_1d ?? null,
       prediction_time:  p.prediction_time  ?? existing.prediction_time ?? null,
       province:         p.province         ?? existing.province ?? null,
-      lat:              existing.lat ?? null,
-      lon:              existing.lon ?? null,
-      location_name:    existing.location_name ?? null,
-      slope:            existing.slope ?? null,
-      elevation:        existing.elevation ?? null,
+      lat:              p.lat ?? existing.lat ?? null,
+      lon:              p.lon ?? existing.lon ?? null,
+      location_name:    p.location_name ?? existing.location_name ?? null,
+      slope:            p.slope ?? existing.slope ?? null,
+      elevation:        p.elevation ?? existing.elevation ?? null,
     }
     _map.set(p.node_id, arr)
   }
