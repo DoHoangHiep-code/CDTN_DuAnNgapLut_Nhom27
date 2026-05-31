@@ -95,8 +95,12 @@ async function bulkUpsertChunk(nodeIds, predictions, predictTime) {
   if (!nodeIds.length) return
 
   const explanation = `Cron tự động – ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`
+  const dateOnlyStr = predictTime.toISOString().split('T')[0]
+  const month = predictTime.getMonth() + 1
+  const hour = predictTime.getHours()
+  const isRainy = month >= 5 && month <= 10
 
-  // Xây dựng VALUES clause: ($1,$2,$3,$4,$5),($6,$7,$8,$9,$10),...
+  // Xây dựng VALUES clause: ($1,$2,$3,$4,$5),...
   const valueClauses = []
   const params = []
   let paramIdx = 1
@@ -107,20 +111,25 @@ async function bulkUpsertChunk(nodeIds, predictions, predictTime) {
     const depthCm = Math.max(0, Number(pred.flood_depth_cm ?? 0))
     const riskLevel = pred.risk_level ?? depthToRisk(depthCm)
 
-    valueClauses.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}::risk_level, $${paramIdx + 4})`)
-    params.push(nodeIds[j], predictTime, depthCm, riskLevel, explanation)
-    paramIdx += 5
+    valueClauses.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, 0, $${paramIdx + 3}::risk_level, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8})`)
+    params.push(nodeIds[j], predictTime, depthCm, riskLevel, explanation, dateOnlyStr, month, hour, isRainy)
+    paramIdx += 9
   }
 
   if (!valueClauses.length) return
 
   const sql = `
-    INSERT INTO flood_predictions (node_id, time, flood_depth_cm, risk_level, explanation)
+    INSERT INTO flood_predictions 
+      (node_id, time, flood_depth_cm, target, risk_level, explanation, date_only, month, hour, rainy_season_flag)
     VALUES ${valueClauses.join(', ')}
     ON CONFLICT (node_id, time) DO UPDATE SET
-      flood_depth_cm = EXCLUDED.flood_depth_cm,
-      risk_level     = EXCLUDED.risk_level,
-      explanation    = EXCLUDED.explanation
+      flood_depth_cm    = EXCLUDED.flood_depth_cm,
+      risk_level        = EXCLUDED.risk_level,
+      explanation       = EXCLUDED.explanation,
+      date_only         = EXCLUDED.date_only,
+      month             = EXCLUDED.month,
+      hour              = EXCLUDED.hour,
+      rainy_season_flag = EXCLUDED.rainy_season_flag
   `
 
   const client = await pool.connect()
@@ -140,7 +149,7 @@ async function bulkUpsertChunk(nodeIds, predictions, predictTime) {
  * Xử lý 1 chunk: gọi AI → upsert DB.
  * Trả về { success: number, error: number }
  */
-async function processChunk(chunk, nodeIds, chunkIndex, totalChunks) {
+async function processChunk(chunk, nodeIds, chunkIndex, totalChunks, predictTime) {
   // Gọi AI batch
   let predictions
   try {
@@ -156,7 +165,6 @@ async function processChunk(chunk, nodeIds, chunkIndex, totalChunks) {
 
   // Bulk upsert
   try {
-    const predictTime = new Date()
     await bulkUpsertChunk(nodeIds, predictions, predictTime)
     return { success: nodeIds.length, error: 0 }
   } catch (err) {
@@ -169,7 +177,10 @@ async function processChunk(chunk, nodeIds, chunkIndex, totalChunks) {
 
 async function runFloodPredictionJob() {
   const startTime = Date.now()
-  console.log(`\n[PredictionCron] ⏰ Bắt đầu lúc ${new Date().toISOString()}`)
+  const cronTime = new Date()
+  cronTime.setMinutes(0, 0, 0)
+  
+  console.log(`\n[PredictionCron] ⏰ Bắt đầu lúc ${new Date().toISOString()} (Mốc thời gian quy tròn: ${cronTime.toISOString()})`)
 
   // Bước 1: Lấy tất cả nodes + weather mới nhất
   let nodes
@@ -217,7 +228,7 @@ async function runFloodPredictionJob() {
     const groupNodeIds = nodeIdChunks.slice(i, i + PARALLEL_WORKERS)
 
     const results = await Promise.allSettled(
-      groupChunks.map((chunk, gi) => processChunk(chunk, groupNodeIds[gi], i + gi, chunks.length))
+      groupChunks.map((chunk, gi) => processChunk(chunk, groupNodeIds[gi], i + gi, chunks.length, cronTime))
     )
 
     results.forEach(r => {

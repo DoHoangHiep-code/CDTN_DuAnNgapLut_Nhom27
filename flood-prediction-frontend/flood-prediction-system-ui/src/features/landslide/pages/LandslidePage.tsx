@@ -292,7 +292,7 @@ export function LandslidePage() {
           className="col-span-12 overflow-hidden rounded-2xl shadow-xl lg:col-span-8"
           style={{ border: '1px solid rgba(120,113,108,0.3)' }}
         >
-          <LandslideMap tileStyle={tileStyle} mapRef={mapRef} dayOffset={dayOffset} onChangeOffset={setDayOffset} />
+          <LandslideMap tileStyle={tileStyle} mapRef={mapRef} dayOffset={dayOffset} onChangeOffset={setDayOffset} focusedNodeId={focusedSpot} />
         </div>
 
         {/* Sidebar */}

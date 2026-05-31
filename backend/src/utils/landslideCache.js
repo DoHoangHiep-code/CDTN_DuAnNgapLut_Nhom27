@@ -103,6 +103,9 @@ function getNodesInBbox(minLat, maxLat, minLng, maxLng, offset = 0, riskFilter =
     if (!pred) continue;
     
     if (pred.lat >= minLat && pred.lat <= maxLat && pred.lon >= minLng && pred.lon <= maxLng) {
+      // Bỏ qua điểm an toàn để giảm tải JSON, frontend cũng không vẽ SAFE
+      if (!pred.risk_level || pred.risk_level === 'SAFE') continue;
+      
       if (riskFilter === 'DANGER' && pred.risk_level !== 'DANGER') continue;
       if (riskFilter === 'WARNING' && !['WARNING', 'DANGER'].includes(pred.risk_level)) continue;
       

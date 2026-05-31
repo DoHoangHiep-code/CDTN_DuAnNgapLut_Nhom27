@@ -15,7 +15,7 @@ import { MiniFloodMap } from '../components/MiniFloodMap'
 import { LocationSearch } from '../components/LocationSearch'
 import type { NominatimResult } from '../components/LocationSearch'
 import { useAsync } from '../../../hooks/useAsync'
-import { getFloodPrediction, getWeather, getWeather7Days, getWeatherForecast24h } from '../../../services/api'
+import { getFloodPrediction, getWeather, getWeather7Days, getWeatherForecast24h, getDashboard } from '../../../services/api'
 import { useDisasterMode } from '../../../context/DisasterContext'
 import { WeatherTerrainPage } from '../../../pages/WeatherTerrain'
 
@@ -358,13 +358,9 @@ function Rain24hChart({ forecast24h }: {
 }
 
 // ── RiskOverview ──────────────────────────────────────────────────────
-function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
-  const counts = useMemo(() => {
-    const c = { safe: 0, medium: 0, high: 0, severe: 0 }
-    districts.forEach((d) => { c[d.risk as keyof typeof c] = (c[d.risk as keyof typeof c] ?? 0) + 1 })
-    return c
-  }, [districts])
-  const total = districts.length
+function RiskOverview({ riskSummary }: { riskSummary?: { safe: number, medium: number, high: number, severe: number, overall: string } }) {
+  const counts = riskSummary || { safe: 0, medium: 0, high: 0, severe: 0, overall: 'safe' }
+  const total = counts.safe + counts.medium + counts.high + counts.severe
   const safePct = total === 0 ? 0 : Math.round((counts.safe / total) * 100)
   const dangerPct = total === 0 ? 0 : Math.round(((counts.high + counts.severe) / total) * 100)
 
@@ -391,7 +387,7 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
             </div>
             <div className="text-sm font-extrabold text-slate-900 dark:text-slate-100">Tổng quan rủi ro</div>
           </div>
-          <div className="mt-1 ml-10 text-xs text-slate-500 dark:text-slate-400">{total} quận/huyện</div>
+          <div className="mt-1 ml-10 text-xs text-slate-500 dark:text-slate-400">{total} khu vực</div>
         </div>
         <div className="text-right">
           <div className={cn('text-lg font-extrabold tabular-nums', dangerPct > 30 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
@@ -428,7 +424,7 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <span className="text-xs text-slate-500">Tổng</span>
-              <span className="text-lg font-bold text-slate-800 dark:text-slate-100 leading-none">{total}</span>
+              <span className="text-lg font-bold text-slate-800 dark:text-slate-100 leading-none">{total >= 1000 ? (total/1000).toFixed(1) + 'k' : total}</span>
             </div>
           </div>
 
@@ -446,7 +442,7 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
                   <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">{item.label}</span>
                 </div>
                 <div className="text-right">
-                  <div className={cn('text-xl font-extrabold tabular-nums leading-none', item.text)}>{item.count}</div>
+                  <div className={cn('text-xl font-extrabold tabular-nums leading-none', item.text)}>{item.count >= 1000 ? (item.count/1000).toFixed(1) + 'k' : item.count}</div>
                   <div className="text-[9px] text-slate-400 tabular-nums mt-0.5">{Math.round((item.count / total) * 100)}%</div>
                 </div>
               </div>
@@ -458,8 +454,8 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
       <div className="flex items-center gap-2 border-t border-slate-100 px-5 py-2.5 dark:border-slate-800">
         <Gauge className="h-3.5 w-3.5 text-slate-400" />
         <span className="text-[11px] text-slate-400 dark:text-slate-500">
-          Chỉ số nguy cơ trung bình: <span className="font-bold text-slate-600 dark:text-slate-300">
-            {(total > 0 ? districts.reduce((s, d) => s + d.flood_depth_cm, 0) / total : 0).toFixed(1)}cm
+          Chỉ số nguy cơ tổng thể: <span className="font-bold text-slate-600 dark:text-slate-300">
+            {counts.overall === 'severe' ? 'Nguy hiểm' : counts.overall === 'high' ? 'Cao' : counts.overall === 'medium' ? 'Trung bình' : 'An toàn'}
           </span>
         </span>
       </div>
@@ -520,6 +516,7 @@ function FloodWeatherPage() {
   )
 
   const floodData = useAsync(() => getFloodPrediction(), [])
+  const dashboardData = useAsync(() => getDashboard(), [])
 
   // ── Handle geo-search result ──
   const handleGeoResult = useCallback((r: NominatimResult) => {
@@ -790,7 +787,7 @@ function FloodWeatherPage() {
       {/* ── Hàng 2: Biểu đồ mưa 24h + Tổng quan rủi ro ── */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Rain24hChart forecast24h={chartForecast24h} />
-        <RiskOverview districts={floodData.data?.districts || []} />
+        <RiskOverview riskSummary={dashboardData.data?.riskSummary} />
       </div>
 
       {/* ── 7-day forecast ── */}
