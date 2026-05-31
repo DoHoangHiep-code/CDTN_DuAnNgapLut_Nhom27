@@ -3,7 +3,8 @@
 const NodeCache = require('node-cache')
 
 // Tạo 1 instance chung, lưu giữ liệu trong RAM. Cấu hình kiểm tra quá hạn mỗi phút.
-const globalCache = new NodeCache({ stdTTL: 0, checkperiod: 60 })
+// SỬA LỖI TIMEOUT: Bắt buộc dùng useClones: false để không deep-clone mảng 100k phần tử, tránh treo Event Loop!
+const globalCache = new NodeCache({ stdTTL: 0, checkperiod: 60, useClones: false })
 
 /**
  * Middleware cache API responses

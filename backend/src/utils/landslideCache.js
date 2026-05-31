@@ -54,28 +54,28 @@ function invalidateCache() {
 function updateCache(predictions) {
   for (const p of predictions) {
     const arr = _map.get(p.node_id) || []
-    
+
     // Đảm bảo mảng có 4 phần tử
-    while(arr.length < 4) arr.push(null)
-    
+    while (arr.length < 4) arr.push(null)
+
     // Nếu có offset truyền vào thì dùng, không thì tự suy luận từ mảng
     // Trong trường hợp cron truyền mảng đã filter offset=0, nó sẽ đè lên index 0
     const offset = p.offset !== undefined ? p.offset : 0;
-    
+
     const existing = arr[offset] || {};
     arr[offset] = {
-      prob_landslide:   p.prob_landslide   ?? existing.prob_landslide ?? null,
-      risk_level:       p.risk_level       ?? existing.risk_level ?? null,
-      rain_7d_accum:    p.rain_7d_accum    ?? existing.rain_7d_accum ?? null,
-      api_7d:           p.api_7d           ?? existing.api_7d ?? null,
+      prob_landslide: p.prob_landslide ?? existing.prob_landslide ?? null,
+      risk_level: p.risk_level ?? existing.risk_level ?? null,
+      rain_7d_accum: p.rain_7d_accum ?? existing.rain_7d_accum ?? null,
+      api_7d: p.api_7d ?? existing.api_7d ?? null,
       soil_moisture_1d: p.soil_moisture_1d ?? existing.soil_moisture_1d ?? null,
-      prediction_time:  p.prediction_time  ?? existing.prediction_time ?? null,
-      province:         p.province         ?? existing.province ?? null,
-      lat:              existing.lat ?? null,
-      lon:              existing.lon ?? null,
-      location_name:    existing.location_name ?? null,
-      slope:            existing.slope ?? null,
-      elevation:        existing.elevation ?? null,
+      prediction_time: p.prediction_time ?? existing.prediction_time ?? null,
+      province: p.province ?? existing.province ?? null,
+      lat: p.lat ?? existing.lat ?? null,
+      lon: p.lon ?? existing.lon ?? null,
+      location_name: p.location_name ?? existing.location_name ?? null,
+      slope: p.slope ?? existing.slope ?? null,
+      elevation: p.elevation ?? existing.elevation ?? null,
     }
     _map.set(p.node_id, arr)
   }
@@ -101,11 +101,14 @@ function getNodesInBbox(minLat, maxLat, minLng, maxLng, offset = 0, riskFilter =
   for (const [node_id, arr] of _map.entries()) {
     const pred = arr[offset] || arr[0];
     if (!pred) continue;
-    
+
     if (pred.lat >= minLat && pred.lat <= maxLat && pred.lon >= minLng && pred.lon <= maxLng) {
+      // Bỏ qua điểm an toàn để giảm tải JSON, frontend cũng không vẽ SAFE
+      if (!pred.risk_level || pred.risk_level === 'SAFE') continue;
+
       if (riskFilter === 'DANGER' && pred.risk_level !== 'DANGER') continue;
       if (riskFilter === 'WARNING' && !['WARNING', 'DANGER'].includes(pred.risk_level)) continue;
-      
+
       nodes.push({
         node_id,
         lat: pred.lat,
@@ -215,23 +218,23 @@ async function prewarmFromDb(pool) {
     // Vì ORDER BY p.prediction_time ASC, ngày cũ nhất (T0) sẽ đến trước, T3 sẽ đến sau
     for (const p of rows) {
       const arr = _map.get(p.node_id) || [null, null, null, null]
-      
+
       let offset = arr.findIndex(x => x === null)
       if (offset === -1) offset = 3 // Safety fallback
-      
+
       arr[offset] = {
-        prob_landslide:   p.prob_landslide   ?? null,
-        risk_level:       p.risk_level       ?? null,
-        rain_7d_accum:    p.rain_7d_accum    ?? null,
-        api_7d:           p.api_7d           ?? null,
+        prob_landslide: p.prob_landslide ?? null,
+        risk_level: p.risk_level ?? null,
+        rain_7d_accum: p.rain_7d_accum ?? null,
+        api_7d: p.api_7d ?? null,
         soil_moisture_1d: p.soil_moisture_1d ?? null,
-        prediction_time:  p.prediction_time  ?? null,
-        province:         p.province         ?? null,
-        lat:              p.lat !== undefined ? parseFloat(p.lat) : null,
-        lon:              p.lon !== undefined ? parseFloat(p.lon) : null,
-        location_name:    p.location_name    ?? null,
-        slope:            p.slope !== undefined ? parseFloat(p.slope) : null,
-        elevation:        p.elevation !== undefined ? parseFloat(p.elevation) : null,
+        prediction_time: p.prediction_time ?? null,
+        province: p.province ?? null,
+        lat: p.lat !== undefined ? parseFloat(p.lat) : null,
+        lon: p.lon !== undefined ? parseFloat(p.lon) : null,
+        location_name: p.location_name ?? null,
+        slope: p.slope !== undefined ? parseFloat(p.slope) : null,
+        elevation: p.elevation !== undefined ? parseFloat(p.elevation) : null,
       }
       _map.set(p.node_id, arr)
     }
@@ -240,7 +243,7 @@ async function prewarmFromDb(pool) {
     const elapsed = Date.now() - t0
     console.log(`[LandslideCache] ✅ Pre-warm: ${_map.size.toLocaleString('vi-VN')} nodes | ${elapsed}ms`)
     _isReady = true
-    
+
     // Khởi động nạp chatbot cache song song
     lastUpdated = new Date()
     populateChatbotCache(pool).catch(err => console.error('[LandslideCache] populateChatbotCache error:', err.message))
@@ -265,8 +268,8 @@ function scanTop(n, offset = 0) {
   const candidates = []
   for (const [node_id, arr] of _map.entries()) {
     const pred = arr[offset]
-    if (pred && (pred.risk_level === 'DANGER' || pred.risk_level === 'WARNING')) {
-      candidates.push({ node_id, prob: pred.prob_landslide ?? 0 })
+    if (pred && pred.prob_landslide != null) {
+      candidates.push({ node_id, prob: pred.prob_landslide })
     }
   }
   candidates.sort((a, b) => b.prob - a.prob)
@@ -302,10 +305,10 @@ function getDashboardStats(offset = 0) {
 
     if (pred.risk_level === 'DANGER' || pred.risk_level === 'WARNING') {
       if (pred.province) {
-         if (!provinceStats.has(pred.province)) provinceStats.set(pred.province, { name: pred.province, danger: 0, warning: 0 });
-         const pStat = provinceStats.get(pred.province);
-         if (pred.risk_level === 'DANGER') pStat.danger++;
-         if (pred.risk_level === 'WARNING') pStat.warning++;
+        if (!provinceStats.has(pred.province)) provinceStats.set(pred.province, { name: pred.province, danger: 0, warning: 0 });
+        const pStat = provinceStats.get(pred.province);
+        if (pred.risk_level === 'DANGER') pStat.danger++;
+        if (pred.risk_level === 'WARNING') pStat.warning++;
       }
     }
   }
@@ -373,15 +376,15 @@ async function populateChatbotCache(pool) {
   }
 }
 
-module.exports = { 
-  updateCache, 
+module.exports = {
+  updateCache,
   getForNode,
   getNodesInBbox,
   getDynamicAlerts,
-  getStats, 
-  clearAll, 
-  prewarmFromDb, 
-  scanTop, 
+  getStats,
+  clearAll,
+  prewarmFromDb,
+  scanTop,
   getDashboardStats,
   worstAreas,
   currentStatus,

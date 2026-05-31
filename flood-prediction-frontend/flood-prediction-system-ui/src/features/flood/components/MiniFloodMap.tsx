@@ -49,9 +49,9 @@ function FlyToPosition({ position }: { position: LatLngExpression | null | undef
   return null
 }
 
-const RED_MARKER_ICON = divIcon({
+const BLUE_MARKER_ICON = divIcon({
   className: '',
-  html: `<div style="width:16px;height:16px;border-radius:50%;background:#e11d48;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>`,
+  html: `<div style="width:16px;height:16px;border-radius:50%;background:#0ea5e9;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>`,
   iconSize: [16, 16],
   iconAnchor: [8, 8],
 })
@@ -122,16 +122,16 @@ export function MiniFloodMap({
         </button>
       </div>
 
-      <MapContainer center={center} zoom={zoom} scrollWheelZoom={false} className="h-full w-full">
+      <MapContainer center={center} zoom={zoom} scrollWheelZoom={true} dragging={true} zoomControl={true} className="h-full w-full">
         <FlyToPosition position={flyTo ?? null} />
         <TileLayer
-          attribution=""
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution="&copy; Google Maps"
+          url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=vi"
         />
 
-        {/* Marker đỏ tại vị trí user vừa search */}
+        {/* Marker xanh tại vị trí user vừa search hoặc mặc định */}
         {searchMarker && (
-          <Marker position={searchMarker} icon={RED_MARKER_ICON}>
+          <Marker position={searchMarker} icon={BLUE_MARKER_ICON}>
             {searchPopupContent && <Popup>{searchPopupContent}</Popup>}
           </Marker>
         )}

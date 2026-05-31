@@ -267,6 +267,7 @@ router.get('/forecasts/latest', cacheResponse(30 * 60, 'flood_api'), async (req,
          gn.st1_id, gn.st1_weight,
          gn.st2_id, gn.st2_weight,
          gn.st3_id, gn.st3_weight,
+         gn.location_name,
          ST_Distance(
            gn.geom::geography,
            ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
@@ -274,7 +275,7 @@ router.get('/forecasts/latest', cacheResponse(30 * 60, 'flood_api'), async (req,
        FROM grid_nodes gn
        WHERE gn.latitude BETWEEN :lat - 0.1 AND :lat + 0.1
          AND gn.longitude BETWEEN :lon - 0.1 AND :lon + 0.1
-       ORDER BY ST_Distance(gn.geom::geography, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography) ASC
+       ORDER BY ST_Distance(gn.geom, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)) ASC
        LIMIT 1`,
       { replacements: { lat, lon } }
     )
@@ -394,8 +395,10 @@ router.get('/forecasts/latest', cacheResponse(30 * 60, 'flood_api'), async (req,
 
     // ── Bước 5: Có data từ DB → kết hợp IDW weather + DB prediction ──────────
     const pred = predRows[0]
-    const floodDepthCm = Number(pred.flood_depth_cm)
-    const { label, warningText } = depthCmToWarning(floodDepthCm)
+    let floodDepthCm = Number(pred.flood_depth_cm)
+    let { label, warningText } = depthCmToWarning(floodDepthCm)
+    let risk_level = pred.risk_level
+    let explanation = pred.explanation
 
     const prcp   = weather?.rain_1h  ?? 0
     const prcp3  = weather?.prcp_3h  ?? 0
@@ -403,6 +406,16 @@ router.get('/forecasts/latest', cacheResponse(30 * 60, 'flood_api'), async (req,
     const prcp12 = weather?.prcp_12h ?? 0
     const prcp24 = weather?.prcp_24h ?? 0
     const rhum   = weather?.rhum     ?? 70
+
+    // Heuristic: Không có mưa tích lũy -> không thể ngập (fix false positives)
+    const isNoRain = prcp === 0 && prcp3 === 0 && prcp6 === 0 && prcp12 === 0
+    if (isNoRain && floodDepthCm > 0) {
+      floodDepthCm = 0
+      label = 0
+      warningText = 'An toàn'
+      risk_level = 'safe'
+      explanation = `[An toàn] Không có mưa. Hệ thống dự báo an toàn. Nhiệt độ ${weather?.temp ?? 0}°C.`
+    }
 
     return res.status(200).json({
       success: true,
@@ -423,8 +436,8 @@ router.get('/forecasts/latest', cacheResponse(30 * 60, 'flood_api'), async (req,
         },
         prediction: {
           flood_depth_cm: Math.round(floodDepthCm * 10) / 10,
-          risk_level:     pred.risk_level,
-          explanation:    pred.explanation,
+          risk_level:     risk_level,
+          explanation:    explanation,
           label:          label,
           warningText:    warningText,
         },

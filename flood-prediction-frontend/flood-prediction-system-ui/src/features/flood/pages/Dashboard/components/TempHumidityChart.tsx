@@ -6,12 +6,31 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  ReferenceLine,
 } from 'recharts'
 import type { DashboardTempHumPoint } from '../../../../../utils/types'
 import { ChartWrapper } from './ChartWrapper'
 
 export function TempHumidityChart({ points }: { points: DashboardTempHumPoint[] }) {
   const hasData = points && points.length > 0
+  let currentStr = ''
+  if (hasData) {
+    const now = new Date()
+    let minDiff = Infinity
+    points.forEach(p => {
+      if (!p.time) return
+      const parts = p.time.split(' ')
+      if (parts.length !== 2) return
+      const [day, month] = parts[0].split('/')
+      const [hour, minute] = parts[1].split(':')
+      const pDate = new Date(now.getFullYear(), Number(month) - 1, Number(day), Number(hour), Number(minute))
+      const diff = Math.abs(pDate.getTime() - now.getTime())
+      if (diff < minDiff) {
+        minDiff = diff
+        currentStr = p.time
+      }
+    })
+  }
 
   return (
     <ChartWrapper className="relative h-full w-full">
@@ -26,7 +45,7 @@ export function TempHumidityChart({ points }: { points: DashboardTempHumPoint[] 
             width={width}
             height={height}
             data={hasData ? points : []}
-            margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+            margin={{ top: 25, right: 10, left: -20, bottom: 0 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.2} vertical={false} />
             <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -43,6 +62,7 @@ export function TempHumidityChart({ points }: { points: DashboardTempHumPoint[] 
               }}
             />
             <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+            <ReferenceLine x={currentStr} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'top', value: 'Hiện tại', fill: '#ef4444', fontSize: 10 }} />
             <Line yAxisId="left" type="monotone" dataKey="temp" name="Nhiệt độ (°C)" stroke="#f97316" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
             <Line yAxisId="right" type="monotone" dataKey="rhum" name="Độ ẩm (%)" stroke="#0ea5e9" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
           </LineChart>

@@ -75,20 +75,17 @@ async function main() {
 
   await sequelize.authenticate()
 
-  // SỬA ĐỔI QUAN TRỌNG: Xóa trắng TOÀN BỘ dữ liệu định vị hiện tại để ép chạy lại từ A-Z
-  console.log('[Cleanup] Đang xóa toàn bộ dữ liệu Geocoding cũ để làm mới 100%...')
-  await sequelize.query(`
-    UPDATE grid_nodes SET location_name = NULL, district_name = NULL;
-  `)
-  await sequelize.query(`
-    UPDATE weather_stations SET location_name = NULL;
-  `)
+  // SỬA ĐỔI: KHÔNG xóa dữ liệu cũ nữa, chỉ điền vào những chỗ còn trống (location_name IS NULL)
+  console.log('[Cleanup] Giữ nguyên dữ liệu cũ, chỉ Geocoding những node/trạm chưa có location_name...')
+  // Bỏ comment nếu muốn xóa:
+  // await sequelize.query(`UPDATE grid_nodes SET location_name = NULL, district_name = NULL;`)
+  // await sequelize.query(`UPDATE weather_stations SET location_name = NULL;`)
 
   // =====================================================================
   // PHẦN 1: GEOCODING CHO 88 TRẠM (WEATHER STATIONS)
   // =====================================================================
-  console.log('\n[Stations] Đang cập nhật 88 Trạm thời tiết...')
-  const stations = await sequelize.query(`SELECT id, latitude, longitude FROM weather_stations`, { type: QueryTypes.SELECT })
+  console.log('\n[Stations] Đang cập nhật Trạm thời tiết (chưa có location_name)...')
+  const stations = await sequelize.query(`SELECT id, latitude, longitude FROM weather_stations WHERE location_name IS NULL OR location_name = ''`, { type: QueryTypes.SELECT })
 
   for (let i = 0; i < stations.length; i++) {
     try {
@@ -108,9 +105,8 @@ async function main() {
   // =====================================================================
   // PHẦN 2: GEOCODING CHO GRID NODES (Chia lưới 0.44km)
   // =====================================================================
-  console.log('\n\n[Nodes] Đang tải 53K nodes...')
-  // Bỏ điều kiện WHERE vì ta đã xóa trắng ở bước Cleanup, giờ select ALL
-  const nodes = await sequelize.query(`SELECT node_id, latitude, longitude FROM grid_nodes`, { type: QueryTypes.SELECT })
+  console.log('\n\n[Nodes] Đang tải các nodes chưa có location_name...')
+  const nodes = await sequelize.query(`SELECT node_id, latitude, longitude FROM grid_nodes WHERE location_name IS NULL OR location_name = ''`, { type: QueryTypes.SELECT })
 
   if (!nodes.length) {
     console.log('✅ Lỗi: Không tìm thấy nodes nào trong Database!')

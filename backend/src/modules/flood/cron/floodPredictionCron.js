@@ -96,7 +96,16 @@ async function bulkUpsertChunk(nodeIds, predictions, predictTime) {
 
   const explanation = `Cron tự động – ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`
 
-  // Xây dựng VALUES clause: ($1,$2,$3,$4,$5),($6,$7,$8,$9,$10),...
+  // Tính toán các trường phụ thuộc thời gian (chuẩn ICT)
+  const d = new Date(predictTime)
+  const tzOffset = 7 * 60 * 60 * 1000
+  const localTime = new Date(d.getTime() + tzOffset)
+  const date_only = localTime.toISOString().split('T')[0]
+  const month = localTime.getUTCMonth() + 1
+  const hour = localTime.getUTCHours()
+  const rainy_season_flag = (month >= 5 && month <= 10)
+
+  // Xây dựng VALUES clause: ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)...
   const valueClauses = []
   const params = []
   let paramIdx = 1
@@ -106,21 +115,27 @@ async function bulkUpsertChunk(nodeIds, predictions, predictTime) {
     if (!pred) continue
     const depthCm = Math.max(0, Number(pred.flood_depth_cm ?? 0))
     const riskLevel = pred.risk_level ?? depthToRisk(depthCm)
+    const target = depthCm > 10 ? 1 : 0
 
-    valueClauses.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4})`)
-    params.push(nodeIds[j], predictTime, depthCm, riskLevel, explanation)
-    paramIdx += 5
+    valueClauses.push(`($${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, $${paramIdx + 9})`)
+    params.push(nodeIds[j], predictTime, depthCm, riskLevel, explanation, target, date_only, month, hour, rainy_season_flag)
+    paramIdx += 10
   }
 
   if (!valueClauses.length) return
 
   const sql = `
-    INSERT INTO flood_predictions (node_id, time, flood_depth_cm, risk_level, explanation)
+    INSERT INTO flood_predictions (node_id, time, flood_depth_cm, risk_level, explanation, target, date_only, month, hour, rainy_season_flag)
     VALUES ${valueClauses.join(', ')}
     ON CONFLICT (node_id, time) DO UPDATE SET
-      flood_depth_cm = EXCLUDED.flood_depth_cm,
-      risk_level     = EXCLUDED.risk_level,
-      explanation    = EXCLUDED.explanation
+      flood_depth_cm    = EXCLUDED.flood_depth_cm,
+      risk_level        = EXCLUDED.risk_level,
+      explanation       = EXCLUDED.explanation,
+      target            = EXCLUDED.target,
+      date_only         = EXCLUDED.date_only,
+      month             = EXCLUDED.month,
+      hour              = EXCLUDED.hour,
+      rainy_season_flag = EXCLUDED.rainy_season_flag
   `
 
   const client = await pool.connect()

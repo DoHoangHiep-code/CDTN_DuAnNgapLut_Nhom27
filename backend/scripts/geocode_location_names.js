@@ -22,6 +22,7 @@ require('dotenv').config()
 const axios  = require('axios')
 const { sequelize } = require('../src/db/sequelize')
 const { QueryTypes } = require('sequelize')
+const ADMIN_MAP_2025 = require('./administrative_mapping_2025.json')
 
 // ─── Cấu hình ─────────────────────────────────────────────────────────────────
 const CELL_DEG    = 0.004    // ~0.44km per cell (cân bằng giữa accuracy và số API calls)
@@ -37,13 +38,24 @@ const BBOX = { minLat: 20.86, maxLat: 21.18, minLon: 105.62, maxLon: 105.95 }
 // ─── Parse địa chỉ từ Nominatim response ─────────────────────────────────────
 function parseLocationName(addr) {
   if (!addr) return null
-  const ward     = addr.quarter || addr.suburb || addr.neighbourhood
-  const district = addr.city_district || addr.county
-  const city     = addr.city || addr.state
+  let road     = addr.road || addr.pedestrian || addr.path
+  let ward     = addr.quarter || addr.suburb || addr.neighbourhood
+  let district = addr.city_district || addr.county
+  let city     = addr.city || addr.state
 
-  if (ward && district) return `${ward}, ${district}`
-  if (ward && city)     return `${ward}, ${city}`
-  if (district)         return district
+  // Áp dụng bộ từ điển hành chính mới 2025
+  if (road && ADMIN_MAP_2025[road]) road = ADMIN_MAP_2025[road]
+  if (ward && ADMIN_MAP_2025[ward]) ward = ADMIN_MAP_2025[ward]
+  if (district && ADMIN_MAP_2025[district]) district = ADMIN_MAP_2025[district]
+  if (city && ADMIN_MAP_2025[city]) city = ADMIN_MAP_2025[city]
+
+  const parts = []
+  if (road) parts.push(road)
+  if (ward) parts.push(ward)
+  if (district) parts.push(district)
+  else if (city) parts.push(city)
+
+  if (parts.length > 0) return parts.join(', ')
   return null
 }
 
@@ -60,7 +72,6 @@ async function main() {
   const nodes = await sequelize.query(`
     SELECT node_id, latitude, longitude, location_name
     FROM grid_nodes
-    WHERE location_name IS NULL OR location_name LIKE 'Grid_%'
     ORDER BY node_id;
   `, { type: QueryTypes.SELECT })
   console.log(`[Query] ${nodes.length.toLocaleString('vi-VN')} nodes cần cập nhật.\n`)
@@ -101,7 +112,7 @@ async function main() {
   for (const [key, cell] of cellMap.entries()) {
     try {
       const res = await axios.get(NOMINATIM_URL, {
-        params: { lat: cell.centLat, lon: cell.centLon, format: 'json', zoom: 16, addressdetails: 1 },
+        params: { lat: cell.centLat, lon: cell.centLon, format: 'json', zoom: 18, addressdetails: 1 },
         headers: { 'User-Agent': 'AQUAALERT-GeocoderBot/1.0' },
         timeout: 8000,
       })
@@ -150,8 +161,8 @@ async function main() {
   // ── Tổng kết ──────────────────────────────────────────────────────────────
   const [check] = await sequelize.query(`
     SELECT
-      COUNT(*) FILTER (WHERE location_name NOT LIKE 'Grid_%' AND location_name IS NOT NULL) AS named,
-      COUNT(*) FILTER (WHERE location_name LIKE 'Grid_%' OR location_name IS NULL) AS unnamed
+      COUNT(*) FILTER (WHERE location_name IS NOT NULL) AS named,
+      COUNT(*) FILTER (WHERE location_name IS NULL) AS unnamed
     FROM grid_nodes;
   `, { type: QueryTypes.SELECT })
 

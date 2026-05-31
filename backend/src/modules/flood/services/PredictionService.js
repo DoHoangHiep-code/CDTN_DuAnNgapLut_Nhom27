@@ -101,9 +101,19 @@ class PredictionService {
   // -------------------------------------------------------------------------
   async _savePrediction(nodeId, predictionTime, floodDepthCm, riskLevel) {
     const target = floodDepthCm > 10 ? 1 : 0
+    
+    // Tính toán các trường thời gian
+    const d = new Date(predictionTime)
+    const tzOffset = 7 * 60 * 60 * 1000
+    const localTime = new Date(d.getTime() + tzOffset)
+    const date_only = localTime.toISOString().split('T')[0]
+    const month = localTime.getUTCMonth() + 1
+    const hour = localTime.getUTCHours()
+    const rainy_season_flag = (month >= 5 && month <= 10)
+
     await this.sequelize.query(
-      `INSERT INTO flood_predictions (node_id, time, flood_depth_cm, target, risk_level)
-       VALUES (:nodeId, :time, :depth, :target, :risk)
+      `INSERT INTO flood_predictions (node_id, time, flood_depth_cm, target, risk_level, date_only, month, hour, rainy_season_flag)
+       VALUES (:nodeId, :time, :depth, :target, :risk, :date_only, :month, :hour, :rainy_season_flag)
        ON CONFLICT DO NOTHING;`,
       {
         replacements: {
@@ -112,6 +122,10 @@ class PredictionService {
           depth: floodDepthCm,
           target,
           risk: riskLevel,
+          date_only,
+          month,
+          hour,
+          rainy_season_flag
         },
       },
     )

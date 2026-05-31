@@ -16,14 +16,16 @@ const LS = {
   warningColor:  '#d97706',
 }
 
-type HotspotCardProps = (typeof LANDSLIDE_HOTSPOTS)[number] & {
+type HotspotCardProps = Omit<(typeof LANDSLIDE_HOTSPOTS)[number], 'risk'> & {
+  risk: 'critical' | 'warning' | 'safe'
   onFly: (lat: number, lng: number) => void
   isFocused: boolean
 }
 
 function HotspotCard({ name, province, risk, soilMoisture, rain7d, slope, lat, lng, onFly, isFocused }: HotspotCardProps) {
   const isCritical = risk === 'critical'
-  const accent = isCritical ? LS.criticalColor : LS.warningColor
+  const isSafe = risk === 'safe'
+  const accent = isCritical ? LS.criticalColor : isSafe ? '#16a34a' : LS.warningColor
   const moistureColor = soilMoisture >= 85 ? '#dc2626' : soilMoisture >= 70 ? '#d97706' : '#ca8a04'
 
   return (
@@ -36,14 +38,18 @@ function HotspotCard({ name, province, risk, soilMoisture, rain7d, slope, lat, l
         isFocused
           ? isCritical
             ? 'border-red-700/50 shadow-md shadow-red-900/30'
-            : 'border-amber-600/50 shadow-md shadow-amber-900/30'
+            : isSafe
+              ? 'border-green-700/50 shadow-md shadow-green-900/30'
+              : 'border-amber-600/50 shadow-md shadow-amber-900/30'
           : 'border-stone-700/40 hover:border-stone-600/60',
       )}
       style={{
         background: isFocused
           ? isCritical
             ? 'linear-gradient(135deg, rgba(40,12,12,0.99), rgba(55,16,16,0.97))'
-            : 'linear-gradient(135deg, rgba(38,24,8,0.99), rgba(52,30,8,0.97))'
+            : isSafe
+              ? 'linear-gradient(135deg, rgba(12,40,12,0.99), rgba(16,55,16,0.97))'
+              : 'linear-gradient(135deg, rgba(38,24,8,0.99), rgba(52,30,8,0.97))'
           : 'linear-gradient(135deg, rgba(26,20,16,0.98), rgba(32,24,18,0.96))',
       }}
     >
@@ -72,11 +78,11 @@ function HotspotCard({ name, province, risk, soilMoisture, rain7d, slope, lat, l
               className="flex-shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-widest"
               style={{
                 background: `${accent}20`,
-                color: isCritical ? '#fca5a5' : '#fcd34d',
+                color: isCritical ? '#fca5a5' : isSafe ? '#86efac' : '#fcd34d',
                 border: `1px solid ${accent}40`,
               }}
             >
-              {isCritical ? '● Rất cao' : '● Cảnh báo'}
+              {isCritical ? '● Rất cao' : isSafe ? '● An toàn' : '● Cảnh báo'}
             </span>
           </div>
 
@@ -120,7 +126,7 @@ export function LandslidePage() {
   const [focusedSpot, setFocusedSpot] = useState<string | null>(null)
   const [tileStyle, setTileStyle] = useState<'terrain' | 'satellite' | 'streets'>('terrain')
   const [hotspots, setHotspots] = useState<Array<{
-    id: string; name: string; province: string; risk: 'critical' | 'warning'
+    id: string; name: string; province: string; risk: 'critical' | 'warning' | 'safe'
     soilMoisture: number; rain7d: number; slope: number; ndvi: number; lat: number; lng: number
   }>>([])
   const [loadingHotspots, setLoadingHotspots] = useState(true)
@@ -142,7 +148,7 @@ export function LandslidePage() {
             id: node.node_id,
             name: node.location_name || node.province || `Node ${node.node_id.slice(0, 6)}`,
             province: node.province || '',
-            risk: node.risk_level === 'DANGER' ? ('critical' as const) : ('warning' as const),
+            risk: node.risk_level === 'DANGER' ? ('critical' as const) : node.risk_level === 'WARNING' ? ('warning' as const) : ('safe' as const),
             soilMoisture: node.soil_moisture_1d ? Math.round(node.soil_moisture_1d * 100) : 0,
             rain7d: node.rain_7d_accum ? Math.round(node.rain_7d_accum) : 0,
             slope: node.slope ? Math.round(node.slope) : 0,
@@ -286,7 +292,7 @@ export function LandslidePage() {
           className="col-span-12 overflow-hidden rounded-2xl shadow-xl lg:col-span-8"
           style={{ border: '1px solid rgba(120,113,108,0.3)' }}
         >
-          <LandslideMap tileStyle={tileStyle} mapRef={mapRef} dayOffset={dayOffset} onChangeOffset={setDayOffset} />
+          <LandslideMap tileStyle={tileStyle} mapRef={mapRef} dayOffset={dayOffset} onChangeOffset={setDayOffset} focusedNodeId={focusedSpot} />
         </div>
 
         {/* Sidebar */}

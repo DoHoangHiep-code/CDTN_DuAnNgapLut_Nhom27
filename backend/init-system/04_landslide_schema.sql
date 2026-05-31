@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS landslide_grid_nodes (
     lulc_class VARCHAR(50)
 );
 CREATE INDEX IF NOT EXISTS idx_landslide_coords ON landslide_grid_nodes (lat, lon);
+CREATE INDEX IF NOT EXISTS landslide_grid_nodes_lat_lon_func_idx ON landslide_grid_nodes (round(lat::DECIMAL, 5), round(lon::DECIMAL, 5));
 
 -- 2. Bảng Data Động (Thời tiết & AI)
 CREATE TABLE IF NOT EXISTS landslide_predictions (

@@ -69,7 +69,7 @@ export function LandslideNodeSearch({
 
         <input
           id={id}
-          type="search"
+          type="text"
           value={value}
           autoComplete="off"
           onChange={(e) => {

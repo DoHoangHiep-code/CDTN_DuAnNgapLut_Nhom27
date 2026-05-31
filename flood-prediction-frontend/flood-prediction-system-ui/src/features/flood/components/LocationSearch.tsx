@@ -185,7 +185,7 @@ export function LocationSearch({
         {/* Input tìm kiếm */}
         <input
           id={id}
-          type="search"
+          type="text"
           value={value}
           autoComplete="off"
           onChange={(e) => {

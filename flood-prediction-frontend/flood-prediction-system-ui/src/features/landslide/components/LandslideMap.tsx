@@ -1,4 +1,4 @@
-import {
+import React, {
   useCallback, useEffect, useMemo, useRef, useState,
 } from 'react'
 import {
@@ -26,9 +26,9 @@ type RiskKey = keyof typeof RISK_PALETTE
 
 // Tile URLs — dùng chung với MapPage
 const TILE_URLS = {
-  terrain:   'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  streets:   'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  terrain:   'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}&hl=vi',
+  satellite: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=vi',
+  streets:   'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=vi',
 }
 
 // ── Bounding box bao phủ toàn bộ Miền Bắc ────────────────────────────────────
@@ -63,10 +63,12 @@ type ClusterFeature = GeoJSON.Feature<GeoJSON.Point, ClusterProps & { cluster_id
 // ═══════════════════════════════════════════════════════════════════════════════
 function LandslideClustersLayer({
   nodes,
+  focusedNodeId,
   onSelectNode,
   onFlyToCluster,
 }: {
   nodes: LandslideNode[]
+  focusedNodeId?: string | null
   onSelectNode: (n: LandslideNode) => void
   onFlyToCluster: (lat: number, lng: number, zoom: number) => void
 }) {
@@ -175,31 +177,54 @@ function LandslideClustersLayer({
         const radius = nodeRadius(n.prob_landslide)
         const prob = n.prob_landslide ?? 0
 
+        const isFocused = n.node_id === focusedNodeId
+
         return (
-          <CircleMarker
-            key={n.node_id}
-            center={[lat, lng]}
-            radius={radius}
-            pathOptions={{
-              color: palette.stroke,
-              fillColor: palette.fill,
-              weight: view.zoom >= 12 ? 1.5 : 1,
-              opacity: 0.9,
-              fillOpacity: clamp(0.35 + prob * 0.5, 0.35, 0.85),
-            }}
-            eventHandlers={{ click: () => onSelectNode(n) }}
-          >
-            {view.zoom >= 10 && (
-              <Tooltip direction="top" className="fps-map-tooltip" opacity={1}>
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-slate-800 dark:text-slate-100">{n.location_name || n.province || 'Khu vực chưa xác định'}</div>
-                  <div className="text-[10px] text-slate-600 dark:text-slate-300">
-                    {palette.emoji} {palette.text} · {(prob * 100).toFixed(2)}%
-                  </div>
-                </div>
-              </Tooltip>
+          <React.Fragment key={n.node_id}>
+            {/* Nếu đang focus, render thêm 1 Marker bọc ngoài có hiệu ứng Toả sóng (Ping) */}
+            {isFocused && (
+              <Marker
+                position={[lat, lng]}
+                interactive={false}
+                icon={L.divIcon({
+                  className: 'bg-transparent border-none pointer-events-none',
+                  html: `
+                    <div style="width: 48px; height: 48px;" class="relative flex items-center justify-center pointer-events-none">
+                      <div class="absolute inset-0 rounded-full bg-cyan-400 opacity-60 animate-ping" style="animation-duration: 1.5s;"></div>
+                      <div class="absolute inset-2 rounded-full border-2 border-cyan-300"></div>
+                    </div>
+                  `,
+                  iconSize: [48, 48],
+                  iconAnchor: [24, 24],
+                })}
+                zIndexOffset={1000} // Nổi lên trên cùng
+              />
             )}
-          </CircleMarker>
+            
+            <CircleMarker
+              center={[lat, lng]}
+              radius={isFocused ? radius + 4 : radius} // Phóng to một chút nếu được focus
+              pathOptions={{
+                color: isFocused ? '#22d3ee' : palette.stroke, // Viền màu Cyan khi focus
+                fillColor: palette.fill,
+                weight: isFocused ? 3 : (view.zoom >= 12 ? 1.5 : 1),
+                opacity: isFocused ? 1 : 0.9,
+                fillOpacity: isFocused ? 0.9 : clamp(0.35 + prob * 0.5, 0.35, 0.85),
+              }}
+              eventHandlers={{ click: () => onSelectNode(n) }}
+            >
+              {view.zoom >= 10 && (
+                <Tooltip direction="top" className="fps-map-tooltip" opacity={1}>
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-bold text-slate-800 dark:text-slate-100">{n.location_name || n.province || 'Khu vực chưa xác định'}</div>
+                    <div className="text-[10px] text-slate-600 dark:text-slate-300">
+                      {palette.emoji} {palette.text} · {(prob * 100).toFixed(2)}%
+                    </div>
+                  </div>
+                </Tooltip>
+              )}
+            </CircleMarker>
+          </React.Fragment>
         )
       })}
     </>
@@ -395,9 +420,13 @@ interface LandslideMapProps {
   dayOffset?: number
   /** Callback khi người dùng kéo Time Slider */
   onChangeOffset?: (offset: number) => void
+  /** Ẩn các điểm nguy hiểm (cho màn hình weather mini map) */
+  hideDangerPoints?: boolean
+  /** Điểm sạt lở đang được chọn từ Hotspot Card để highlight */
+  focusedNodeId?: string | null
 }
 
-export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, dayOffset = 0, onChangeOffset }: LandslideMapProps) {
+export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, dayOffset = 0, onChangeOffset, hideDangerPoints = false, searchMarker = null, focusedNodeId = null }: LandslideMapProps) {
   const [map, setMap] = useState<L.Map | null>(null)
   const [nodes, setNodes] = useState<LandslideNode[]>([])
   const [isFetching, setIsFetching] = useState(false)
@@ -418,6 +447,7 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, d
 
   // ── Fetch landslide nodes khi bounds thay đổi ─────────────────────────────
   const fetchNodes = useCallback(async (bounds: L.LatLngBounds) => {
+    if (hideDangerPoints) return
     if (abortRef.current) abortRef.current.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -478,7 +508,9 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, d
         center={NORTH_VN_CENTER}
         zoom={NORTH_VN_ZOOM}
         maxZoom={18}
-        scrollWheelZoom
+        scrollWheelZoom={true}
+        dragging={true}
+        zoomControl={true}
         preferCanvas
         className="h-full w-full"
         style={{ minHeight: '520px' }}
@@ -496,16 +528,28 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, d
 
         <FlyToTarget target={flyTarget} />
 
-        <LandslideClustersLayer
-          nodes={nodes}
-          onSelectNode={(n) => {
-            setSelectedNode(n)
-            setFlyTarget({ lat: n.lat, lng: n.lon, zoom: 14 })
-          }}
-          onFlyToCluster={(lat, lng, zoom) =>
-            setFlyTarget({ lat, lng, zoom })
-          }
-        />
+        {!hideDangerPoints && (
+          <LandslideClustersLayer
+            nodes={nodes}
+            focusedNodeId={focusedNodeId}
+            onSelectNode={(n) => {
+              setSelectedNode(n)
+              setFlyTarget({ lat: n.lat, lng: n.lon, zoom: 14 })
+            }}
+            onFlyToCluster={(lat, lng, zoom) =>
+              setFlyTarget({ lat, lng, zoom })
+            }
+          />
+        )}
+
+        {searchMarker && (
+          <Marker position={searchMarker} icon={L.divIcon({
+            className: '',
+            html: `<div style="width:16px;height:16px;border-radius:50%;background:#0ea5e9;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>`,
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
+          })} />
+        )}
 
         <NodePopup node={selectedNode} onClose={() => setSelectedNode(null)} />
       </MapContainer>

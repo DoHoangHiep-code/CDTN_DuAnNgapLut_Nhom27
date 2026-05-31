@@ -21,11 +21,10 @@ import { FloodReportModal } from '../components/FloodReportModal'
 import { FloodWarningCard } from '../components/FloodWarningCard'
 import { useSettings } from '../../../context/SettingsContext'
 
-// Tile URLs cho từng kiểu bản đồ
 const TILE_URLS: Record<string, string> = {
-  streets: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+  streets: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=vi',
+  satellite: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=vi',
+  terrain: 'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}&hl=vi',
 }
 
 const TILE_ATTRIBUTIONS: Record<string, string> = {
@@ -462,7 +461,7 @@ function FloodMapContent() {
           maxLat: b.getNorth(),
           minLng: b.getWest(),
           maxLng: b.getEast(),
-          limit: 2000,  // chỉ nhận điểm ngập (flood_depth_cm > 10) → 2000 điểm vẫn nhẹ
+          limit: 5000,
           offset: dayOffset,
         }, controller.signal)
         const pts: FloodPoint[] = (result?.districts ?? []).map((d) => ({
@@ -532,7 +531,7 @@ function FloodMapContent() {
         <div className="col-span-12 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 lg:col-span-8">
           <div className="relative">
             {/* ── Thanh tìm kiếm nổi trên bản đồ ── */}
-            <div className="absolute top-4 left-4 z-[1000] w-full max-w-sm pointer-events-auto">
+            <div className="absolute top-4 left-4 z-[650] w-full max-w-sm pointer-events-auto">
               <LocationSearch
                 districts={flood.data.districts}
                 placeholder={t('floodMap.searchDistrict')}
@@ -554,7 +553,7 @@ function FloodMapContent() {
             <button
               type="button"
               onClick={handleResetView}
-              className="absolute top-4 right-4 z-[1000] cursor-pointer rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-bold text-slate-800 shadow-sm backdrop-blur hover:bg-white dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100"
+              className="absolute top-4 right-4 z-[650] cursor-pointer rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-bold text-slate-800 shadow-sm backdrop-blur hover:bg-white dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100"
             >
               {t('floodMap.resetView')}
             </button>
@@ -563,7 +562,7 @@ function FloodMapContent() {
             <button
               type="button"
               onClick={() => setReportModalOpen(true)}
-              className="absolute bottom-5 right-4 z-[1000] flex cursor-pointer items-center gap-2 rounded-2xl border border-rose-200 bg-rose-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg backdrop-blur transition hover:bg-rose-700 active:scale-95 dark:border-rose-700"
+              className="absolute bottom-5 right-4 z-[650] flex cursor-pointer items-center gap-2 rounded-2xl border border-rose-200 bg-rose-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg backdrop-blur transition hover:bg-rose-700 active:scale-95 dark:border-rose-700"
             >
               {/* Icon cảnh báo ngập */}
               <span className="text-base leading-none">🚨</span>
@@ -572,14 +571,14 @@ function FloodMapContent() {
 
             {/* ── FloodWarningCard: Bảng dự đoán nổi góc dưới trái ── */}
             <FloodWarningCard
-              lat={mapCenter.lat}
-              lon={mapCenter.lon}
+              lat={selectedNodeData ? (selectedNodeData.position as [number, number])[0] : mapCenter.lat}
+              lon={selectedNodeData ? (selectedNodeData.position as [number, number])[1] : mapCenter.lon}
               dayOffset={dayOffset}
             />
 
             {/* ── Loading overlay khi đang fetch BBox ── */}
             {isFetchingBbox && (
-              <div className="absolute top-4 left-1/2 z-[1000] -translate-x-1/2 flex items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-md backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
+              <div className="absolute top-4 left-1/2 z-[650] -translate-x-1/2 flex items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-md backdrop-blur dark:bg-slate-900/90 dark:text-slate-200">
                 <span className="h-3 w-3 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
                 Đang tải dữ liệu khu vực…
               </div>
