@@ -41,19 +41,13 @@ const RISK_LEVELS = {
   DANGER:  { label: 'DANGER',  vi: 'Nguy hiểm',    min: 0.65, max: 1.01 },
 }
 
-/**
- * Phân loại rủi ro dựa vào xác suất.
- * WARNING band được định nghĩa quanh optimal_threshold ±15%.
- *
- * @param {number} probability
- * @returns {'SAFE' | 'WARNING' | 'DANGER'}
- */
 function classifyRisk(probability) {
-  // Vì optimal_threshold có thể rất nhỏ (vd: 0.09), 
-  // nếu trừ cứng 0.15 thì ngưỡng dưới (low) sẽ <= 0, dẫn đến mất trạng thái SAFE.
-  // Thay vào đó, ta chia tỷ lệ dựa trên optimal_threshold:
-  const dangerThreshold = optimal_threshold;         // >= Ngưỡng tối ưu -> DANGER
-  const warningThreshold = optimal_threshold * 0.5;  // >= 50% Ngưỡng tối ưu -> WARNING
+  // Dựa trên phân phối thực tế (Max ~0.5, Median ~0.18), ngưỡng 0.09 của mô hình
+  // là quá thấp (thuần khoa học), dẫn đến báo đỏ 30-50% số điểm (gây cảm giác "ảo").
+  // Cập nhật lại ngưỡng thực dụng cho UI: 
+  // DANGER >= 0.26 (Top 10%), WARNING >= 0.20 (Top 25%).
+  const dangerThreshold = 0.26;         // >= 26% -> DANGER
+  const warningThreshold = 0.20;        // >= 20% -> WARNING
   
   if (probability >= dangerThreshold)   return 'DANGER'
   if (probability >= warningThreshold)  return 'WARNING'

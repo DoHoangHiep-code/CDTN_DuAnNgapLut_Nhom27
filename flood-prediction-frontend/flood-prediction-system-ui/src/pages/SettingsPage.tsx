@@ -229,23 +229,7 @@ export function SettingsPage() {
               </div>
             </div>
 
-            {/* ── Thông báo ── */}
-            <div className="space-y-4">
-              <SectionHeader icon={<Bell className="h-4 w-4 text-amber-500" />} title={t('settings.notifications')} />
-              <div className={cn("overflow-hidden rounded-3xl border border-slate-200/60 bg-white/60 shadow-lg backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-900/60 divide-y divide-slate-200/50 dark:divide-slate-800/50", alertsLoading && 'pointer-events-none opacity-50')}>
-                <ToggleRow
-                  icon={floodAlertsEnabled
-                    ? <Bell className="h-6 w-6 text-sky-500" />
-                    : <BellOff className="h-6 w-6 text-slate-400" />}
-                  iconBg={floodAlertsEnabled ? 'bg-sky-100/80 dark:bg-sky-900/40' : 'bg-slate-100 dark:bg-slate-800/50'}
-                  title={t('settings.floodAlerts')}
-                  description={alertsLoading ? 'Đang cập nhật...' : t('settings.floodAlertsHint')}
-                  checked={floodAlertsEnabled}
-                  onChange={handleAlertToggle}
-                  active={floodAlertsEnabled}
-                />
-              </div>
-            </div>
+
           </div>
 
           {/* --- CỘT PHẢI --- */}

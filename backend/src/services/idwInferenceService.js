@@ -20,29 +20,59 @@
 const { sequelize }           = require('../db/sequelize')
 const { getWeatherByCoords }  = require('./OpenWeatherService')
 
+const stationRepNodeCache = new Map()
+
 // ─── Lấy thời tiết mới nhất của danh sách station IDs từ weather_measurements ─
 async function getLatestStationWeather(stationIds) {
   if (!stationIds || !stationIds.length) return new Map()
 
-  // Lấy bản ghi mới nhất của mỗi station (dựa trên node_id = station_id trong bảng weather_measurements)
-  // Trạm ảo được lưu theo node_id = station_id (đặc thù của Phase 3 WeatherCron)
+  // 1. Fetch missing repNodeIds
+  const missing = stationIds.filter(id => !stationRepNodeCache.has(id))
+  if (missing.length > 0) {
+    const [rows] = await sequelize.query(`
+      SELECT DISTINCT ON (weather_station_id) node_id, weather_station_id
+      FROM grid_nodes
+      WHERE weather_station_id = ANY(:ids)
+      ORDER BY weather_station_id, node_id ASC
+    `, { replacements: { ids: missing } })
+    for (const r of rows) {
+      stationRepNodeCache.set(Number(r.weather_station_id), Number(r.node_id))
+    }
+  }
+
+  // 2. Build map and array of repNodeIds
+  const repNodeToStationMap = new Map()
+  const repNodeIds = []
+  for (const sid of stationIds) {
+    const rid = stationRepNodeCache.get(sid)
+    if (rid != null) {
+      repNodeIds.push(rid)
+      repNodeToStationMap.set(rid, sid)
+    }
+  }
+
+  // 3. Query weather_measurements using repNodeIds
   const [rows] = await sequelize.query(`
     SELECT DISTINCT ON (node_id) node_id, rain_1h, clouds, temp, rhum
     FROM weather_measurements
     WHERE node_id = ANY(:ids)
-    ORDER BY node_id, time DESC
+    ORDER BY node_id, ABS(EXTRACT(EPOCH FROM (time - NOW()))) ASC
   `, {
-    replacements: { ids: stationIds },
+    replacements: { ids: repNodeIds },
   })
 
+  // 4. Map back to stationId
   const map = new Map()
   for (const r of rows) {
-    map.set(Number(r.node_id), {
-      rain_1h: parseFloat(r.rain_1h ?? r.prcp ?? 0),
-      clouds:  parseInt(r.clouds ?? 0),
-      temp:    parseFloat(r.temp ?? 0),
-      rhum:    parseFloat(r.rhum ?? 0),
-    })
+    const stationId = repNodeToStationMap.get(Number(r.node_id))
+    if (stationId) {
+      map.set(stationId, {
+        rain_1h: parseFloat(r.rain_1h ?? r.prcp ?? 0),
+        clouds:  parseInt(r.clouds ?? 0),
+        temp:    parseFloat(r.temp ?? 0),
+        rhum:    parseFloat(r.rhum ?? 0),
+      })
+    }
   }
   return map
 }

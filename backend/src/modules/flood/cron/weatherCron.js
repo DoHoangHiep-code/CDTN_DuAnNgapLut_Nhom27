@@ -468,8 +468,11 @@ async function processStationNodes(stationNodes, sharedFeatures, stationName) {
     if (!meta || !result || result.flood_depth_cm == null) continue
     let depthCm   = Number(result.flood_depth_cm)
     
-    // Áp dụng logic No-Rain Override: nếu không có mưa thì độ ngập = 0
-    if (meta.prcp === 0 && meta.prcp_3h === 0 && meta.prcp_6h === 0 && meta.prcp_12h === 0 && meta.prcp_24h === 0) {
+    // Áp dụng logic No-Rain Override để chống "ảo giác" của AI
+    // Chắc chắn KHÔNG ngập nếu:
+    // 1. Trời không mưa (prcp < 0.5) VÀ tổng mưa 24h qua < 5mm (ít mưa gần đây)
+    // Hoặc 2. Trời đang nắng nóng (temp > 28) và mưa không đáng kể (prcp < 1)
+    if ((meta.prcp < 0.5 && meta.prcp_24h < 5) || (meta.temp > 28 && meta.prcp < 1)) {
       depthCm = 0;
     }
 
