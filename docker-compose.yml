@@ -1,0 +1,27 @@
+services:
+
+  backend:
+    build:
+      context: ./backend
+    container_name: flood-backend
+    ports:
+      - "3002:3002"
+    env_file:
+      - ./backend/.env
+
+  ai-service:
+    build:
+      context: ./ai_service
+    container_name: flood-ai
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./flood-prediction-frontend/flood-prediction-system-ui
+    container_name: flood-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+      - ai-service
