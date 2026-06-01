@@ -8,17 +8,6 @@ class MapRepository {
     this.sequelize = sequelize
   }
 
-  async _withStatementTimeout(ms, fn) {
-    return this.sequelize.transaction(async (t) => {
-      await this.sequelize.query(`SET LOCAL statement_timeout = ${Number(ms) | 0};`, { transaction: t })
-      return fn(t)
-    })
-  }
-
-  /**
-   * Returns a GeoJSON FeatureCollection for CURRENT local hour (Asia/Ho_Chi_Minh).
-   * GeoJSON is built in SQL (no JS mapping).
-   */
   async getCurrentFloodMapFeatureCollection() {
     const tz = 'Asia/Ho_Chi_Minh'
     const sql = `
@@ -49,13 +38,13 @@ class MapRepository {
       FROM features;
     `
 
-    return this._withStatementTimeout(10000, (t) =>
-      this.sequelize.query(sql, {
-        type: QueryTypes.SELECT,
-        replacements: { tz },
-        transaction: t,
-      }).then((rows) => rows?.[0]?.geojson ?? { type: 'FeatureCollection', features: [] }),
-    )
+    return this.sequelize.query(sql, {
+      type: QueryTypes.SELECT,
+      replacements: { tz },
+    }).then((rows) => rows?.[0]?.geojson ?? { type: 'FeatureCollection', features: [] }).catch(err => {
+      console.error('MapRepository Error:', err.message);
+      return { type: 'FeatureCollection', features: [] };
+    });
   }
 }
 

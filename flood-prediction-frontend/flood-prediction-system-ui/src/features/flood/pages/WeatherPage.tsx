@@ -463,17 +463,6 @@ function RiskOverview({ riskSummary }: { riskSummary?: { safe: number, medium: n
   )
 }
 
-// ── FloodDistrict stub (dùng cho props empty) ─────────────────────────
-type FloodDistrict = {
-  id: string
-  name: string
-  risk: 'safe' | 'medium' | 'high' | 'severe'
-  predictedRainfallMm: number
-  flood_depth_cm: number
-  polygon: [number, number][]
-  updatedAtIso: string
-}
-
 // ── FloodWeatherPage ───────────────────────────────────────────────────────
 function FloodWeatherPage() {
   const { t } = useTranslation()
@@ -516,7 +505,8 @@ function FloodWeatherPage() {
   )
 
   const floodData = useAsync(() => getFloodPrediction(), [])
-  const dashboardData = useAsync(() => getDashboard(), [])
+  const dashboardParams = useMemo(() => ({ search: selectedLocation?.name || '' }), [selectedLocation?.name])
+  const dashboardData = useAsync(() => getDashboard(dashboardParams), [dashboardParams])
 
   // ── Handle geo-search result ──
   const handleGeoResult = useCallback((r: NominatimResult) => {
@@ -584,7 +574,7 @@ function FloodWeatherPage() {
   const currentCfg = KIND_CONFIG[currentKind]
   const CurrentIcon = currentCfg.Icon
 
-  const locationLabel = selectedLocation?.name ?? current.locationName
+  const locationLabel = selectedLocation?.name ?? 'Thành phố Hà Nội'
 
   return (
     <div className="space-y-5">

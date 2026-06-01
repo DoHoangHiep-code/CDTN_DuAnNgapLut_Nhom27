@@ -36,7 +36,10 @@ router.get('/nodes/:id/current', async (req, res, next) => {
       JOIN grid_nodes gn ON gn.node_id = fp.node_id
       WHERE fp.node_id = :nodeId
         AND fp.date_only = CURRENT_DATE + (:offset || ' days')::interval
-      ORDER BY fp.flood_depth_cm DESC, fp.time ASC
+      ORDER BY 
+        CASE WHEN fp.flood_depth_cm > 0 THEN 0 ELSE 1 END ASC,
+        fp.flood_depth_cm DESC, 
+        ABS(EXTRACT(EPOCH FROM (fp.time - NOW()))) ASC
       LIMIT 1
     `, { replacements: { nodeId, offset } })
 
@@ -55,15 +58,25 @@ router.get('/nodes/:id/current', async (req, res, next) => {
     const locationName = nodeRows[0].location_name
     let weatherData = null
 
-    // 3. Lấy thời tiết thật từ trạm (weather_station_id -> node_id trong weather_measurements)
+    // 3. Lấy thời tiết thật từ trạm (chú ý weather_measurements lưu theo repNodeId)
     if (stationId) {
+      const [repRows] = await sequelize.query(`
+        SELECT node_id
+        FROM grid_nodes
+        WHERE weather_station_id = :stationId
+        ORDER BY node_id ASC
+        LIMIT 1
+      `, { replacements: { stationId } })
+      const repNodeId = repRows && repRows.length > 0 ? repRows[0].node_id : stationId;
+
+      const targetTime = predRows && predRows.length > 0 && predRows[0].time ? new Date(predRows[0].time) : new Date();
       const [wxRows] = await sequelize.query(`
         SELECT temp, clouds, prcp, rhum, time
         FROM weather_measurements
-        WHERE node_id = :stationId
-        ORDER BY time DESC
+        WHERE node_id = :repNodeId
+        ORDER BY ABS(EXTRACT(EPOCH FROM (time - :targetTime))) ASC
         LIMIT 1
-      `, { replacements: { stationId } })
+      `, { replacements: { repNodeId, targetTime } })
       
       if (wxRows && wxRows.length > 0) {
         weatherData = wxRows[0]
@@ -158,20 +171,15 @@ router.get('/flood-prediction/by-location', async (req, res, next) => {
     let floodDepthCm = aiResult?.flood_depth_cm ?? 0
     let { label, warningText } = depthCmToWarning(floodDepthCm)
 
-    // ─── NO-RAIN OVERRIDE (logic thực tế) ─────────────────────────────────
-    // Nếu OWM xác nhận KHÔNG có mưa (rain1h = 0) VÀ độ ẩm < 90%:
+    // ─── NO-RAIN OVERRIDE (logic thực tế đồng bộ với weatherCron) ─────────
+    // Nếu OWM xác nhận mưa rất nhỏ hoặc trời nắng nóng không mưa:
     //   → Force label = 0 (An toàn) bất kể model AI dự đoán gì.
-    // Lý do: CatBoost dự đoán depth dựa trên feature địa lý (impervious_ratio
-    // cao, elevation thấp ở Hà Nội) → cho depth > ngưỡng dù không có mưa.
-    // Ngưỡng 90%: Hà Nội thường đạt 80-90% humidity khi khô ráo.
-    // Override chỉ áp dụng khi CÓ live weather (không áp dụng khi OWM lỗi).
-    const NO_RAIN_HUMIDITY_THRESHOLD = 90 // %
-    const humidity = weatherData?.humidity ?? 100
-    const noRainCondition = weatherData !== null && prcp === 0 && humidity < NO_RAIN_HUMIDITY_THRESHOLD
+    const temp = weatherData?.temp ?? 28
+    const noRainCondition = weatherData !== null && ((prcp < 0.5) || (temp > 28 && prcp < 1))
 
     if (noRainCondition && label === 1) {
       console.info(
-        `[FloodPrediction/by-location] No-rain override: rain=0mm, humidity=${humidity}% → An toàn (AI raw depth=${floodDepthCm.toFixed(1)}cm)`
+        `[FloodPrediction/by-location] No-rain override: prcp=${prcp}mm, temp=${temp}°C → An toàn (AI raw depth=${floodDepthCm.toFixed(1)}cm)`
       )
       label = 0
       floodDepthCm = 0
@@ -269,7 +277,10 @@ router.get('/forecasts/latest', async (req, res, next) => {
        FROM flood_predictions fp
        WHERE fp.node_id = :nodeId
          AND fp.date_only = CURRENT_DATE + (:offset || ' days')::interval
-       ORDER BY fp.flood_depth_cm DESC, fp.time ASC
+       ORDER BY 
+         CASE WHEN fp.flood_depth_cm > 0 THEN 0 ELSE 1 END ASC,
+         fp.flood_depth_cm DESC, 
+         ABS(EXTRACT(EPOCH FROM (fp.time - NOW()))) ASC
        LIMIT 1`,
       { replacements: { nodeId, offset } }
     )

@@ -39,11 +39,13 @@ class DashboardRepository {
     }
     const rows = await this.sequelize.query(
       `SELECT node_id FROM grid_nodes
-       WHERE location_name = :pattern`,
-      { type: QueryTypes.SELECT, replacements: { pattern: search.trim() } },
+       WHERE location_name ILIKE :pattern`,
+      { type: QueryTypes.SELECT, replacements: { pattern: `%${search.trim()}%` } },
     )
     if (rows.length === 0) {
-      return { isGlobal: true, predictionNodeIds: null, weatherNodeIds: null }
+      // If the user typed a location but we have no grid nodes matching it,
+      // return empty results instead of falling back to all 53,300 global nodes.
+      return { isGlobal: false, predictionNodeIds: [-1], weatherNodeIds: [-1] }
     }
     const predictionNodeIds = rows.map((r) => Number(r.node_id))
 
@@ -176,6 +178,7 @@ class DashboardRepository {
           END AS risk_level,
           COUNT(*)::int AS count
         FROM mv_latest_flood_predictions
+        WHERE date_only = CURRENT_DATE
         GROUP BY 1;
       `
       return this.sequelize.query(sql, { type: QueryTypes.SELECT })
