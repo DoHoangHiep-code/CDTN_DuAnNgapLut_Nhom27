@@ -350,7 +350,7 @@ async function processNodeWithOWMForecast(node, owmPoints, presHistoryMap) {
  * Tính sẵn mảng shared weather features cho toàn bộ owmPoints của 1 trạm.
  * Kết quả này dùng chung cho tất cả nodes trong trạm — tránh tính lại 53.000 lần.
  */
-function buildSharedWeatherFeatures(owmPoints, presHistoryMap) {
+function buildSharedWeatherFeatures(owmPoints, historyMap) {
   const rainyMonths = [5, 6, 7, 8, 9, 10]
   const stepSizeH   = owmPoints.length >= 48 ? 1 : 3
 
@@ -381,9 +381,9 @@ function buildSharedWeatherFeatures(owmPoints, presHistoryMap) {
     const pastInOwm = owmPoints.find(op => op.timeUtc.getTime() === time24hAgo)
     if (pastInOwm) {
       pres24hAgo = pastInOwm.pressure
-    } else if (presHistoryMap) {
-      for (const [tMs, pastP] of presHistoryMap.entries()) {
-        if (Math.abs(tMs - time24hAgo) <= 3600000) { pres24hAgo = pastP; break }
+    } else if (historyMap) {
+      for (const [tMs, pastData] of historyMap.entries()) {
+        if (Math.abs(tMs - time24hAgo) <= 3600000) { pres24hAgo = pastData.pres; break }
       }
     }
     const pressure_change_24h = pres24hAgo ? Number((pres - pres24hAgo).toFixed(2)) : 0
@@ -392,7 +392,30 @@ function buildSharedWeatherFeatures(owmPoints, presHistoryMap) {
     const rain = (targetHours) => {
       const steps = Math.ceil(targetHours / stepSizeH)
       let total = 0
-      for (let j = 0; j < steps && i - j >= 0; j++) total += owmPoints[i - j]?.rain3h ?? 0
+      
+      // 1. Cộng dồn lượng mưa từ các mốc TƯƠNG LAI (trong mảng owmPoints)
+      for (let j = 0; j < steps && i - j >= 0; j++) {
+        total += owmPoints[i - j]?.rain3h ?? 0
+      }
+      
+      // 2. Nếu chưa đủ mốc (tức là i < steps - 1), cần lấy thêm từ QUÁ KHỨ (DB)
+      let remainingSteps = steps - (i + 1)
+      if (remainingSteps > 0 && historyMap) {
+        let currentTimeMs = p.timeUtc.getTime()
+        for (let j = 0; j < remainingSteps; j++) {
+          currentTimeMs -= (stepSizeH * 3600000)
+          
+          // Tìm record quá khứ gần với currentTimeMs nhất (sai số 1 tiếng)
+          let pastPrcp = 0
+          for (const [tMs, pastData] of historyMap.entries()) {
+            if (Math.abs(tMs - currentTimeMs) <= 3600000) { 
+              pastPrcp = pastData.prcp || 0
+              break 
+            }
+          }
+          total += pastPrcp
+        }
+      }
       return total
     }
     const prcp_3h  = rain(3)
@@ -469,10 +492,9 @@ async function processStationNodes(stationNodes, sharedFeatures, stationName) {
     let depthCm   = Number(result.flood_depth_cm)
     
     // Áp dụng logic No-Rain Override để chống "ảo giác" của AI
-    // Chắc chắn KHÔNG ngập nếu:
-    // 1. Trời không mưa (prcp < 0.5) VÀ tổng mưa 24h qua < 5mm (ít mưa gần đây)
-    // Hoặc 2. Trời đang nắng nóng (temp > 28) và mưa không đáng kể (prcp < 1)
-    if ((meta.prcp < 0.5 && meta.prcp_24h < 5) || (meta.temp > 28 && meta.prcp < 1)) {
+    // Chắc chắn KHÔNG ngập nếu mưa quá nhỏ:
+    // - Lượng mưa 3h <= 10mm VÀ mưa 12h <= 25mm VÀ mưa hiện tại <= 5mm
+    if (meta.prcp_3h <= 10 && meta.prcp_12h <= 25 && meta.prcp <= 5) {
       depthCm = 0;
     }
 
@@ -647,21 +669,21 @@ async function runWeatherCron() {
 
     // Pre-fetch nodes TRƯỚC để có valid node_id cho weather_measurements
 
-    // Pre-fetch tất cả nodes và presHistory trong 1 query to trước vòng lặp
+    // Pre-fetch tất cả nodes và history trong 1 query to trước vòng lặp
     const allStationIds   = stations.map(s => s.id)
-    const [presHistoryRows] = await sequelize.query(`
-      SELECT DISTINCT ON (node_id) node_id, pres, time
+    const [historyRows] = await sequelize.query(`
+      SELECT node_id, pres, prcp, time
       FROM weather_measurements
       WHERE node_id = ANY(:ids) AND time >= NOW() - INTERVAL '48 hours'
       ORDER BY node_id, time DESC
     `, { replacements: { ids: allStationIds } })
 
-    // Map stationId → presHistoryMap
-    const stationPresMap = new Map()
-    for (const r of presHistoryRows) {
+    // Map stationId → historyMap
+    const stationHistoryMap = new Map()
+    for (const r of historyRows) {
       const sid = Number(r.node_id)
-      if (!stationPresMap.has(sid)) stationPresMap.set(sid, new Map())
-      stationPresMap.get(sid).set(new Date(r.time).getTime(), Number(r.pres))
+      if (!stationHistoryMap.has(sid)) stationHistoryMap.set(sid, new Map())
+      stationHistoryMap.get(sid).set(new Date(r.time).getTime(), { pres: Number(r.pres), prcp: Number(r.prcp) })
     }
 
     // Pre-fetch tất cả nodes 1 lần
@@ -679,7 +701,7 @@ async function runWeatherCron() {
       if (!nodesByStation.has(sid)) nodesByStation.set(sid, [])
       nodesByStation.get(sid).push(n)
     }
-    console.log(`[Phase 2] Đã load ${allNodeRows.length.toLocaleString('vi-VN')} nodes và ${presHistoryRows.length} pressure records.`)
+    console.log(`[Phase 2] Đã load ${allNodeRows.length.toLocaleString('vi-VN')} nodes và ${historyRows.length} history records.`)
 
     // ── Phase 1.5: Ghi weather_measurements (101 trạm × 96h = 9.696 records) ────────
     // Dùng node_id của node đầu tiên trong cluster (valid FK vào grid_nodes)
@@ -693,34 +715,35 @@ async function runWeatherCron() {
       if (!clusterNodes || !clusterNodes.length) continue
       // Dùng node đầu tiên của cluster làm representative (node_id hợp lệ với FK)
       const repNodeId = clusterNodes[0].node_id
-      for (const p of owmPts) {
-        const ictMs  = p.timeUtc.getTime() + 7 * 3600 * 1000
-        const dt     = new Date(ictMs)
-        const month  = dt.getMonth() + 1
-        const hour   = dt.getHours()
-        const date_only = dt.toISOString().slice(0, 10)
+      // Dùng sharedFeatures để tính đúng prcp_12h (có history) thay vì gán mù p.rain3h
+      const historyMap = stationHistoryMap.get(Number(station.id)) ?? new Map()
+      const sharedFeatures = buildSharedWeatherFeatures(owmPts, historyMap)
+      
+      for (const sf of sharedFeatures) {
         stationWeatherRecords.push({
           node_id:             repNodeId,
-          time:                p.timeUtc,
-          date_only, month, hour,
-          rainy_season_flag:   rainyMonths.includes(month),
-          temp:                p.temp,
-          rhum:                p.humidity,
-          clouds:              p.clouds,
-          prcp:                p.rain3h,
-          prcp_3h:             p.rain3h,
-          prcp_6h:             p.rain3h,
-          prcp_12h:            p.rain3h,
-          prcp_24h:            p.rain3h,
-          wspd:                p.windSpeed,
-          wdir:                p.windDeg,
-          pres:                p.pressure,
-          pressure_change_24h: 0,
-          max_prcp_3h:         p.rain3h,
-          max_prcp_6h:         p.rain3h,
-          max_prcp_12h:        p.rain3h,
-          visibility_km:       p.visibility != null ? p.visibility / 1000 : null,
-          feels_like_c:        p.feels_like,
+          time:                sf.meta.timeUtc,
+          date_only:           sf.meta.date_only, 
+          month:               sf.meta.month, 
+          hour:                sf.meta.hour,
+          rainy_season_flag:   sf.meta.rainy_season_flag,
+          temp:                sf.meta.temp,
+          rhum:                sf.meta.rhum,
+          clouds:              sf.meta.clouds,
+          prcp:                sf.meta.prcp,
+          prcp_3h:             sf.meta.prcp_3h,
+          prcp_6h:             sf.meta.prcp_6h,
+          prcp_12h:            sf.meta.prcp_12h,
+          prcp_24h:            sf.meta.prcp_24h,
+          wspd:                sf.meta.wspd,
+          wdir:                sf.meta.wdir,
+          pres:                sf.meta.pres,
+          pressure_change_24h: sf.meta.pressure_change_24h,
+          max_prcp_3h:         sf.meta.prcp_3h,
+          max_prcp_6h:         sf.meta.prcp_6h,
+          max_prcp_12h:        sf.meta.prcp_12h,
+          visibility_km:       sf.meta.visibility_km,
+          feels_like_c:        sf.meta.feels_like_c,
         })
       }
     }
@@ -745,8 +768,8 @@ async function runWeatherCron() {
           const stationNodes = nodesByStation.get(Number(station.id)) ?? []
           if (!stationNodes.length) return { predictionRecords: [] }
 
-          const presHistoryMap = stationPresMap.get(Number(station.id)) ?? new Map()
-          const sharedFeatures = buildSharedWeatherFeatures(owmPoints, presHistoryMap)
+          const historyMap = stationHistoryMap.get(Number(station.id)) ?? new Map()
+          const sharedFeatures = buildSharedWeatherFeatures(owmPoints, historyMap)
           const result         = await processStationNodes(stationNodes, sharedFeatures, station.name)
           totalNodesProcessed += stationNodes.length
           return result
