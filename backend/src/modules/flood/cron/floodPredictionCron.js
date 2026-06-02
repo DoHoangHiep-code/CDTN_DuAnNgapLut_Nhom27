@@ -178,23 +178,6 @@ async function processChunk(chunk, nodeIds, chunkIndex, totalChunks) {
   // Bulk upsert
   try {
     const predictTime = new Date();
-    
-    // Áp dụng logic No-Rain Override: nếu không có mưa thì độ ngập = 0
-    for (let j = 0; j < predictions.length; j++) {
-      const features = chunk[j];
-      if (
-        features && 
-        features.prcp === 0 && 
-        features.prcp_3h === 0 && 
-        features.prcp_6h === 0 && 
-        features.prcp_12h === 0 && 
-        features.prcp_24h === 0
-      ) {
-         predictions[j].flood_depth_cm = 0;
-         predictions[j].risk_level = 'safe';
-         predictions[j].explanation = 'Không có mưa trong 24h qua, khu vực hiện đang an toàn.';
-      }
-    }
 
     await bulkUpsertChunk(nodeIds, predictions, predictTime);
     return { success: nodeIds.length, error: 0 };

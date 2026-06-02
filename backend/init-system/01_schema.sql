@@ -191,7 +191,12 @@ SELECT DISTINCT ON (node_id, date_only)
   explanation, date_only, month, hour, rainy_season_flag
 FROM flood_predictions
 WHERE time >= date_trunc('day', NOW()) - INTERVAL '1 day'
-ORDER BY node_id, date_only, flood_depth_cm DESC, time ASC;
+ORDER BY 
+  node_id, 
+  date_only, 
+  CASE WHEN date_only = CURRENT_DATE THEN ABS(EXTRACT(EPOCH FROM (time - NOW()))) ELSE 0 END ASC,
+  flood_depth_cm DESC, 
+  time ASC;
 
 CREATE UNIQUE INDEX IF NOT EXISTS mv_latest_flood_predictions_pkey ON mv_latest_flood_predictions (prediction_id);
 

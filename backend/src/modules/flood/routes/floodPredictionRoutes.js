@@ -181,32 +181,8 @@ router.get('/flood-prediction/by-location', async (req, res, next) => {
     const aiResult = await predictionService._callAI(features)
 
     // Bước 4: Chuyển depth_cm → binary label + warning text
-    // Dùng let vì có thể bị override bởi no-rain logic bên dưới
     let floodDepthCm = aiResult?.flood_depth_cm ?? 0
     let { label, warningText } = depthCmToWarning(floodDepthCm)
-
-    // ─── NO-RAIN OVERRIDE (logic thực tế) ─────────────────────────────────
-    // Nếu OWM xác nhận KHÔNG có mưa (rain1h = 0) VÀ độ ẩm < 90%:
-    //   → Force label = 0 (An toàn) bất kể model AI dự đoán gì.
-    // Lý do: CatBoost dự đoán depth dựa trên feature địa lý (impervious_ratio
-    // cao, elevation thấp ở Hà Nội) → cho depth > ngưỡng dù không có mưa.
-    // Ngưỡng 90%: Hà Nội thường đạt 80-90% humidity khi khô ráo.
-    // Override chỉ áp dụng khi CÓ live weather (không áp dụng khi OWM lỗi).
-    const NO_RAIN_HUMIDITY_THRESHOLD = 90 // %
-    const humidity = weatherData?.humidity ?? 100
-    
-    // For legacy route, we can only check prcp since we don't have accumulated rain from OWM.
-    const noRainCondition = weatherData !== null && prcp === 0 && humidity < NO_RAIN_HUMIDITY_THRESHOLD
-
-    if (noRainCondition && label === 1) {
-      console.info(
-        `[FloodPrediction/by-location] No-rain override: rain=0mm, humidity=${humidity}% → An toàn (AI raw depth=${floodDepthCm.toFixed(1)}cm)`
-      )
-      label = 0
-      floodDepthCm = 0
-      warningText = 'An toàn'
-    }
-    // ──────────────────────────────────────────────────────────────────────
 
     return res.status(200).json({
       success: true,
@@ -353,13 +329,6 @@ router.get('/forecasts/latest', cacheResponse(30 * 60, 'flood_api'), async (req,
       let floodDepthCm = aiResult?.flood_depth_cm ?? 0
       let { label, warningText } = depthCmToWarning(floodDepthCm)
       
-      const noRainOverride = prcp === 0 && prcp3 === 0 && prcp6 === 0 && prcp12 === 0 && (weather?.rhum ?? 70) < 90 && label === 1
-      if (noRainOverride) {
-        floodDepthCm = 0
-        label = 0
-        warningText = 'An toàn'
-      }
-      
       const riskLevel = floodDepthCm < 15 ? 'safe'
         : floodDepthCm < 30 ? 'medium'
         : floodDepthCm < 60 ? 'high' : 'severe'
@@ -407,16 +376,10 @@ router.get('/forecasts/latest', cacheResponse(30 * 60, 'flood_api'), async (req,
     const prcp24 = weather?.prcp_24h ?? 0
     const rhum   = weather?.rhum     ?? 70
 
-    // Heuristic: Không có mưa tích lũy -> không thể ngập (fix false positives)
-    const isNoRain = prcp === 0 && prcp3 === 0 && prcp6 === 0 && prcp12 === 0
-    if (isNoRain && floodDepthCm > 0) {
-      floodDepthCm = 0
-      label = 0
-      warningText = 'An toàn'
-      risk_level = 'safe'
-      explanation = `[An toàn] Không có mưa. Hệ thống dự báo an toàn. Nhiệt độ ${weather?.temp ?? 0}°C.`
-    }
-
+    // Đã xóa Heuristic (isNoRain) ở đây vì cronjob (weatherCron / floodPredictionCron) 
+    // đã áp dụng logic chống "ảo giác" trước khi lưu vào DB.
+    // Nếu áp dụng lại ở đây với dữ liệu IDW (thiếu prcp_12h) sẽ gây ra lỗi "An toàn" ảo.
+    
     return res.status(200).json({
       success: true,
       source: 'database',
