@@ -463,11 +463,15 @@ async function runLandslideJob() {
   console.log(`${'═'.repeat(65)}\n`)
 
   try {
+    const isPartialSuccess = totalError > 0
+    const logPrefix = isPartialSuccess ? 'WARN: Cronjob Partial Success' : 'Cronjob OK'
+    const eventType = isPartialSuccess ? 'CRONJOB_LANDSLIDE_WARN' : 'CRONJOB_LANDSLIDE'
+
     await SystemLog.create({
       admin_id:     null,
-      event_type:   'CRONJOB_LANDSLIDE',
+      event_type:   eventType,
       event_source: 'modules/landslide/cron/landslideCron (ONNX in-process)',
-      message:      `Cronjob OK: total_nodes=${totalNodes}, success=${totalSuccess}, error=${totalError}, danger=${dangerCount}, warning=${warningCount}, elapsed=${elapsed}s`,
+      message:      `${logPrefix}: total_nodes=${totalNodes}, success=${totalSuccess}, error=${totalError}, danger=${dangerCount}, warning=${warningCount}, elapsed=${elapsed}s`,
       timestamp:    new Date(),
     })
   } catch (logErr) {
