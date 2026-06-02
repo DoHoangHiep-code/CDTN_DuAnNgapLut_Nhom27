@@ -201,10 +201,13 @@ export function AiMonitorLogs() {
       const mappedLogs: LogEntry[] = data.map((d: any) => {
         const typeStr = (d.event_type || '').toUpperCase()
         const msgStr = (d.message || '').toUpperCase()
+        
+        // Loại bỏ các chỉ số 'ERROR=...' và 'WARNING=...' để không bị nhận diện nhầm thành log lỗi
+        const cleanMsgForLevel = msgStr.replace(/ERROR\s*=\s*\d+/g, '').replace(/WARNING\s*=\s*\d+/g, '')
 
         let level: LogLevel = 'INFO'
-        if (typeStr.includes('ERR') || msgStr.includes('ERROR') || msgStr.includes('FAIL')) level = 'ERROR'
-        else if (typeStr.includes('WARN') || msgStr.includes('WARN')) level = 'WARNING'
+        if (typeStr.includes('ERR') || cleanMsgForLevel.includes('ERROR') || cleanMsgForLevel.includes('FAIL')) level = 'ERROR'
+        else if (typeStr.includes('WARN') || cleanMsgForLevel.includes('WARN')) level = 'WARNING'
         else if (typeStr.includes('DEBUG')) level = 'DEBUG'
 
         const date = new Date(d.timestamp)
