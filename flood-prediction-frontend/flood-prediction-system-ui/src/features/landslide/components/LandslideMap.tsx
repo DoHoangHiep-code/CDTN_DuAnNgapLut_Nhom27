@@ -73,7 +73,6 @@ function LandslideClustersLayer({
   onFlyToCluster: (lat: number, lng: number, zoom: number) => void
 }) {
   const map = useMap()
-  const indexRef = useRef<Supercluster<NodePoint, ClusterProps> | null>(null)
 
   const [view, setView] = useState(() => {
     const b = map.getBounds()
@@ -424,6 +423,8 @@ interface LandslideMapProps {
   hideDangerPoints?: boolean
   /** Điểm sạt lở đang được chọn từ Hotspot Card để highlight */
   focusedNodeId?: string | null
+  /** Marker tọa độ tìm kiếm */
+  searchMarker?: [number, number] | null
 }
 
 export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, dayOffset = 0, onChangeOffset, hideDangerPoints = false, searchMarker = null, focusedNodeId = null }: LandslideMapProps) {

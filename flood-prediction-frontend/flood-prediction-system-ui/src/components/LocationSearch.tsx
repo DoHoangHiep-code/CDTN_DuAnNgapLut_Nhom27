@@ -42,7 +42,6 @@ export type LocationSearchProps = {
 //   Tây: 105.28  Bắc: 21.39  Đông: 106.02  Nam: 20.81
 // ───────────────────────────────────────────────────────────────
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
-const HANOI_VIEWBOX = '105.28,21.39,106.02,20.81'
 
 async function fetchGeoResults(query: string): Promise<NominatimResult[]> {
   // Thêm header User-Agent theo yêu cầu của Nominatim Usage Policy
