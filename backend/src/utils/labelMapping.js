@@ -18,7 +18,7 @@
  */
 
 // Ngưỡng phân loại binary (cm) – có thể ghi đè qua .env
-const FLOOD_BINARY_THRESHOLD_CM = Number(process.env.FLOOD_BINARY_THRESHOLD_CM) || 5
+const FLOOD_BINARY_THRESHOLD_CM = Number(process.env.FLOOD_BINARY_THRESHOLD_CM) || 10
 
 // ─────────────────────────────────────────────────────────────────
 // Map nhãn DB 4 mức → binary 0/1

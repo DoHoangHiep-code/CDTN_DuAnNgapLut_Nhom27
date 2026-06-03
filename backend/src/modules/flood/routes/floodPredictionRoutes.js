@@ -329,9 +329,9 @@ router.get('/forecasts/latest', cacheResponse(30 * 60, 'flood_api'), async (req,
       let floodDepthCm = aiResult?.flood_depth_cm ?? 0
       let { label, warningText } = depthCmToWarning(floodDepthCm)
       
-      const riskLevel = floodDepthCm < 15 ? 'safe'
-        : floodDepthCm < 30 ? 'medium'
-        : floodDepthCm < 60 ? 'high' : 'severe'
+      const riskLevel = floodDepthCm <= 10 ? 'safe'
+        : floodDepthCm <= 20 ? 'medium'
+        : floodDepthCm <= 40 ? 'high' : 'severe'
 
       return res.status(200).json({
         success: true,
