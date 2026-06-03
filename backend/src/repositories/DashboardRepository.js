@@ -150,7 +150,7 @@ class DashboardRepository {
     }
     for (const r of fpRows) {
       let depth = Number(r.flood_depth_cm || r.avg_depth_cm) || 0
-      
+
       if (timeMap.has(r.time)) {
         const prcp = timeMap.get(r.time).prcp
         if (prcp === 0 && depth < 1.0) depth = 0 // Lọc nhiễu hồi quy CatBoost
@@ -304,7 +304,7 @@ class DashboardRepository {
     }
     for (const r of fpRows) {
       let depth = Number(r.flood_depth_cm) || 0
-      
+
       if (timeMap.has(r.time)) {
         const prcp = timeMap.get(r.time).prcp
         if (prcp === 0 && depth < 1.0) depth = 0 // Lọc nhiễu hồi quy CatBoost
@@ -421,8 +421,8 @@ class DashboardRepository {
         to_char(fp.time AT TIME ZONE :tz, 'HH24:MI DD/MM') AS time
       FROM flood_predictions fp
       JOIN grid_nodes gn ON fp.node_id = gn.node_id
-      WHERE fp.time >= date_trunc('hour', now()) AND fp.time <= date_trunc('hour', now()) + interval '6 hours'
-        AND (fp.target = 1 OR fp.risk_level IN ('high', 'severe'))
+      WHERE fp.time >= date_trunc('hour', now()) AND fp.time <= date_trunc('hour', now()) + interval '24 hours'
+        AND (fp.target = 1 OR fp.risk_level IN ('high', 'severe', 'medium'))
         AND gn.district_name IS NOT NULL
       ORDER BY gn.district_name, fp.flood_depth_cm DESC
     `
