@@ -213,3 +213,14 @@ export async function askExpertChat(
     EXPERT_TIMEOUT_MS
   )
 }
+
+export async function getAreaNodes(areaName: string): Promise<{ success: boolean; nodes: any[] }> {
+  try {
+    const res = await fetch(`${BASE_URL}/chatbot/area-nodes?areaName=${encodeURIComponent(areaName)}`);
+    if (!res.ok) throw new Error('Không thể lấy dữ liệu cao độ.');
+    return await res.json();
+  } catch (err) {
+    console.error(err);
+    return { success: false, nodes: [] };
+  }
+}
