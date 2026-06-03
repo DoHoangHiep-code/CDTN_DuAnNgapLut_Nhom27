@@ -341,6 +341,199 @@ function formatTier2ExpertAnalysis(catboostData, locationName) {
   return md
 }
 
+const FLOOD_RISK_MAP = {
+  safe: 'An toàn 🟢',
+  medium: 'Nguy cơ thấp 🟡',
+  high: 'Nguy cơ cao 🟠',
+  severe: 'Nguy hiểm nghiêm trọng 🔴'
+}
+
+const LANDSLIDE_RISK_MAP = {
+  SAFE: 'An toàn 🟢',
+  WARNING: 'Nguy cơ cao 🟠',
+  DANGER: 'Nguy hiểm nghiêm trọng 🔴',
+  safe: 'An toàn 🟢',
+  warning: 'Nguy cơ cao 🟠',
+  danger: 'Nguy hiểm nghiêm trọng 🔴'
+}
+
+function formatFloodTop10(rows, hoursOffset) {
+  const now = formatVN(new Date())
+  const timeLabel = hoursOffset ? `trong ${hoursOffset} giờ tới` : 'hiện tại'
+  
+  let md = `📊 **Top 10 khu vực có nguy cơ ngập lụt cao nhất (${timeLabel}):**\n\n`
+  if (!rows || rows.length === 0) {
+    return md + `✅ Không ghi nhận điểm ngập lụt nguy hiểm nào cho khoảng thời gian này.\n`
+  }
+
+  rows.forEach((r, idx) => {
+    const loc = r.location_name || `Khu vực tại (${safe(r.latitude, 4)}°N, ${safe(r.longitude, 4)}°E)`
+    const depth = safe(r.flood_depth_cm, 1)
+    const riskLabel = FLOOD_RISK_MAP[r.risk_level] || r.risk_level || 'Chưa xác định'
+    const predTime = formatVN(r.time)
+    
+    md += `**${idx + 1}.** **${loc}**\n`
+    md += `   - Mức độ: **${riskLabel}** | Độ ngập: **${depth} cm**\n`
+    md += `   - Thời điểm dự báo: ${predTime}\n\n`
+  })
+  
+  md += `⚠️ **Khuyến nghị**: Người dân tại các khu vực trên nên chủ động theo dõi tình hình thời tiết và hạn chế di chuyển qua các tuyến đường ngập sâu.\n`
+  return md
+}
+
+function formatFloodAreaHoursBreakdown(areaName, breakdownData) {
+  const now = formatVN(new Date())
+  const title = areaName.charAt(0).toUpperCase() + areaName.slice(1)
+  
+  let md = `📍 **Bảng phân tích tiến trình ngập lụt khu vực ${title} (6 giờ tới):**\n\n`
+  md += `| Mốc thời gian | Rủi ro lớn nhất | Độ ngập tối đa | Trạng thái dự báo |\n`
+  md += `|---|---|---|---|\n`
+
+  const offsets = [1, 2, 3, 6]
+  let maxDepth = 0
+  let peakTime = null
+  let maxRisk = 'safe'
+  
+  const severityOrder = { severe: 4, high: 3, medium: 2, safe: 1 }
+
+  offsets.forEach(offset => {
+    const rows = breakdownData[offset] || []
+    if (rows.length === 0) {
+      md += `| Sau ${offset}h | Không có dữ liệu | - | Không tìm thấy điểm đo hoặc dự báo |\n`
+      return
+    }
+    
+    let worstNode = rows[0]
+    rows.forEach(r => {
+      if (Number(r.flood_depth_cm) > Number(worstNode.flood_depth_cm)) {
+        worstNode = r
+      }
+    })
+    
+    const depth = Number(worstNode.flood_depth_cm)
+    const risk = worstNode.risk_level || 'safe'
+    const riskLabel = FLOOD_RISK_MAP[risk] || risk
+    
+    if (depth > maxDepth) {
+      maxDepth = depth
+      peakTime = formatVN(worstNode.time)
+    }
+    
+    if (severityOrder[risk] > severityOrder[maxRisk]) {
+      maxRisk = risk
+    }
+    
+    let statusText = 'Khô ráo, di chuyển an toàn'
+    if (risk === 'medium') statusText = 'Ngập cục bộ nhẹ, xe cộ đi lại chậm'
+    if (risk === 'high') statusText = 'Ngập vừa, tránh di chuyển phương tiện nhỏ'
+    if (risk === 'severe') statusText = 'Ngập rất sâu, nguy hiểm nghiêm trọng, cấm di chuyển'
+    
+    md += `| **Trong ${offset} giờ tới** | ${riskLabel} | **${safe(depth, 1)} cm** | ${statusText} |\n`
+  })
+  
+  md += `\n`
+  
+  if (maxDepth > 0) {
+    md += `⚠️ **Nhận xét đỉnh ngập:** Khu vực **${title}** dự báo đạt đỉnh ngập tối đa **${safe(maxDepth, 1)} cm** vào khoảng lúc **${peakTime}** (mức ${FLOOD_RISK_MAP[maxRisk] || maxRisk}).\n\n`
+    md += `🛠️ **Khuyến nghị di chuyển:**\n`
+    if (maxRisk === 'severe' || maxRisk === 'high') {
+      md += `- ⛔ **Tránh tuyệt đối** di chuyển qua các điểm trũng thấp trong khu vực vào khung giờ cao điểm.\n`
+      md += `- 🚗 Lên lộ trình đường vòng tránh khu vực này qua ứng dụng bản đồ AQUAALERT.\n`
+    } else {
+      md += `- 🟡 Di chuyển bình thường nhưng cần chú ý quan sát nắp cống và các ngõ nhỏ trũng thấp.\n`
+    }
+  } else {
+    md += `✅ **Nhận xét:** Khu vực **${title}** được dự báo tương đối an toàn, không có nguy cơ ngập úng nghiêm trọng trong 6 giờ tới.\n`
+  }
+  
+  return md
+}
+
+function formatLandslideTop10(rows) {
+  const now = formatVN(new Date())
+  let md = `⛰️ **Top 10 khu vực có nguy cơ sạt lở cao nhất (Cập nhật ngày hôm nay):**\n\n`
+  if (!rows || rows.length === 0) {
+    return md + `✅ Không ghi nhận cảnh báo sạt lở nguy hiểm nào tại các khu vực đồi núi.\n`
+  }
+
+  rows.forEach((r, idx) => {
+    const loc = r.location_name || `Khu vực tại (${safe(r.lat, 4)}°N, ${safe(r.lon, 4)}°E)`
+    const prob = (Number(r.prob_landslide || 0) * 100).toFixed(1)
+    const riskLabel = LANDSLIDE_RISK_MAP[r.risk_level] || r.risk_level || 'Chưa xác định'
+    const slope = safe(r.slope, 1)
+    const elev = safe(r.elevation, 0)
+    
+    md += `**${idx + 1}.** **${loc}**\n`
+    md += `   - Nguy cơ: **${riskLabel}** | Xác suất: **${prob}%**\n`
+    md += `   - Độ dốc: **${slope}°** | Cao độ: **${elev} m**\n\n`
+  })
+
+  md += `💡 *Lưu ý: Nguy cơ sạt lở được tính toán dựa trên lượng mưa lũy tích nhiều ngày và độ ẩm của đất sườn dốc nên diễn biến sẽ kéo dài trong ngày.*\n`
+  return md
+}
+
+function formatLandslideAreaHoursBreakdown(areaName, breakdownData) {
+  const title = areaName.charAt(0).toUpperCase() + areaName.slice(1)
+  
+  let md = `⛰️ **Dự báo nguy cơ sạt lở khu vực ${title} theo chu kỳ 4 ngày (Hôm nay & tương lai):**\n\n`
+  md += `> 💡 *Do sạt lở là hiện tượng có độ trễ lớn (phụ thuộc mưa tích lũy và độ ẩm đất thay đổi chậm), phân tích dưới đây thể hiện xu hướng theo ngày để đảm bảo độ chính xác khoa học.*\n\n`
+  md += `| Khoảng thời gian | Mức độ rủi ro | Xác suất sạt lở | Chỉ số tác động chính |\n`
+  md += `|---|---|---|---|\n`
+
+  const dayLabels = {
+    0: 'Trong 1-6 giờ tới (Hôm nay)',
+    1: 'Trong 24 giờ tới (Ngày mai)',
+    2: 'Trong 48 giờ tới (Ngày kia)',
+    3: 'Trong 72 giờ tới (Ngày kìa)'
+  }
+
+  const offsets = [0, 1, 2, 3]
+  let worstRisk = 'SAFE'
+  let highestProb = 0
+  
+  const severityOrder = { DANGER: 3, WARNING: 2, SAFE: 1, safe: 1, warning: 2, danger: 3 }
+
+  offsets.forEach(offset => {
+    const row = breakdownData[offset]
+    if (!row) {
+      md += `| ${dayLabels[offset]} | Không có dữ liệu | - | Cập nhật lần sau |\n`
+      return
+    }
+    
+    const prob = Number(row.prob_landslide || 0)
+    const probPct = (prob * 100).toFixed(1)
+    const risk = row.risk_level || 'SAFE'
+    const riskLabel = LANDSLIDE_RISK_MAP[risk] || risk
+    
+    if (prob > highestProb) {
+      highestProb = prob
+    }
+    if (severityOrder[risk] > severityOrder[worstRisk]) {
+      worstRisk = risk
+    }
+
+    let mainFactor = 'Do đặc thù địa hình dốc sườn núi'
+    if (Number(row.api_7d) >= 100) mainFactor = 'Lượng mưa lũy kế 7 ngày cực lớn'
+    else if (Number(row.soil_moisture_1d) >= 0.4) mainFactor = 'Đất đã bão hòa nước, kém ổn định'
+    else if (Number(row.rain_7d_accum) >= 80) mainFactor = 'Mưa liên tục nhiều ngày qua'
+    else if (Number(row.ndvi) <= 0.4) mainFactor = 'Thảm thực vật thưa thớt'
+    
+    md += `| **${dayLabels[offset]}** | ${riskLabel} | **${probPct}%** | ${mainFactor} |\n`
+  })
+
+  md += `\n`
+
+  if (highestProb >= 0.4 || worstRisk === 'DANGER' || worstRisk === 'WARNING') {
+    md += `⚠️ **Cảnh báo an toàn sạt lở:**\n`
+    md += `- 🏠 **Theo dõi sát sao** các dấu hiệu địa chấn như nứt đất, cây nghiêng, nước ngầm đổi màu đục.\n`
+    md += `- ⛔ **Không di chuyển** sát sườn núi dốc đứng vào các thời điểm trời mưa to kéo dài.\n`
+  } else {
+    md += `✅ **Nhận định:** Nguy cơ trượt lở đất tại khu vực **${title}** trong những ngày tới ở mức rất thấp, tình hình địa hình ổn định.\n`
+  }
+  
+  return md
+}
+
 module.exports = {
   formatCurrentStatus,
   formatTier1RiskExplanation,
@@ -348,4 +541,8 @@ module.exports = {
   computeRiskScore,
   riskLevelLabel,
   formatVN,
+  formatFloodTop10,
+  formatFloodAreaHoursBreakdown,
+  formatLandslideTop10,
+  formatLandslideAreaHoursBreakdown,
 }
