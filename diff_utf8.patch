@@ -1,0 +1,704 @@
+﻿diff --git a/ai_service/Dockerfile b/ai_service/Dockerfile
+index 311566d..e92877c 100644
+--- a/ai_service/Dockerfile
++++ b/ai_service/Dockerfile
+@@ -1,5 +1,7 @@
+ FROM python:3.11
+ 
++RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
++
+ WORKDIR /app
+ 
+ COPY requirements.txt .
+diff --git a/backend/scratch_test_chatbot.js b/backend/scratch_test_chatbot.js
+new file mode 100644
+index 0000000..fd1f578
+--- /dev/null
++++ b/backend/scratch_test_chatbot.js
+@@ -0,0 +1,76 @@
++/**
++ * scratch_test_chatbot.js
++ * Chß║íy test in-process cho chatbot ask router ─æß╗â x├íc thß╗▒c nhß║¡n diß╗çn intent v├á format dß╗» liß╗çu.
++ */
++require('dotenv').config()
++
++const { unifiedChatbotRouter } = require('./src/routes/unifiedChatbotRoutes.js')
++
++// H├ám helper ─æß╗â giß║ú lß║¡p req, res v├á gß╗ìi route handler
++function mockAsk(message, domain = null) {
++    return new Promise((resolve) => {
++        const req = {
++            body: { message, domain }
++        }
++        const res = {
++            status: function(code) {
++                this.statusCode = code
++                return this
++            },
++            json: function(data) {
++                resolve({ statusCode: this.statusCode || 200, data })
++            }
++        }
++        
++        // T├¼m handler cß╗ºa POST /chatbot/ask
++        const layer = unifiedChatbotRouter.stack.find(l => l.route && l.route.path === '/chatbot/ask' && l.route.methods.post)
++        if (!layer) {
++            resolve({ error: 'Route /chatbot/ask not found' })
++            return
++        }
++        
++        // Gß╗ìi handler
++        const handler = layer.route.stack[0].handle
++        handler(req, res).catch(err => {
++            resolve({ error: err.message })
++        })
++    })
++}
++
++async function runTests() {
++    const testCases = [
++        { name: 'Top 10 ngß║¡p lß╗Ñt', query: 'H├úy liß╗çt k├¬ top 10 c├íc ─æiß╗âm c├│ khß║ú n─âng ngß║¡p lß╗Ñt cao nhß║Ñt', domain: 'flood' },
++        { name: 'Ngß║¡p lß╗Ñt 3 giß╗Ø tß╗øi', query: 'Xem nhß╗»ng v├╣ng c├│ khß║ú n─âng ngß║¡p lß╗Ñt trong 3 giß╗Ø tß╗øi', domain: 'flood' },
++        { name: 'Sß║ít lß╗ƒ 6 giß╗Ø tß╗øi', query: 'Xem nhß╗»ng v├╣ng c├│ khß║ú n─âng sß║ít lß╗ƒ trong 6 giß╗Ø tß╗øi', domain: 'landslide' },
++        { name: 'Ngß║¡p lß╗Ñt Triß╗üu Kh├║c 3 giß╗Ø tß╗øi', query: 'Triß╗üu Kh├║c ngß║¡p lß╗Ñt thß║┐ n├áo trong 3 giß╗Ø tß╗øi', domain: 'flood' },
++        { name: 'Sß║ít lß╗ƒ Sãín La trong 1,2,3,6h', query: 'Dß╗▒ b├ío sß║ít lß╗ƒ ß╗ƒ Sãín La trong 1,2,3,6 giß╗Ø tß╗øi', domain: 'landslide' }
++    ]
++
++    console.log('­ƒñû Bß║»t ─æß║ºu chß║íy test in-process cho Chatbot...\n')
++    for (const tc of testCases) {
++        console.log(`========================================`)
++        console.log(`­ƒº¬ Testcase: ${tc.name}`)
++        console.log(`­ƒÆ¼ C├óu hß╗Åi: "${tc.query}"`)
++        console.log(`========================================`)
++        
++        const result = await mockAsk(tc.query, tc.domain)
++        if (result.error) {
++            console.error(`ÔØî Lß╗ùi thß╗▒c thi:`, result.error)
++        } else {
++            console.log(`HTTP Status: ${result.statusCode}`)
++            console.log(`Intent nhß║¡n diß╗çn: ${result.data.intent}`)
++            console.log(`Khu vß╗▒c tr├¡ch xuß║Ñt: ${result.data.area || 'Kh├┤ng c├│'}`)
++            console.log(`Trß║ú lß╗Øi cß╗ºa Bot:\n`)
++            console.log(result.data.reply)
++            console.log(`Expert Nodes:`, JSON.stringify(result.data.expertNodes))
++        }
++        console.log('\n')
++    }
++    
++    process.exit(0)
++}
++
++runTests().catch(err => {
++    console.error('Lß╗ùi kiß╗âm thß╗¡:', err)
++    process.exit(1)
++})
+diff --git a/backend/src/routes/unifiedChatbotRoutes.js b/backend/src/routes/unifiedChatbotRoutes.js
+index 67be9f8..388f6df 100644
+--- a/backend/src/routes/unifiedChatbotRoutes.js
++++ b/backend/src/routes/unifiedChatbotRoutes.js
+@@ -28,13 +28,21 @@ try {
+ 
+ let landslideService = null
+ try {
+-    landslideService = require('../modules/landslide/services/landslideService')
++    landslideService = require('../modules/landslide/services/LandslideService')
+ } catch (err) {
+     console.warn('[UnifiedChatbot] landslideService kh├┤ng load ─æã░ß╗úc:', err.message)
+ }
+ 
+ // ÔöÇÔöÇ Markdown Formatter (2-Tier Templates) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+-const { formatCurrentStatus, formatTier1RiskExplanation, formatTier2ExpertAnalysis } = require('../utils/chatbotFormatter')
++const { 
++    formatCurrentStatus, 
++    formatTier1RiskExplanation, 
++    formatTier2ExpertAnalysis,
++    formatFloodTop10,
++    formatFloodAreaHoursBreakdown,
++    formatLandslideTop10,
++    formatLandslideAreaHoursBreakdown
++} = require('../utils/chatbotFormatter')
+ 
+ // ÔöÇÔöÇ Fail-safe require ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+ // Nß║┐u redis hoß║Àc floodFeature.service lß╗ùi khi load (env thiß║┐u, pool fail...),
+@@ -144,17 +152,34 @@ function extractArea(msg) {
+ function detectIntent(msg, domain) {
+     const m = msg.toLowerCase()
+ 
++    // Hß╗ù trß╗ú tr├¡ch xuß║Ñt khung giß╗Ø: 1, 2, 3, 6 giß╗Ø tß╗øi
++    let matchedHour = null
++    const hourMatch = m.match(/(?:trong\s+)?([1236])\s*(?:giß╗Ø|h)(?:\s+tß╗øi|\s+nß╗»a|\s+sau)?/i)
++    if (hourMatch) {
++        matchedHour = parseInt(hourMatch[1], 10)
++    }
++    const isMultiHours = /(1\s*,\s*2\s*,\s*3\s*,\s*6|1\s*2\s*3\s*6|c├íc khung giß╗Ø|khung giß╗Ø|khung gio)/.test(m)
++
+     // Kiß╗âm tra c├íc c├óu hß╗Åi vß╗ü sß║ít lß╗ƒ trã░ß╗øc dß╗▒a tr├¬n domain hoß║Àc tß╗½ kh├│a
+     const isLandslide = (domain === 'landslide') || /(sß║ít lß╗ƒ|lß╗ƒ ─æß║Ñt|trã░ß╗út lß╗ƒ|sß║ít lß╗ƒ ─æß║Ñt|sß║ít n├║i)/.test(m)
+ 
+     if (isLandslide) {
+         let area = extractArea(m)
+         if (!area) {
+-            const match = m.match(/(?:khu vß╗▒c|tß║íi|ß╗ƒ|tß╗ënh|huyß╗çn|x├ú)\s+([a-z├á├íß║íß║ú├ú├óß║ºß║Ñß║¡ß║®ß║½─âß║▒ß║»ß║Àß║│ß║Á├¿├®ß║╣ß║╗ß║¢├¬ß╗üß║┐ß╗çß╗âß╗à├¼├¡ß╗ïß╗ë─®├▓├│ß╗ìß╗Å├Á├┤ß╗ôß╗æß╗Öß╗òß╗ùãíß╗Øß╗øß╗úß╗ƒß╗í├╣├║ß╗Ñß╗º┼®ã░ß╗½ß╗®ß╗▒ß╗¡ß╗»ß╗│├¢ß╗Áß╗Àß╗╣d─æ\s]+)/i)
++            const match = m.match(/(?:^|\s)(?:khu vß╗▒c|tß║íi|ß╗ƒ|tß╗ënh|huyß╗çn|x├ú)\s+([a-z├á├íß║íß║ú├ú├óß║ºß║Ñß║¡ß║®ß║½─âß║▒ß║»ß║Àß║│ß║Á├¿├®ß║╣ß║╗ß║¢├¬ß╗üß║┐ß╗çß╗âß╗à├¼├¡ß╗ïß╗ë─®├▓├│ß╗ìß╗Å├Á├┤ß╗ôß╗æß╗Öß╗òß╗ùãíß╗Øß╗øß╗úß╗ƒß╗í├╣├║ß╗Ñß╗º┼®ã░ß╗½ß╗®ß╗▒ß╗¡ß╗»ß╗│├¢ß╗Áß╗Àß╗╣d─æ\s]+)/i)
+             if (match) {
+                 area = match[1].trim()
+             }
+         }
++        
++        // Nß║┐u hß╗Åi sß║ít lß╗ƒ theo khu vß╗▒c k├¿m theo khung giß╗Ø hoß║Àc hß╗Åi c├íc khung giß╗Ø
++        if (area && (matchedHour !== null || isMultiHours)) {
++            return { intent: 'LANDSLIDE_AREA_HOURS_PREDICTION', area, timeOffset: matchedHour }
++        }
++        if (matchedHour !== null || isMultiHours) {
++            return { intent: 'LANDSLIDE_HOURS_PREDICTION', area: null, timeOffset: matchedHour }
++        }
++
+         if (/(v├¼ sao|tß║íi sao|nguy├¬n nh├ón|giß║úi th├¡ch|l├¢ do|sao lß║íi|v├¼ l├¢ do g├¼)/.test(m))
+             return { intent: 'LANDSLIDE_EXPLAIN_RISK', area, timeOffset: 0 }
+         if (/(khu vß╗▒c n├áo|─æ├óu nguy hiß╗âm|nß║Àng nhß║Ñt|nguy hiß╗âm nhß║Ñt|khu vß╗▒c nguy hiß╗âm|nguy hiß╗âm|khu n├áo|nguy cãí cao nhß║Ñt|nguy cãí cao|hotspot|─æiß╗âm ─æen)/.test(m))
+@@ -164,14 +189,32 @@ function detectIntent(msg, domain) {
+ 
+     if (/(?:^|\s)(xin ch├áo|hello|hi|ch├áo bot|ch├áo aqua)(?:\s|$)/.test(m))
+         return { intent: 'GREETING', area: null, timeOffset: 0 }
++
++    // Kiß╗âm tra top 10 ─æiß╗âm ngß║¡p lß╗Ñt cao nhß║Ñt
++    if (/(top\s*10|10\s*(?:─æiß╗âm|khu vß╗▒c|v├╣ng|vß╗ï tr├¡)|liß╗çt k├¬\s*10)/.test(m)) {
++        return { intent: 'FLOOD_TOP_10', area: extractArea(m), timeOffset: matchedHour || 0 }
++    }
++
++    const area = extractArea(m)
++    
++    // Kiß╗âm tra xem c├│ hß╗Åi vß╗ü ngß║¡p lß╗Ñt theo khu vß╗▒c k├¿m khung giß╗Ø kh├┤ng
++    if (area && (matchedHour !== null || isMultiHours)) {
++        return { intent: 'FLOOD_AREA_HOURS_PREDICTION', area, timeOffset: matchedHour }
++    }
++
++    // Dß╗▒ b├ío ngß║¡p lß╗Ñt chung theo khung giß╗Ø 1, 2, 3, 6h
++    if (matchedHour !== null || isMultiHours) {
++        return { intent: 'FLOOD_HOURS_PREDICTION', area: null, timeOffset: matchedHour }
++    }
++
+     if (/(v├¼ sao|tß║íi sao|nguy├¬n nh├ón|giß║úi th├¡ch|l├¢ do|sao lß║íi|v├¼ l├¢ do g├¼)/.test(m))
+-        return { intent: 'EXPLAIN_RISK', area: extractArea(m), timeOffset: 0 }
++        return { intent: 'EXPLAIN_RISK', area, timeOffset: 0 }
+     if (/(khu vß╗▒c n├áo|─æ├óu nguy hiß╗âm|nß║Àng nhß║Ñt|nguy hiß╗âm nhß║Ñt|khu n├áo ngß║¡p|ngß║¡p nß║Àng)/.test(m))
+         return { intent: 'WORST_AREA', area: null, timeOffset: 0 }
+     if (/(an to├án kh├┤ng|n├¬n ─æi kh├┤ng|c├│ thß╗â ra|n├¬n ß╗ƒ nh├á|nguy hiß╗âm kh├┤ng)/.test(m))
+-        return { intent: 'SAFE_ADVICE', area: extractArea(m), timeOffset: 0 }
++        return { intent: 'SAFE_ADVICE', area, timeOffset: 0 }
+     if (/(─æã░ß╗Øng v├▓ng|─æi tr├ính|tr├ính ngß║¡p|ng├Á n├áo|─æã░ß╗Øng n├áo|chß╗ë ─æã░ß╗Øng|tuyß║┐n ─æã░ß╗Øng|lß╗æi ─æi|lß╗Ö tr├¼nh|t├¼m ─æã░ß╗Øng)/.test(m))
+-        return { intent: 'FIND_SAFE_ROUTE', area: extractArea(m), timeOffset: 0 }
++        return { intent: 'FIND_SAFE_ROUTE', area, timeOffset: 0 }
+     if (/(\d{1,2}h|\d{1,2}:\d{2}|s├íng|chiß╗üu|tß╗æi|trã░a|ng├áy mai|h├┤m nay|ng├áy kia)/.test(m) &&
+         /(ngß║¡p|mã░a|l┼®|dß╗▒ b├ío|nguy cãí)/.test(m)) {
+         let offset = 0
+@@ -179,13 +222,12 @@ function detectIntent(msg, domain) {
+         else if (/(ng├áy kia|day after)/.test(m)) offset = 36
+         else if (/chiß╗üu/.test(m)) offset = 6
+         else if (/tß╗æi/.test(m)) offset = 10
+-        return { intent: 'SPECIFIC_TIME', area: extractArea(m), timeOffset: offset }
++        return { intent: 'SPECIFIC_TIME', area, timeOffset: offset }
+     }
+ 
+     if (/(hiß╗çn tß║íi|b├óy giß╗Ø|─æang ngß║¡p|l├║c n├áy|ngay b├óy giß╗Ø|hiß╗çn giß╗Ø|ngß║¡p kh├┤ng|c├│ ngß║¡p|t├¼nh trß║íng ngß║¡p)/.test(m))
+-        return { intent: 'CURRENT_STATUS', area: extractArea(m), timeOffset: 0 }
++        return { intent: 'CURRENT_STATUS', area, timeOffset: 0 }
+ 
+-    const area = extractArea(m)
+     if (area) return { intent: 'SPECIFIC_AREA', area, timeOffset: 0 }
+ 
+     if (/(dß╗▒ b├ío|ngß║¡p lß╗Ñt|l┼® lß╗Ñt|4 ng├áy|96 giß╗Ø|tuß║ºn|sß║»p tß╗øi|trong thß╗Øi gian)/.test(m))
+@@ -228,6 +270,116 @@ async function queryForecastSummary() {
+     })
+ }
+ 
++async function queryFloodTop10ByTime(hoursOffset) {
++    const offset = Number.isFinite(hoursOffset) ? Math.round(hoursOffset) : 0
++    const cacheKey = `ucbot:flood_top10_bytime:${offset}`
++    return cached(cacheKey, CACHE_TTL, async () => {
++        const sql = `
++          SELECT sub.risk_level, sub.flood_depth_cm, sub.explanation, sub.time,
++                 sub.node_id, gn.location_name, gn.latitude, gn.longitude
++          FROM (
++            SELECT node_id, risk_level, flood_depth_cm, explanation, time
++            FROM flood_predictions
++            WHERE time BETWEEN NOW() + ($1::INT * INTERVAL '1 hour') - INTERVAL '45 minutes'
++                           AND NOW() + ($1::INT * INTERVAL '1 hour') + INTERVAL '45 minutes'
++              AND risk_level IN ('medium', 'high', 'severe')
++            ORDER BY flood_depth_cm DESC
++            LIMIT 10
++          ) sub
++          JOIN grid_nodes gn ON gn.node_id = sub.node_id
++          ORDER BY sub.flood_depth_cm DESC
++        `
++        const { rows } = await withTimeout(pool.query(sql, [offset]))
++        return rows
++    })
++}
++
++async function queryAreaFloodByOffsets(nodeIds, offsets) {
++    const results = {}
++    for (const offset of offsets) {
++        const sql = `
++          SELECT fp.node_id, fp.risk_level, fp.flood_depth_cm, fp.time, gn.location_name
++          FROM flood_predictions fp
++          JOIN grid_nodes gn ON gn.node_id = fp.node_id
++          WHERE fp.node_id = ANY($1)
++            AND fp.time BETWEEN NOW() + ($2::INT * INTERVAL '1 hour') - INTERVAL '45 minutes'
++                              AND NOW() + ($2::INT * INTERVAL '1 hour') + INTERVAL '45 minutes'
++          ORDER BY fp.flood_depth_cm DESC
++        `
++        const { rows } = await withTimeout(pool.query(sql, [nodeIds, offset]))
++        results[offset] = rows
++    }
++    return results
++}
++
++async function queryLandslideTop10() {
++    const lsCacheFresh = landslideCache && landslideCache.lastUpdated !== null
++    if (lsCacheFresh && landslideCache.currentStatus && landslideCache.currentStatus.length > 0) {
++        return landslideCache.currentStatus.slice(0, 10)
++    }
++    const sql = `
++      SELECT sub.node_id, sub.prob_landslide, sub.risk_level, sub.prediction_time,
++             gn.location_name, gn.province, gn.lat, gn.lon, gn.slope, gn.elevation
++      FROM (
++        SELECT DISTINCT ON (node_id) *
++        FROM landslide_predictions
++        WHERE prediction_time >= NOW() - INTERVAL '24 hours'
++          AND risk_level IN ('DANGER', 'WARNING')
++        ORDER BY node_id, prediction_time DESC
++      ) sub
++      JOIN landslide_grid_nodes gn ON gn.node_id = sub.node_id
++      ORDER BY sub.prob_landslide DESC
++      LIMIT 10
++    `
++    const { rows } = await withTimeout(pool.query(sql))
++    return rows
++}
++
++async function queryAreaLandslidePredictions(areaName) {
++    const sqlNodes = `
++      SELECT node_id, location_name, province, lat, lon, slope, elevation
++      FROM landslide_grid_nodes
++      WHERE location_name ILIKE $1 OR province ILIKE $1
++      LIMIT 50
++    `
++    const { rows: nodes } = await withTimeout(pool.query(sqlNodes, [`%${areaName}%`]))
++    if (nodes.length === 0) return {}
++    
++    const nodeIds = nodes.map(n => n.node_id)
++    const nodeMap = new Map(nodes.map(n => [n.node_id, n]))
++    
++    const sqlPreds = `
++      SELECT node_id, prob_landslide, risk_level, prediction_time, rain_7d_accum, api_7d, soil_moisture_1d
++      FROM landslide_predictions
++      WHERE node_id = ANY($1)
++        AND prediction_time >= NOW() - INTERVAL '24 hours'
++      ORDER BY node_id, prediction_time ASC
++    `
++    const { rows: preds } = await withTimeout(pool.query(sqlPreds, [nodeIds]))
++    
++    const resultsByOffset = { 0: null, 1: null, 2: null, 3: null }
++    
++    preds.forEach(p => {
++        const now = new Date()
++        now.setHours(0, 0, 0, 0)
++        const pTime = new Date(p.prediction_time)
++        pTime.setHours(0, 0, 0, 0)
++        
++        const diffTime = Math.abs(pTime - now)
++        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24))
++        const offset = diffDays >= 0 && diffDays <= 3 ? diffDays : 0
++        
++        const gn = nodeMap.get(p.node_id)
++        const merged = { ...p, ...gn }
++        
++        if (!resultsByOffset[offset] || Number(p.prob_landslide) > Number(resultsByOffset[offset].prob_landslide)) {
++            resultsByOffset[offset] = merged
++        }
++    })
++    
++    return resultsByOffset
++}
++
+ async function queryCurrentStatus() {
+     return cached('ucbot:current_status', CACHE_TTL, async () => {
+         // DISTINCT ON (node_id): chß╗ë lß║Ñy bß║ún ghi mß╗øi nhß║Ñt cß╗ºa mß╗ùi node
+@@ -981,6 +1133,111 @@ router.post('/chatbot/ask', async (req, res) => {
+                     }
+                     break
+ 
++                case 'FLOOD_TOP_10':
++                    {
++                        const offset = timeOffset || 0
++                        const result = await queryFloodTop10ByTime(offset)
++                        const rows = result.data || []
++                        const replyText = formatFloodTop10(rows, offset)
++                        const expertNodes = rows
++                            .filter(r => r.node_id && ['high', 'severe'].includes(r.risk_level))
++                            .slice(0, 3)
++                            .map(r => ({ node_id: r.node_id, location_name: r.location_name, risk_level: r.risk_level }))
++                        
++                        replyObj = { text: replyText, suggestAreas: false, expertNodes }
++                    }
++                    break
++
++                case 'FLOOD_AREA_HOURS_PREDICTION':
++                    {
++                        const nodes = await getNodesByArea(area)
++                        if (nodes.length === 0) {
++                            replyObj = {
++                                text: `­ƒöì Kh├┤ng t├¼m thß║Ñy dß╗» liß╗çu ngß║¡p lß╗Ñt cho khu vß╗▒c **${area}**. Vui l├▓ng kiß╗âm tra lß║íi t├¬n ─æß╗ïa danh.`,
++                                suggestAreas: true,
++                                expertNodes: []
++                            }
++                        } else {
++                            const nodeIds = nodes.map(n => n.node_id)
++                            const breakdownData = await queryAreaFloodByOffsets(nodeIds, [1, 2, 3, 6])
++                            const replyText = formatFloodAreaHoursBreakdown(area, breakdownData)
++                            
++                            const expertNodes = []
++                            const seenNodes = new Set()
++                            const allRows = [].concat(...Object.values(breakdownData))
++                            allRows.forEach(r => {
++                                if (r.node_id && ['high', 'severe'].includes(r.risk_level) && !seenNodes.has(r.node_id)) {
++                                    seenNodes.add(r.node_id)
++                                    expertNodes.push({ node_id: r.node_id, location_name: r.location_name, risk_level: r.risk_level })
++                                }
++                            })
++                            
++                            replyObj = { text: replyText, suggestAreas: false, expertNodes: expertNodes.slice(0, 3) }
++                        }
++                    }
++                    break
++
++                case 'FLOOD_HOURS_PREDICTION':
++                    {
++                        const offset = timeOffset || 1
++                        const result = await queryFloodTop10ByTime(offset)
++                        const rows = result.data || []
++                        const replyText = formatFloodTop10(rows, offset)
++                        const expertNodes = rows
++                            .filter(r => r.node_id && ['high', 'severe'].includes(r.risk_level))
++                            .slice(0, 3)
++                            .map(r => ({ node_id: r.node_id, location_name: r.location_name, risk_level: r.risk_level }))
++                        
++                        replyObj = { text: replyText, suggestAreas: false, expertNodes }
++                    }
++                    break
++
++                case 'LANDSLIDE_HOURS_PREDICTION':
++                    {
++                        const rows = await queryLandslideTop10()
++                        const replyText = formatLandslideTop10(rows)
++                        const expertNodes = rows
++                            .filter(r => r.node_id && ['DANGER', 'WARNING'].includes(r.risk_level))
++                            .slice(0, 3)
++                            .map(r => ({
++                                node_id: r.node_id,
++                                location_name: r.location_name || `Khu vß╗▒c tß║íi (${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)})`,
++                                risk_level: r.risk_level === 'DANGER' ? 'severe' : 'high'
++                            }))
++                        
++                        replyObj = { text: replyText, suggestAreas: false, expertNodes }
++                    }
++                    break
++
++                case 'LANDSLIDE_AREA_HOURS_PREDICTION':
++                    {
++                        const breakdownData = await queryAreaLandslidePredictions(area)
++                        const valid = Object.values(breakdownData).some(x => x !== null)
++                        if (!valid) {
++                            replyObj = {
++                                text: `­ƒöì Kh├┤ng t├¼m thß║Ñy dß╗» liß╗çu sß║ít lß╗ƒ cho khu vß╗▒c **${area}**. Vui l├▓ng kiß╗âm tra lß║íi t├¬n ─æß╗ïa danh.`,
++                                suggestAreas: true,
++                                areaKeywords: ['Sãín La', 'T├ón Lang', 'Y├¬n B├íi', 'Lai Ch├óu', 'H├▓a B├¼nh'],
++                                expertNodes: []
++                            }
++                        } else {
++                            const replyText = formatLandslideAreaHoursBreakdown(area, breakdownData)
++                            const expertNodes = []
++                            Object.values(breakdownData).forEach(r => {
++                                if (r && r.node_id && ['DANGER', 'WARNING'].includes(r.risk_level)) {
++                                    expertNodes.push({
++                                        node_id: r.node_id,
++                                        location_name: r.location_name || `Khu vß╗▒c tß║íi (${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)})`,
++                                        risk_level: r.risk_level === 'DANGER' ? 'severe' : 'high'
++                                    })
++                                }
++                            })
++                            
++                            replyObj = { text: replyText, suggestAreas: false, expertNodes: expertNodes.slice(0, 3) }
++                        }
++                    }
++                    break
++
+                 case 'GREETING':
+                     replyObj = replyGreeting()
+                     break
+diff --git a/backend/src/utils/chatbotFormatter.js b/backend/src/utils/chatbotFormatter.js
+index d77875a..4289e11 100644
+--- a/backend/src/utils/chatbotFormatter.js
++++ b/backend/src/utils/chatbotFormatter.js
+@@ -341,6 +341,199 @@ function formatTier2ExpertAnalysis(catboostData, locationName) {
+   return md
+ }
+ 
++const FLOOD_RISK_MAP = {
++  safe: 'An to├án ­ƒƒó',
++  medium: 'Nguy cãí thß║Ñp ­ƒƒí',
++  high: 'Nguy cãí cao ­ƒƒá',
++  severe: 'Nguy hiß╗âm nghi├¬m trß╗ìng ­ƒö┤'
++}
++
++const LANDSLIDE_RISK_MAP = {
++  SAFE: 'An to├án ­ƒƒó',
++  WARNING: 'Nguy cãí cao ­ƒƒá',
++  DANGER: 'Nguy hiß╗âm nghi├¬m trß╗ìng ­ƒö┤',
++  safe: 'An to├án ­ƒƒó',
++  warning: 'Nguy cãí cao ­ƒƒá',
++  danger: 'Nguy hiß╗âm nghi├¬m trß╗ìng ­ƒö┤'
++}
++
++function formatFloodTop10(rows, hoursOffset) {
++  const now = formatVN(new Date())
++  const timeLabel = hoursOffset ? `trong ${hoursOffset} giß╗Ø tß╗øi` : 'hiß╗çn tß║íi'
++  
++  let md = `­ƒôè **Top 10 khu vß╗▒c c├│ nguy cãí ngß║¡p lß╗Ñt cao nhß║Ñt (${timeLabel}):**\n\n`
++  if (!rows || rows.length === 0) {
++    return md + `Ô£à Kh├┤ng ghi nhß║¡n ─æiß╗âm ngß║¡p lß╗Ñt nguy hiß╗âm n├áo cho khoß║úng thß╗Øi gian n├áy.\n`
++  }
++
++  rows.forEach((r, idx) => {
++    const loc = r.location_name || `Khu vß╗▒c tß║íi (${safe(r.latitude, 4)}┬░N, ${safe(r.longitude, 4)}┬░E)`
++    const depth = safe(r.flood_depth_cm, 1)
++    const riskLabel = FLOOD_RISK_MAP[r.risk_level] || r.risk_level || 'Chã░a x├íc ─æß╗ïnh'
++    const predTime = formatVN(r.time)
++    
++    md += `**${idx + 1}.** **${loc}**\n`
++    md += `   - Mß╗®c ─æß╗Ö: **${riskLabel}** | ─Éß╗Ö ngß║¡p: **${depth} cm**\n`
++    md += `   - Thß╗Øi ─æiß╗âm dß╗▒ b├ío: ${predTime}\n\n`
++  })
++  
++  md += `ÔÜá´©Å **Khuyß║┐n nghß╗ï**: Ngã░ß╗Øi d├ón tß║íi c├íc khu vß╗▒c tr├¬n n├¬n chß╗º ─æß╗Öng theo d├Ái t├¼nh h├¼nh thß╗Øi tiß║┐t v├á hß║ín chß║┐ di chuyß╗ân qua c├íc tuyß║┐n ─æã░ß╗Øng ngß║¡p s├óu.\n`
++  return md
++}
++
++function formatFloodAreaHoursBreakdown(areaName, breakdownData) {
++  const now = formatVN(new Date())
++  const title = areaName.charAt(0).toUpperCase() + areaName.slice(1)
++  
++  let md = `­ƒôì **Bß║úng ph├ón t├¡ch tiß║┐n tr├¼nh ngß║¡p lß╗Ñt khu vß╗▒c ${title} (6 giß╗Ø tß╗øi):**\n\n`
++  md += `| Mß╗æc thß╗Øi gian | Rß╗ºi ro lß╗øn nhß║Ñt | ─Éß╗Ö ngß║¡p tß╗æi ─æa | Trß║íng th├íi dß╗▒ b├ío |\n`
++  md += `|---|---|---|---|\n`
++
++  const offsets = [1, 2, 3, 6]
++  let maxDepth = 0
++  let peakTime = null
++  let maxRisk = 'safe'
++  
++  const severityOrder = { severe: 4, high: 3, medium: 2, safe: 1 }
++
++  offsets.forEach(offset => {
++    const rows = breakdownData[offset] || []
++    if (rows.length === 0) {
++      md += `| Sau ${offset}h | Kh├┤ng c├│ dß╗» liß╗çu | - | Kh├┤ng t├¼m thß║Ñy ─æiß╗âm ─æo hoß║Àc dß╗▒ b├ío |\n`
++      return
++    }
++    
++    let worstNode = rows[0]
++    rows.forEach(r => {
++      if (Number(r.flood_depth_cm) > Number(worstNode.flood_depth_cm)) {
++        worstNode = r
++      }
++    })
++    
++    const depth = Number(worstNode.flood_depth_cm)
++    const risk = worstNode.risk_level || 'safe'
++    const riskLabel = FLOOD_RISK_MAP[risk] || risk
++    
++    if (depth > maxDepth) {
++      maxDepth = depth
++      peakTime = formatVN(worstNode.time)
++    }
++    
++    if (severityOrder[risk] > severityOrder[maxRisk]) {
++      maxRisk = risk
++    }
++    
++    let statusText = 'Kh├┤ r├ío, di chuyß╗ân an to├án'
++    if (risk === 'medium') statusText = 'Ngß║¡p cß╗Ñc bß╗Ö nhß║╣, xe cß╗Ö ─æi lß║íi chß║¡m'
++    if (risk === 'high') statusText = 'Ngß║¡p vß╗½a, tr├ính di chuyß╗ân phã░ãíng tiß╗çn nhß╗Å'
++    if (risk === 'severe') statusText = 'Ngß║¡p rß║Ñt s├óu, nguy hiß╗âm nghi├¬m trß╗ìng, cß║Ñm di chuyß╗ân'
++    
++    md += `| **Trong ${offset} giß╗Ø tß╗øi** | ${riskLabel} | **${safe(depth, 1)} cm** | ${statusText} |\n`
++  })
++  
++  md += `\n`
++  
++  if (maxDepth > 0) {
++    md += `ÔÜá´©Å **Nhß║¡n x├®t ─æß╗ënh ngß║¡p:** Khu vß╗▒c **${title}** dß╗▒ b├ío ─æß║ít ─æß╗ënh ngß║¡p tß╗æi ─æa **${safe(maxDepth, 1)} cm** v├áo khoß║úng l├║c **${peakTime}** (mß╗®c ${FLOOD_RISK_MAP[maxRisk] || maxRisk}).\n\n`
++    md += `­ƒøá´©Å **Khuyß║┐n nghß╗ï di chuyß╗ân:**\n`
++    if (maxRisk === 'severe' || maxRisk === 'high') {
++      md += `- Ôøö **Tr├ính tuyß╗çt ─æß╗æi** di chuyß╗ân qua c├íc ─æiß╗âm tr┼®ng thß║Ñp trong khu vß╗▒c v├áo khung giß╗Ø cao ─æiß╗âm.\n`
++      md += `- ­ƒÜù L├¬n lß╗Ö tr├¼nh ─æã░ß╗Øng v├▓ng tr├ính khu vß╗▒c n├áy qua ß╗®ng dß╗Ñng bß║ún ─æß╗ô AQUAALERT.\n`
++    } else {
++      md += `- ­ƒƒí Di chuyß╗ân b├¼nh thã░ß╗Øng nhã░ng cß║ºn ch├║ ├¢ quan s├ít nß║»p cß╗æng v├á c├íc ng├Á nhß╗Å tr┼®ng thß║Ñp.\n`
++    }
++  } else {
++    md += `Ô£à **Nhß║¡n x├®t:** Khu vß╗▒c **${title}** ─æã░ß╗úc dß╗▒ b├ío tã░ãíng ─æß╗æi an to├án, kh├┤ng c├│ nguy cãí ngß║¡p ├║ng nghi├¬m trß╗ìng trong 6 giß╗Ø tß╗øi.\n`
++  }
++  
++  return md
++}
++
++function formatLandslideTop10(rows) {
++  const now = formatVN(new Date())
++  let md = `Ôø░´©Å **Top 10 khu vß╗▒c c├│ nguy cãí sß║ít lß╗ƒ cao nhß║Ñt (Cß║¡p nhß║¡t ng├áy h├┤m nay):**\n\n`
++  if (!rows || rows.length === 0) {
++    return md + `Ô£à Kh├┤ng ghi nhß║¡n cß║únh b├ío sß║ít lß╗ƒ nguy hiß╗âm n├áo tß║íi c├íc khu vß╗▒c ─æß╗ôi n├║i.\n`
++  }
++
++  rows.forEach((r, idx) => {
++    const loc = r.location_name || `Khu vß╗▒c tß║íi (${safe(r.lat, 4)}┬░N, ${safe(r.lon, 4)}┬░E)`
++    const prob = (Number(r.prob_landslide || 0) * 100).toFixed(1)
++    const riskLabel = LANDSLIDE_RISK_MAP[r.risk_level] || r.risk_level || 'Chã░a x├íc ─æß╗ïnh'
++    const slope = safe(r.slope, 1)
++    const elev = safe(r.elevation, 0)
++    
++    md += `**${idx + 1}.** **${loc}**\n`
++    md += `   - Nguy cãí: **${riskLabel}** | X├íc suß║Ñt: **${prob}%**\n`
++    md += `   - ─Éß╗Ö dß╗æc: **${slope}┬░** | Cao ─æß╗Ö: **${elev} m**\n\n`
++  })
++
++  md += `­ƒÆí *Lã░u ├¢: Nguy cãí sß║ít lß╗ƒ ─æã░ß╗úc t├¡nh to├ín dß╗▒a tr├¬n lã░ß╗úng mã░a l┼®y t├¡ch nhiß╗üu ng├áy v├á ─æß╗Ö ß║®m cß╗ºa ─æß║Ñt sã░ß╗Øn dß╗æc n├¬n diß╗àn biß║┐n sß║¢ k├®o d├ái trong ng├áy.*\n`
++  return md
++}
++
++function formatLandslideAreaHoursBreakdown(areaName, breakdownData) {
++  const title = areaName.charAt(0).toUpperCase() + areaName.slice(1)
++  
++  let md = `Ôø░´©Å **Dß╗▒ b├ío nguy cãí sß║ít lß╗ƒ khu vß╗▒c ${title} theo chu kß╗│ 4 ng├áy (H├┤m nay & tã░ãíng lai):**\n\n`
++  md += `> ­ƒÆí *Do sß║ít lß╗ƒ l├á hiß╗çn tã░ß╗úng c├│ ─æß╗Ö trß╗à lß╗øn (phß╗Ñ thuß╗Öc mã░a t├¡ch l┼®y v├á ─æß╗Ö ß║®m ─æß║Ñt thay ─æß╗òi chß║¡m), ph├ón t├¡ch dã░ß╗øi ─æ├óy thß╗â hiß╗çn xu hã░ß╗øng theo ng├áy ─æß╗â ─æß║úm bß║úo ─æß╗Ö ch├¡nh x├íc khoa hß╗ìc.*\n\n`
++  md += `| Khoß║úng thß╗Øi gian | Mß╗®c ─æß╗Ö rß╗ºi ro | X├íc suß║Ñt sß║ít lß╗ƒ | Chß╗ë sß╗æ t├íc ─æß╗Öng ch├¡nh |\n`
++  md += `|---|---|---|---|\n`
++
++  const dayLabels = {
++    0: 'Trong 1-6 giß╗Ø tß╗øi (H├┤m nay)',
++    1: 'Trong 24 giß╗Ø tß╗øi (Ng├áy mai)',
++    2: 'Trong 48 giß╗Ø tß╗øi (Ng├áy kia)',
++    3: 'Trong 72 giß╗Ø tß╗øi (Ng├áy k├¼a)'
++  }
++
++  const offsets = [0, 1, 2, 3]
++  let worstRisk = 'SAFE'
++  let highestProb = 0
++  
++  const severityOrder = { DANGER: 3, WARNING: 2, SAFE: 1, safe: 1, warning: 2, danger: 3 }
++
++  offsets.forEach(offset => {
++    const row = breakdownData[offset]
++    if (!row) {
++      md += `| ${dayLabels[offset]} | Kh├┤ng c├│ dß╗» liß╗çu | - | Cß║¡p nhß║¡t lß║ºn sau |\n`
++      return
++    }
++    
++    const prob = Number(row.prob_landslide || 0)
++    const probPct = (prob * 100).toFixed(1)
++    const risk = row.risk_level || 'SAFE'
++    const riskLabel = LANDSLIDE_RISK_MAP[risk] || risk
++    
++    if (prob > highestProb) {
++      highestProb = prob
++    }
++    if (severityOrder[risk] > severityOrder[worstRisk]) {
++      worstRisk = risk
++    }
++
++    let mainFactor = 'Do ─æß║Àc th├╣ ─æß╗ïa h├¼nh dß╗æc sã░ß╗Øn n├║i'
++    if (Number(row.api_7d) >= 100) mainFactor = 'Lã░ß╗úng mã░a l┼®y kß║┐ 7 ng├áy cß╗▒c lß╗øn'
++    else if (Number(row.soil_moisture_1d) >= 0.4) mainFactor = '─Éß║Ñt ─æ├ú b├úo h├▓a nã░ß╗øc, k├®m ß╗òn ─æß╗ïnh'
++    else if (Number(row.rain_7d_accum) >= 80) mainFactor = 'Mã░a li├¬n tß╗Ñc nhiß╗üu ng├áy qua'
++    else if (Number(row.ndvi) <= 0.4) mainFactor = 'Thß║úm thß╗▒c vß║¡t thã░a thß╗øt'
++    
++    md += `| **${dayLabels[offset]}** | ${riskLabel} | **${probPct}%** | ${mainFactor} |\n`
++  })
++
++  md += `\n`
++
++  if (highestProb >= 0.4 || worstRisk === 'DANGER' || worstRisk === 'WARNING') {
++    md += `ÔÜá´©Å **Cß║únh b├ío an to├án sß║ít lß╗ƒ:**\n`
++    md += `- ­ƒÅá **Theo d├Ái s├ít sao** c├íc dß║Ñu hiß╗çu ─æß╗ïa chß║Ñn nhã░ nß╗®t ─æß║Ñt, c├óy nghi├¬ng, nã░ß╗øc ngß║ºm ─æß╗òi m├áu ─æß╗Ñc.\n`
++    md += `- Ôøö **Kh├┤ng di chuyß╗ân** s├ít sã░ß╗Øn n├║i dß╗æc ─æß╗®ng v├áo c├íc thß╗Øi ─æiß╗âm trß╗Øi mã░a to k├®o d├ái.\n`
++  } else {
++    md += `Ô£à **Nhß║¡n ─æß╗ïnh:** Nguy cãí trã░ß╗út lß╗ƒ ─æß║Ñt tß║íi khu vß╗▒c **${title}** trong nhß╗»ng ng├áy tß╗øi ß╗ƒ mß╗®c rß║Ñt thß║Ñp, t├¼nh h├¼nh ─æß╗ïa h├¼nh ß╗òn ─æß╗ïnh.\n`
++  }
++  
++  return md
++}
++
+ module.exports = {
+   formatCurrentStatus,
+   formatTier1RiskExplanation,
+@@ -348,4 +541,8 @@ module.exports = {
+   computeRiskScore,
+   riskLevelLabel,
+   formatVN,
++  formatFloodTop10,
++  formatFloodAreaHoursBreakdown,
++  formatLandslideTop10,
++  formatLandslideAreaHoursBreakdown,
+ }
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 6775495..d0c1927 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -1,5 +1,11 @@
+ services:
+ 
++  redis:
++    image: redis:alpine
++    container_name: flood-redis
++    ports:
++      - "6379:6379"
++
+   backend:
+     build:
+       context: ./backend
+@@ -8,6 +14,14 @@ services:
+       - "3002:3002"
+     env_file:
+       - ./backend/.env
++    environment:
++      - AI_SERVICE_URL=http://ai-service:8000
++      - REDIS_URL=redis://redis:6379
++    depends_on:
++      ai-service:
++        condition: service_healthy
++      redis:
++        condition: service_started
+ 
+   ai-service:
+     build:
+@@ -15,6 +29,12 @@ services:
+     container_name: flood-ai
+     ports:
+       - "8000:8000"
++    healthcheck:
++      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
++      interval: 10s
++      timeout: 5s
++      retries: 10
++      start_period: 30s
+ 
+   frontend:
+     build:
+@@ -23,5 +43,5 @@ services:
+     ports:
+       - "5173:5173"
+     depends_on:
+-      - backend
+-      - ai-service
++      backend:
++        condition: service_started

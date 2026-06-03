@@ -361,8 +361,20 @@ function Rain24hChart({ forecast24h }: {
 function RiskOverview({ riskSummary }: { riskSummary?: { safe: number, medium: number, high: number, severe: number, overall: string } }) {
   const counts = riskSummary || { safe: 0, medium: 0, high: 0, severe: 0, overall: 'safe' }
   const total = counts.safe + counts.medium + counts.high + counts.severe
-  const safePct = total === 0 ? 0 : Math.round((counts.safe / total) * 100)
-  const dangerPct = total === 0 ? 0 : Math.round(((counts.high + counts.severe) / total) * 100)
+  const dangerCount = counts.high + counts.severe
+  const dangerPctNum = total === 0 ? 0 : (dangerCount / total) * 100
+
+  const getPctString = (count: number, total: number) => {
+    if (total === 0 || count === 0) return '0%'
+    if (count === total) return '100%'
+    const pct = Math.round((count / total) * 100)
+    if (pct === 0) return '<1%'
+    if (pct === 100) return '>99%'
+    return `${pct}%`
+  }
+
+  const safePctStr = getPctString(counts.safe, total)
+  const dangerPctStr = getPctString(dangerCount, total)
 
   const items = [
     { key: 'severe', label: 'Nguy hiểm', color: 'bg-rose-500',    text: 'text-rose-600 dark:text-rose-400',     count: counts.severe, icon: '🔴' },
@@ -390,10 +402,10 @@ function RiskOverview({ riskSummary }: { riskSummary?: { safe: number, medium: n
           <div className="mt-1 ml-10 text-xs text-slate-500 dark:text-slate-400">{total} khu vực</div>
         </div>
         <div className="text-right">
-          <div className={cn('text-lg font-extrabold tabular-nums', dangerPct > 30 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
-            {safePct}%<span className="text-xs font-medium text-slate-400"> an toàn</span>
+          <div className={cn('text-lg font-extrabold tabular-nums', dangerPctNum > 30 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
+            {safePctStr}<span className="text-xs font-medium text-slate-400"> an toàn</span>
           </div>
-          <div className="text-[10px] text-slate-400">{dangerPct}% nguy cơ cao</div>
+          <div className="text-[10px] text-slate-400">{dangerPctStr} nguy cơ cao</div>
         </div>
       </div>
 
@@ -443,7 +455,7 @@ function RiskOverview({ riskSummary }: { riskSummary?: { safe: number, medium: n
                 </div>
                 <div className="text-right">
                   <div className={cn('text-xl font-extrabold tabular-nums leading-none', item.text)}>{item.count >= 1000 ? (item.count/1000).toFixed(1) + 'k' : item.count}</div>
-                  <div className="text-[9px] text-slate-400 tabular-nums mt-0.5">{Math.round((item.count / total) * 100)}%</div>
+                  <div className="text-[9px] text-slate-400 tabular-nums mt-0.5">{getPctString(item.count, total)}</div>
                 </div>
               </div>
             ))}

@@ -350,8 +350,20 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
     return c
   }, [districts])
   const total = districts.length || 1
-  const safePct = Math.round((counts.safe / total) * 100)
-  const dangerPct = Math.round(((counts.high + counts.severe) / total) * 100)
+  const dangerCount = counts.high + counts.severe
+  const dangerPctNum = (dangerCount / total) * 100
+
+  const getPctString = (count: number, total: number) => {
+    if (total === 0 || count === 0) return '0%'
+    if (count === total) return '100%'
+    const pct = Math.round((count / total) * 100)
+    if (pct === 0) return '<1%'
+    if (pct === 100) return '>99%'
+    return `${pct}%`
+  }
+
+  const safePctStr = getPctString(counts.safe, total)
+  const dangerPctStr = getPctString(dangerCount, total)
 
   const items = [
     { key: 'severe', label: 'Nguy hiểm', color: 'bg-rose-500',    text: 'text-rose-600 dark:text-rose-400',     count: counts.severe, icon: '🔴' },
@@ -373,10 +385,10 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
           <div className="mt-1 ml-10 text-xs text-slate-500 dark:text-slate-400">{total} quận/huyện</div>
         </div>
         <div className="text-right">
-          <div className={cn('text-lg font-extrabold tabular-nums', dangerPct > 30 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
-            {safePct}%<span className="text-xs font-medium text-slate-400"> an toàn</span>
+          <div className={cn('text-lg font-extrabold tabular-nums', dangerPctNum > 30 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
+            {safePctStr}<span className="text-xs font-medium text-slate-400"> an toàn</span>
           </div>
-          <div className="text-[10px] text-slate-400">{dangerPct}% nguy cơ cao</div>
+          <div className="text-[10px] text-slate-400">{dangerPctStr} nguy cơ cao</div>
         </div>
       </div>
 
@@ -406,7 +418,7 @@ function RiskOverview({ districts }: { districts: FloodDistrict[] }) {
               </div>
               <div className="text-right">
                 <div className={cn('text-xl font-extrabold tabular-nums leading-none', item.text)}>{item.count}</div>
-                <div className="text-[9px] text-slate-400 tabular-nums">{Math.round((item.count / total) * 100)}%</div>
+                <div className="text-[9px] text-slate-400 tabular-nums">{getPctString(item.count, total)}</div>
               </div>
             </div>
           ))}

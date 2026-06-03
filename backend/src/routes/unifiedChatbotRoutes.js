@@ -325,7 +325,7 @@ async function queryLandslideTop10() {
         FROM landslide_predictions
         WHERE prediction_time >= NOW() - INTERVAL '24 hours'
           AND risk_level IN ('DANGER', 'WARNING')
-        ORDER BY node_id, prediction_time DESC
+        ORDER BY node_id, prob_landslide DESC
       ) sub
       JOIN landslide_grid_nodes gn ON gn.node_id = sub.node_id
       ORDER BY sub.prob_landslide DESC
@@ -365,9 +365,11 @@ async function queryAreaLandslidePredictions(areaName) {
         const pTime = new Date(p.prediction_time)
         pTime.setHours(0, 0, 0, 0)
         
-        const diffTime = Math.abs(pTime - now)
+        const diffTime = pTime.getTime() - now.getTime()
         const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24))
-        const offset = diffDays >= 0 && diffDays <= 3 ? diffDays : 0
+        
+        if (diffDays < 0 || diffDays > 3) return
+        const offset = diffDays
         
         const gn = nodeMap.get(p.node_id)
         const merged = { ...p, ...gn }

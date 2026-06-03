@@ -244,9 +244,9 @@ async function prewarmFromDb(pool) {
     console.log(`[LandslideCache] ✅ Pre-warm: ${_map.size.toLocaleString('vi-VN')} nodes | ${elapsed}ms`)
     _isReady = true
 
-    // Khởi động nạp chatbot cache song song
+    // Khởi động nạp chatbot cache
     lastUpdated = new Date()
-    populateChatbotCache(pool).catch(err => console.error('[LandslideCache] populateChatbotCache error:', err.message))
+    await populateChatbotCache(pool).catch(err => console.error('[LandslideCache] populateChatbotCache error:', err.message))
 
     invalidateCache()
     return { loaded: _map.size, elapsed }

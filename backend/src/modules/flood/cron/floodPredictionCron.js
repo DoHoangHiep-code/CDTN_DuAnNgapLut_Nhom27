@@ -44,8 +44,7 @@ pool.on('error', (err) => console.error('[PredictionCron] Pool error:', err.mess
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildFeatureVector(row) {
-  const now = new Date()
+function buildFeatureVector(row, now = new Date()) {
   const hour = Number(row.hour ?? now.getHours())
   const month = Number(row.month ?? now.getMonth() + 1)
   const startOfYear = new Date(now.getFullYear(), 0, 0)
@@ -229,7 +228,8 @@ async function runFloodPredictionJob() {
   if (!nodes.length) { console.log('[PredictionCron] ℹ️  Không có node nào.'); return }
 
   // Bước 2: Build feature vectors + chia chunks
-  const featureVectors = nodes.map(buildFeatureVector)
+  const now = new Date()
+  const featureVectors = nodes.map(row => buildFeatureVector(row, now))
   const chunks = chunkArray(featureVectors, CHUNK_SIZE)
   const nodeIdChunks = chunkArray(nodes.map(n => n.node_id), CHUNK_SIZE)
 
