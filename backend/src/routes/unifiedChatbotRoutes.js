@@ -28,13 +28,21 @@ try {
 
 let landslideService = null
 try {
-    landslideService = require('../modules/landslide/services/landslideService')
+    landslideService = require('../modules/landslide/services/LandslideService')
 } catch (err) {
     console.warn('[UnifiedChatbot] landslideService không load được:', err.message)
 }
 
 // ── Markdown Formatter (2-Tier Templates) ─────────────────────────────────────
-const { formatCurrentStatus, formatTier1RiskExplanation, formatTier2ExpertAnalysis } = require('../utils/chatbotFormatter')
+const { 
+    formatCurrentStatus, 
+    formatTier1RiskExplanation, 
+    formatTier2ExpertAnalysis,
+    formatFloodTop10,
+    formatFloodAreaHoursBreakdown,
+    formatLandslideTop10,
+    formatLandslideAreaHoursBreakdown
+} = require('../utils/chatbotFormatter')
 
 // ── Fail-safe require ─────────────────────────────────────────────────────────
 // Nếu redis hoặc floodFeature.service lỗi khi load (env thiếu, pool fail...),
@@ -144,17 +152,34 @@ function extractArea(msg) {
 function detectIntent(msg, domain) {
     const m = msg.toLowerCase()
 
+    // Hỗ trợ trích xuất khung giờ: 1, 2, 3, 6 giờ tới
+    let matchedHour = null
+    const hourMatch = m.match(/(?:trong\s+)?([1236])\s*(?:giờ|h)(?:\s+tới|\s+nữa|\s+sau)?/i)
+    if (hourMatch) {
+        matchedHour = parseInt(hourMatch[1], 10)
+    }
+    const isMultiHours = /(1\s*,\s*2\s*,\s*3\s*,\s*6|1\s*2\s*3\s*6|các khung giờ|khung giờ|khung gio)/.test(m)
+
     // Kiểm tra các câu hỏi về sạt lở trước dựa trên domain hoặc từ khóa
     const isLandslide = (domain === 'landslide') || /(sạt lở|lở đất|trượt lở|sạt lở đất|sạt núi)/.test(m)
 
     if (isLandslide) {
         let area = extractArea(m)
         if (!area) {
-            const match = m.match(/(?:khu vực|tại|ở|tỉnh|huyện|xã)\s+([a-zàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹdđ\s]+)/i)
+            const match = m.match(/(?:^|\s)(?:khu vực|tại|ở|tỉnh|huyện|xã)\s+([a-zàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹdđ\s]+)/i)
             if (match) {
                 area = match[1].trim()
             }
         }
+        
+        // Nếu hỏi sạt lở theo khu vực kèm theo khung giờ hoặc hỏi các khung giờ
+        if (area && (matchedHour !== null || isMultiHours)) {
+            return { intent: 'LANDSLIDE_AREA_HOURS_PREDICTION', area, timeOffset: matchedHour }
+        }
+        if (matchedHour !== null || isMultiHours) {
+            return { intent: 'LANDSLIDE_HOURS_PREDICTION', area: null, timeOffset: matchedHour }
+        }
+
         if (/(vì sao|tại sao|nguyên nhân|giải thích|lý do|sao lại|vì lý do gì)/.test(m))
             return { intent: 'LANDSLIDE_EXPLAIN_RISK', area, timeOffset: 0 }
         if (/(khu vực nào|đâu nguy hiểm|nặng nhất|nguy hiểm nhất|khu vực nguy hiểm|nguy hiểm|khu nào|nguy cơ cao nhất|nguy cơ cao|hotspot|điểm đen)/.test(m))
@@ -164,14 +189,32 @@ function detectIntent(msg, domain) {
 
     if (/(?:^|\s)(xin chào|hello|hi|chào bot|chào aqua)(?:\s|$)/.test(m))
         return { intent: 'GREETING', area: null, timeOffset: 0 }
+
+    // Kiểm tra top 10 điểm ngập lụt cao nhất
+    if (/(top\s*10|10\s*(?:điểm|khu vực|vùng|vị trí)|liệt kê\s*10)/.test(m)) {
+        return { intent: 'FLOOD_TOP_10', area: extractArea(m), timeOffset: matchedHour || 0 }
+    }
+
+    const area = extractArea(m)
+    
+    // Kiểm tra xem có hỏi về ngập lụt theo khu vực kèm khung giờ không
+    if (area && (matchedHour !== null || isMultiHours)) {
+        return { intent: 'FLOOD_AREA_HOURS_PREDICTION', area, timeOffset: matchedHour }
+    }
+
+    // Dự báo ngập lụt chung theo khung giờ 1, 2, 3, 6h
+    if (matchedHour !== null || isMultiHours) {
+        return { intent: 'FLOOD_HOURS_PREDICTION', area: null, timeOffset: matchedHour }
+    }
+
     if (/(vì sao|tại sao|nguyên nhân|giải thích|lý do|sao lại|vì lý do gì)/.test(m))
-        return { intent: 'EXPLAIN_RISK', area: extractArea(m), timeOffset: 0 }
+        return { intent: 'EXPLAIN_RISK', area, timeOffset: 0 }
     if (/(khu vực nào|đâu nguy hiểm|nặng nhất|nguy hiểm nhất|khu nào ngập|ngập nặng)/.test(m))
         return { intent: 'WORST_AREA', area: null, timeOffset: 0 }
     if (/(an toàn không|nên đi không|có thể ra|nên ở nhà|nguy hiểm không)/.test(m))
-        return { intent: 'SAFE_ADVICE', area: extractArea(m), timeOffset: 0 }
+        return { intent: 'SAFE_ADVICE', area, timeOffset: 0 }
     if (/(đường vòng|đi tránh|tránh ngập|ngõ nào|đường nào|chỉ đường|tuyến đường|lối đi|lộ trình|tìm đường)/.test(m))
-        return { intent: 'FIND_SAFE_ROUTE', area: extractArea(m), timeOffset: 0 }
+        return { intent: 'FIND_SAFE_ROUTE', area, timeOffset: 0 }
     if (/(\d{1,2}h|\d{1,2}:\d{2}|sáng|chiều|tối|trưa|ngày mai|hôm nay|ngày kia)/.test(m) &&
         /(ngập|mưa|lũ|dự báo|nguy cơ)/.test(m)) {
         let offset = 0
@@ -179,13 +222,12 @@ function detectIntent(msg, domain) {
         else if (/(ngày kia|day after)/.test(m)) offset = 36
         else if (/chiều/.test(m)) offset = 6
         else if (/tối/.test(m)) offset = 10
-        return { intent: 'SPECIFIC_TIME', area: extractArea(m), timeOffset: offset }
+        return { intent: 'SPECIFIC_TIME', area, timeOffset: offset }
     }
 
     if (/(hiện tại|bây giờ|đang ngập|lúc này|ngay bây giờ|hiện giờ|ngập không|có ngập|tình trạng ngập)/.test(m))
-        return { intent: 'CURRENT_STATUS', area: extractArea(m), timeOffset: 0 }
+        return { intent: 'CURRENT_STATUS', area, timeOffset: 0 }
 
-    const area = extractArea(m)
     if (area) return { intent: 'SPECIFIC_AREA', area, timeOffset: 0 }
 
     if (/(dự báo|ngập lụt|lũ lụt|4 ngày|96 giờ|tuần|sắp tới|trong thời gian)/.test(m))
@@ -226,6 +268,116 @@ async function queryForecastSummary() {
         const { rows } = await withTimeout(pool.query(sql), DB_TIMEOUT_MS)
         return rows
     })
+}
+
+async function queryFloodTop10ByTime(hoursOffset) {
+    const offset = Number.isFinite(hoursOffset) ? Math.round(hoursOffset) : 0
+    const cacheKey = `ucbot:flood_top10_bytime:${offset}`
+    return cached(cacheKey, CACHE_TTL, async () => {
+        const sql = `
+          SELECT sub.risk_level, sub.flood_depth_cm, sub.explanation, sub.time,
+                 sub.node_id, gn.location_name, gn.latitude, gn.longitude
+          FROM (
+            SELECT node_id, risk_level, flood_depth_cm, explanation, time
+            FROM flood_predictions
+            WHERE time BETWEEN NOW() + ($1::INT * INTERVAL '1 hour') - INTERVAL '45 minutes'
+                           AND NOW() + ($1::INT * INTERVAL '1 hour') + INTERVAL '45 minutes'
+              AND risk_level IN ('medium', 'high', 'severe')
+            ORDER BY flood_depth_cm DESC
+            LIMIT 10
+          ) sub
+          JOIN grid_nodes gn ON gn.node_id = sub.node_id
+          ORDER BY sub.flood_depth_cm DESC
+        `
+        const { rows } = await withTimeout(pool.query(sql, [offset]))
+        return rows
+    })
+}
+
+async function queryAreaFloodByOffsets(nodeIds, offsets) {
+    const results = {}
+    for (const offset of offsets) {
+        const sql = `
+          SELECT fp.node_id, fp.risk_level, fp.flood_depth_cm, fp.time, gn.location_name
+          FROM flood_predictions fp
+          JOIN grid_nodes gn ON gn.node_id = fp.node_id
+          WHERE fp.node_id = ANY($1)
+            AND fp.time BETWEEN NOW() + ($2::INT * INTERVAL '1 hour') - INTERVAL '45 minutes'
+                              AND NOW() + ($2::INT * INTERVAL '1 hour') + INTERVAL '45 minutes'
+          ORDER BY fp.flood_depth_cm DESC
+        `
+        const { rows } = await withTimeout(pool.query(sql, [nodeIds, offset]))
+        results[offset] = rows
+    }
+    return results
+}
+
+async function queryLandslideTop10() {
+    const lsCacheFresh = landslideCache && landslideCache.lastUpdated !== null
+    if (lsCacheFresh && landslideCache.currentStatus && landslideCache.currentStatus.length > 0) {
+        return landslideCache.currentStatus.slice(0, 10)
+    }
+    const sql = `
+      SELECT sub.node_id, sub.prob_landslide, sub.risk_level, sub.prediction_time,
+             gn.location_name, gn.province, gn.lat, gn.lon, gn.slope, gn.elevation
+      FROM (
+        SELECT DISTINCT ON (node_id) *
+        FROM landslide_predictions
+        WHERE prediction_time >= NOW() - INTERVAL '24 hours'
+          AND risk_level IN ('DANGER', 'WARNING')
+        ORDER BY node_id, prediction_time DESC
+      ) sub
+      JOIN landslide_grid_nodes gn ON gn.node_id = sub.node_id
+      ORDER BY sub.prob_landslide DESC
+      LIMIT 10
+    `
+    const { rows } = await withTimeout(pool.query(sql))
+    return rows
+}
+
+async function queryAreaLandslidePredictions(areaName) {
+    const sqlNodes = `
+      SELECT node_id, location_name, province, lat, lon, slope, elevation
+      FROM landslide_grid_nodes
+      WHERE location_name ILIKE $1 OR province ILIKE $1
+      LIMIT 50
+    `
+    const { rows: nodes } = await withTimeout(pool.query(sqlNodes, [`%${areaName}%`]))
+    if (nodes.length === 0) return {}
+    
+    const nodeIds = nodes.map(n => n.node_id)
+    const nodeMap = new Map(nodes.map(n => [n.node_id, n]))
+    
+    const sqlPreds = `
+      SELECT node_id, prob_landslide, risk_level, prediction_time, rain_7d_accum, api_7d, soil_moisture_1d
+      FROM landslide_predictions
+      WHERE node_id = ANY($1)
+        AND prediction_time >= NOW() - INTERVAL '24 hours'
+      ORDER BY node_id, prediction_time ASC
+    `
+    const { rows: preds } = await withTimeout(pool.query(sqlPreds, [nodeIds]))
+    
+    const resultsByOffset = { 0: null, 1: null, 2: null, 3: null }
+    
+    preds.forEach(p => {
+        const now = new Date()
+        now.setHours(0, 0, 0, 0)
+        const pTime = new Date(p.prediction_time)
+        pTime.setHours(0, 0, 0, 0)
+        
+        const diffTime = Math.abs(pTime - now)
+        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24))
+        const offset = diffDays >= 0 && diffDays <= 3 ? diffDays : 0
+        
+        const gn = nodeMap.get(p.node_id)
+        const merged = { ...p, ...gn }
+        
+        if (!resultsByOffset[offset] || Number(p.prob_landslide) > Number(resultsByOffset[offset].prob_landslide)) {
+            resultsByOffset[offset] = merged
+        }
+    })
+    
+    return resultsByOffset
 }
 
 async function queryCurrentStatus() {
@@ -977,6 +1129,111 @@ router.post('/chatbot/ask', async (req, res) => {
                                 areaKeywords: ['Sơn La', 'Tân Lang', 'Yên Bái', 'Lai Châu', 'Hòa Bình'],
                                 expertNodes: []
                             }
+                        }
+                    }
+                    break
+
+                case 'FLOOD_TOP_10':
+                    {
+                        const offset = timeOffset || 0
+                        const result = await queryFloodTop10ByTime(offset)
+                        const rows = result.data || []
+                        const replyText = formatFloodTop10(rows, offset)
+                        const expertNodes = rows
+                            .filter(r => r.node_id && ['high', 'severe'].includes(r.risk_level))
+                            .slice(0, 3)
+                            .map(r => ({ node_id: r.node_id, location_name: r.location_name, risk_level: r.risk_level }))
+                        
+                        replyObj = { text: replyText, suggestAreas: false, expertNodes }
+                    }
+                    break
+
+                case 'FLOOD_AREA_HOURS_PREDICTION':
+                    {
+                        const nodes = await getNodesByArea(area)
+                        if (nodes.length === 0) {
+                            replyObj = {
+                                text: `🔍 Không tìm thấy dữ liệu ngập lụt cho khu vực **${area}**. Vui lòng kiểm tra lại tên địa danh.`,
+                                suggestAreas: true,
+                                expertNodes: []
+                            }
+                        } else {
+                            const nodeIds = nodes.map(n => n.node_id)
+                            const breakdownData = await queryAreaFloodByOffsets(nodeIds, [1, 2, 3, 6])
+                            const replyText = formatFloodAreaHoursBreakdown(area, breakdownData)
+                            
+                            const expertNodes = []
+                            const seenNodes = new Set()
+                            const allRows = [].concat(...Object.values(breakdownData))
+                            allRows.forEach(r => {
+                                if (r.node_id && ['high', 'severe'].includes(r.risk_level) && !seenNodes.has(r.node_id)) {
+                                    seenNodes.add(r.node_id)
+                                    expertNodes.push({ node_id: r.node_id, location_name: r.location_name, risk_level: r.risk_level })
+                                }
+                            })
+                            
+                            replyObj = { text: replyText, suggestAreas: false, expertNodes: expertNodes.slice(0, 3) }
+                        }
+                    }
+                    break
+
+                case 'FLOOD_HOURS_PREDICTION':
+                    {
+                        const offset = timeOffset || 1
+                        const result = await queryFloodTop10ByTime(offset)
+                        const rows = result.data || []
+                        const replyText = formatFloodTop10(rows, offset)
+                        const expertNodes = rows
+                            .filter(r => r.node_id && ['high', 'severe'].includes(r.risk_level))
+                            .slice(0, 3)
+                            .map(r => ({ node_id: r.node_id, location_name: r.location_name, risk_level: r.risk_level }))
+                        
+                        replyObj = { text: replyText, suggestAreas: false, expertNodes }
+                    }
+                    break
+
+                case 'LANDSLIDE_HOURS_PREDICTION':
+                    {
+                        const rows = await queryLandslideTop10()
+                        const replyText = formatLandslideTop10(rows)
+                        const expertNodes = rows
+                            .filter(r => r.node_id && ['DANGER', 'WARNING'].includes(r.risk_level))
+                            .slice(0, 3)
+                            .map(r => ({
+                                node_id: r.node_id,
+                                location_name: r.location_name || `Khu vực tại (${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)})`,
+                                risk_level: r.risk_level === 'DANGER' ? 'severe' : 'high'
+                            }))
+                        
+                        replyObj = { text: replyText, suggestAreas: false, expertNodes }
+                    }
+                    break
+
+                case 'LANDSLIDE_AREA_HOURS_PREDICTION':
+                    {
+                        const breakdownData = await queryAreaLandslidePredictions(area)
+                        const valid = Object.values(breakdownData).some(x => x !== null)
+                        if (!valid) {
+                            replyObj = {
+                                text: `🔍 Không tìm thấy dữ liệu sạt lở cho khu vực **${area}**. Vui lòng kiểm tra lại tên địa danh.`,
+                                suggestAreas: true,
+                                areaKeywords: ['Sơn La', 'Tân Lang', 'Yên Bái', 'Lai Châu', 'Hòa Bình'],
+                                expertNodes: []
+                            }
+                        } else {
+                            const replyText = formatLandslideAreaHoursBreakdown(area, breakdownData)
+                            const expertNodes = []
+                            Object.values(breakdownData).forEach(r => {
+                                if (r && r.node_id && ['DANGER', 'WARNING'].includes(r.risk_level)) {
+                                    expertNodes.push({
+                                        node_id: r.node_id,
+                                        location_name: r.location_name || `Khu vực tại (${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)})`,
+                                        risk_level: r.risk_level === 'DANGER' ? 'severe' : 'high'
+                                    })
+                                }
+                            })
+                            
+                            replyObj = { text: replyText, suggestAreas: false, expertNodes: expertNodes.slice(0, 3) }
                         }
                     }
                     break
