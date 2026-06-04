@@ -24,7 +24,7 @@ import { useSettings } from '../../../context/SettingsContext'
 const TILE_URLS: Record<string, string> = {
   streets: 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=vi',
   satellite: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=vi',
-  terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+  terrain: 'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
 }
 
 const TILE_ATTRIBUTIONS: Record<string, string> = {

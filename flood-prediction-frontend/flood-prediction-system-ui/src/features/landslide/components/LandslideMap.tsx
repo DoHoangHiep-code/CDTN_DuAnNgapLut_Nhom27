@@ -26,7 +26,7 @@ type RiskKey = keyof typeof RISK_PALETTE
 
 // Tile URLs — dùng chung với MapPage
 const TILE_URLS = {
-  terrain:   'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+  terrain:   'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
   satellite: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=vi',
   streets:   'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=vi',
 }
