@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Send, Bot, User, X, Droplets, Mountain } from 'lucide-react'
-import { askChatbot as askChatbotApi, callExpertDetail as callExpertDetailApi } from '../services/expertChatApi'
+import { askChatbot as askChatbotApi, callExpertDetail as callExpertDetailApi, getAreaNodes } from '../services/expertChatApi'
 import { useAuth } from '../context/AuthContext'
 import { useDisasterMode } from '../context/DisasterContext'
+import { LandslideMap } from '../features/landslide/components/LandslideMap'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,8 @@ export function ChatInterface({ onClose }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [elevationMapConfig, setElevationMapConfig] = useState<{ lat: number; lng: number; label: string } | null>(null)
+  const [areaNodes, setAreaNodes] = useState<any[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -333,6 +336,38 @@ export function ChatInterface({ onClose }: Props) {
                 <button
                   type="button"
                   onClick={() => {
+                    if (msg.actionButton!.payload === 'OPEN_ELEVATION_MAP') {
+                      let lat = 21.0278;
+                      let lng = 105.8342;
+                      let label = 'Hà Nội';
+                      const area = msg.area?.toLowerCase() || '';
+                      if (area.includes('triều khúc')) {
+                        lat = 20.985;
+                        lng = 105.798;
+                        label = 'Triều Khúc';
+                      } else if (area.includes('phạm hùng')) {
+                        lat = 21.016;
+                        lng = 105.783;
+                        label = 'Đường Phạm Hùng';
+                      } else if (area.includes('nguyễn trãi')) {
+                        lat = 20.998;
+                        lng = 105.802;
+                        label = 'Đường Nguyễn Trãi';
+                      }
+                      setElevationMapConfig({ lat, lng, label });
+                      if (msg.area) {
+                        getAreaNodes(msg.area).then(res => {
+                          if (res && res.success && res.nodes) {
+                            setAreaNodes(res.nodes);
+                          } else {
+                            setAreaNodes([]);
+                          }
+                        });
+                      } else {
+                        setAreaNodes([]);
+                      }
+                      return;
+                    }
                     const parts = msg.actionButton!.payload.split('|')
                     if (parts.length > 1) {
                       void handleExpertDetailClick(parts[1], "Phân tích chuyên sâu")
@@ -430,6 +465,54 @@ export function ChatInterface({ onClose }: Props) {
           <Send className="h-4 w-4" />
         </button>
       </div>
+
+      {/* Elevation Map Overlay */}
+      {elevationMapConfig && (
+        <div className="absolute inset-0 bg-white dark:bg-slate-900 z-[100] flex flex-col rounded-3xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+          {/* Map Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex-shrink-0">
+            <span className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+              <span>🗺️</span> Bản đồ Cao độ: {elevationMapConfig.label}
+            </span>
+            <button
+              type="button"
+              onClick={() => setElevationMapConfig(null)}
+              className="rounded-lg p-1 text-slate-500 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-slate-700/60"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          
+          {/* Map Content */}
+          <div className="flex-1 relative z-0 min-h-0">
+            {/* Floating Close Button */}
+            <button
+              type="button"
+              onClick={() => setElevationMapConfig(null)}
+              className="absolute top-4 right-4 z-[1000] flex h-10 w-10 items-center justify-center rounded-full bg-slate-900/80 hover:bg-slate-900 text-white shadow-lg backdrop-blur-sm transition-all hover:scale-105 active:scale-95 border border-white/20"
+              title="Thoát bản đồ"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <LandslideMap 
+              tileStyle="terrain" 
+              hideHUD={true} 
+              hideDangerPoints={true} 
+              searchMarker={[elevationMapConfig.lat, elevationMapConfig.lng]} 
+              elevationNodes={areaNodes}
+            />
+            {/* Legend */}
+            <div className="absolute bottom-4 left-4 z-[1000] bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-800 p-2.5 rounded-xl text-[10px] space-y-1 shadow-md select-none pointer-events-none">
+              <div className="font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider text-[9px] mb-1">Cao Độ Địa Hình (m)</div>
+              <div className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-[#16a34a]" /> <span>&gt; 5.5m (An toàn)</span></div>
+              <div className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-[#f59e0b]" /> <span>4.5m - 5.5m (TB)</span></div>
+              <div className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-[#f97316]" /> <span>3.5m - 4.5m (Thấp)</span></div>
+              <div className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-[#e11d48]" /> <span>&le; 3.5m (Vùng trũng)</span></div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

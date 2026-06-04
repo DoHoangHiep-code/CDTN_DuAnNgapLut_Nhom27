@@ -43,7 +43,8 @@ async function runTests() {
         { name: 'Ngập lụt 3 giờ tới', query: 'Xem những vùng có khả năng ngập lụt trong 3 giờ tới', domain: 'flood' },
         { name: 'Sạt lở 6 giờ tới', query: 'Xem những vùng có khả năng sạt lở trong 6 giờ tới', domain: 'landslide' },
         { name: 'Ngập lụt Triều Khúc 3 giờ tới', query: 'Triều Khúc ngập lụt thế nào trong 3 giờ tới', domain: 'flood' },
-        { name: 'Sạt lở Sơn La trong 1,2,3,6h', query: 'Dự báo sạt lở ở Sơn La trong 1,2,3,6 giờ tới', domain: 'landslide' }
+        { name: 'Sạt lở Sơn La trong 1,2,3,6h', query: 'Dự báo sạt lở ở Sơn La trong 1,2,3,6 giờ tới', domain: 'landslide' },
+        { name: 'Đường tránh Nguyễn Trãi', query: 'Đường Nguyễn Trãi đang ngập, tôi nên đi đường nào để tránh', domain: 'flood' }
     ]
 
     console.log('🤖 Bắt đầu chạy test in-process cho Chatbot...\n')

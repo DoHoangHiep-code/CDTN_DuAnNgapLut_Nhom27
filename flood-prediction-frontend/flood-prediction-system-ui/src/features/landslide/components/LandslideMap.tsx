@@ -26,7 +26,7 @@ type RiskKey = keyof typeof RISK_PALETTE
 
 // Tile URLs — dùng chung với MapPage
 const TILE_URLS = {
-  terrain:   'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}&hl=vi',
+  terrain:   'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
   satellite: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=vi',
   streets:   'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=vi',
 }
@@ -425,9 +425,10 @@ interface LandslideMapProps {
   focusedNodeId?: string | null
   /** Marker tọa độ tìm kiếm */
   searchMarker?: [number, number] | null
+  elevationNodes?: Array<{ node_id: string; location_name: string; latitude: number; longitude: number; elevation: number; slope: number }>
 }
 
-export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, dayOffset = 0, onChangeOffset, hideDangerPoints = false, searchMarker = null, focusedNodeId = null }: LandslideMapProps) {
+export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, dayOffset = 0, onChangeOffset, hideDangerPoints = false, searchMarker = null, focusedNodeId = null, elevationNodes = [] }: LandslideMapProps) {
   const [map, setMap] = useState<L.Map | null>(null)
   const [nodes, setNodes] = useState<LandslideNode[]>([])
   const [isFetching, setIsFetching] = useState(false)
@@ -445,6 +446,12 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, d
   useEffect(() => {
     if (mapRef) mapRef.current = { flyToWard: handleFlyToWard }
   }, [mapRef, handleFlyToWard])
+
+  useEffect(() => {
+    if (searchMarker) {
+      setFlyTarget({ lat: searchMarker[0], lng: searchMarker[1], zoom: 14 })
+    }
+  }, [searchMarker])
 
   // ── Fetch landslide nodes khi bounds thay đổi ─────────────────────────────
   const fetchNodes = useCallback(async (bounds: L.LatLngBounds) => {
@@ -551,6 +558,37 @@ export function LandslideMap({ tileStyle = 'terrain', mapRef, hideHUD = false, d
             iconAnchor: [8, 8],
           })} />
         )}
+
+        {elevationNodes && elevationNodes.map(n => {
+          const elev = Number(n.elevation ?? 5);
+          const color = elev <= 3.5 ? '#e11d48' : elev <= 4.5 ? '#f97316' : elev <= 5.5 ? '#f59e0b' : '#16a34a';
+          return (
+            <CircleMarker
+              key={`el_${n.node_id}`}
+              center={[Number(n.latitude), Number(n.longitude)]}
+              radius={8}
+              pathOptions={{
+                color: '#fff',
+                fillColor: color,
+                weight: 1.5,
+                opacity: 0.9,
+                fillOpacity: 0.85
+              }}
+            >
+              <Tooltip direction="top" className="fps-map-tooltip" opacity={1}>
+                <div className="space-y-1 text-xs">
+                  <div className="font-bold">{n.location_name}</div>
+                  <div className="text-[11px] text-slate-700 dark:text-slate-300">
+                    ⛰️ Cao độ: <strong className="text-slate-950 dark:text-white font-bold">{elev.toFixed(2)}m</strong>
+                  </div>
+                  <div className="text-[11px] text-slate-700 dark:text-slate-300">
+                    📐 Độ dốc: <strong className="text-slate-950 dark:text-white font-bold">{Number(n.slope ?? 0).toFixed(2)}°</strong>
+                  </div>
+                </div>
+              </Tooltip>
+            </CircleMarker>
+          );
+        })}
 
         <NodePopup node={selectedNode} onClose={() => setSelectedNode(null)} />
       </MapContainer>
