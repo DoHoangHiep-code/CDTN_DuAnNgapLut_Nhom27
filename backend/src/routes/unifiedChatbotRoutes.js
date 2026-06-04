@@ -1718,7 +1718,9 @@ router.post('/chatbot/ask', async (req, res) => {
                 case 'FIND_SAFE_ROUTE':
                     if (area) {
                         try {
-                            data = await queryAlternativeRoutes(area);
+                            // queryAlternativeRoutes trả về mảng trực tiếp (Array), không phải { data: [] }
+                            const routes = await queryAlternativeRoutes(area);
+                            data = { data: Array.isArray(routes) ? routes : [] };
                         } catch (err) {
                             console.warn('[CHATBOT] queryAlternativeRoutes lỗi:', err.message);
                             data = { data: [] };
