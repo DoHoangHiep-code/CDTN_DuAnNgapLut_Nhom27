@@ -17,8 +17,8 @@ async function test() {
     console.error("Error:", err.message);
   } finally {
     setTimeout(() => {
-        pool.end();
-        console.log("Pool ended");
+      pool.end();
+      console.log("Pool ended");
     }, 5000);
   }
 }

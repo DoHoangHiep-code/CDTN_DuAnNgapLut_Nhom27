@@ -264,6 +264,60 @@ function formatTier1RiskExplanation(f, locationName) {
 // FORMAT: TIER 2 EXPERT ANALYSIS
 // ═════════════════════════════════════════════════════════════════════════════
 
+const FEATURE_LABELS = {
+  prcp: "Lượng mưa hiện tại",
+  prcp_3h: "Tổng mưa 3h qua",
+  prcp_6h: "Tổng mưa 6h qua",
+  prcp_12h: "Tổng mưa 12h qua",
+  prcp_24h: "Tổng mưa 24h qua",
+  temp: "Nhiệt độ",
+  rhum: "Độ ẩm không khí",
+  wspd: "Tốc độ gió",
+  pres: "Áp suất khí quyển",
+  pressure_change_24h: "Biến thiên áp suất 24h",
+  max_prcp_3h: "Mưa tối đa 3h qua",
+  max_prcp_6h: "Mưa tối đa 6h qua",
+  max_prcp_12h: "Mưa tối đa 12h qua",
+  elevation: "Cao độ địa hình",
+  slope: "Độ dốc địa hình",
+  impervious_ratio: "Tỷ lệ bê tông hóa",
+  dist_to_drain_km: "Khoảng cách cống",
+  dist_to_river_km: "Khoảng cách sông",
+  dist_to_pump_km: "Khoảng cách trạm bơm",
+  dist_to_main_road_km: "Khoảng cách đường chính",
+  dist_to_park_km: "Khoảng cách công viên",
+  hour: "Giờ trong ngày",
+  dayofweek: "Thứ trong tuần",
+  month: "Tháng trong năm",
+  dayofyear: "Ngày trong năm",
+  hour_sin: "Chu kỳ giờ (sin)",
+  hour_cos: "Chu kỳ giờ (cos)",
+  month_sin: "Chu kỳ tháng (sin)",
+  month_cos: "Chu kỳ tháng (cos)",
+  rainy_season_flag: "Mùa mưa"
+};
+
+function getUnit(name) {
+  if (name.includes('prcp')) return ' mm';
+  if (name === 'temp') return '°C';
+  if (name === 'rhum') return '%';
+  if (name === 'wspd') return ' km/h';
+  if (name.includes('pres')) return ' hPa';
+  if (name === 'elevation') return ' m';
+  if (name === 'slope') return '°';
+  if (name === 'impervious_ratio') return '%';
+  if (name.includes('dist_')) return ' km';
+  return '';
+}
+
+function formatFeatureValue(name, val) {
+  if (val === undefined || val === null) return '0';
+  if (name === 'impervious_ratio') return (Number(val) * 100).toFixed(0);
+  if (name === 'dayofweek') return `Thứ ${Number(val) + 1}`;
+  if (name === 'rainy_season_flag') return Number(val) === 1 ? 'Có' : 'Không';
+  return Number(val).toFixed(1);
+}
+
 /**
  * Tạo Markdown Tier 2 cho phân tích chuyên gia CatBoost.
  *
@@ -281,14 +335,39 @@ function formatTier2ExpertAnalysis(catboostData, locationName) {
   const riskTag = riskLabels[riskLevel] || 'AN TOÀN 🟢'
   const depthAssess = depthCm > 30 ? 'Ngập sâu nguy hiểm' : (depthCm > 10 ? 'Ngập nhẹ' : 'An toàn')
 
-  // Top features (giả định dựa trên rule vì không có SHAP value thực tế từ CatBoost API trả về)
+  // Top features (sử dụng SHAP value từ CatBoost API nếu có, fallback về rule)
   const topFeatures = []
-  if (features.prcp_24h >= 100) topFeatures.push(`🌧️ Lượng mưa 24h cực lớn (${features.prcp_24h}mm) gây quá tải cục bộ`)
-  else if (features.prcp_3h >= 50) topFeatures.push(`🌧️ Cường độ mưa 3h mạnh (${features.prcp_3h}mm) tạo dòng chảy mặt`)
-  if (features.elevation <= 5) topFeatures.push(`📉 Cao độ địa hình thấp (${features.elevation}m) dễ tích tụ nước`)
-  if (features.impervious_ratio >= 0.7) topFeatures.push(`🏢 Tỷ lệ bê tông hóa rất cao (${(features.impervious_ratio * 100).toFixed(0)}%) ngăn nước thấm`)
-  if (features.dist_to_drain_km >= 1.5) topFeatures.push(`🕳️ Khoảng cách đến cống thoát khá xa (${features.dist_to_drain_km}km)`)
-  if (topFeatures.length === 0) topFeatures.push('✅ Không có yếu tố nào vượt ngưỡng nguy hiểm đột biến')
+  if (aiResult && aiResult.feature_importance && Object.keys(aiResult.feature_importance).length > 0) {
+    const shap = aiResult.feature_importance
+    const items = Object.keys(shap)
+      .map(name => ({
+        name,
+        val: shap[name],
+        absVal: Math.abs(shap[name])
+      }))
+      .filter(item => item.absVal > 0.01)
+      .sort((a, b) => b.absVal - a.absVal)
+
+    const topItems = items.slice(0, 3)
+    topItems.forEach(item => {
+      const label = FEATURE_LABELS[item.name] || item.name
+      const valStr = formatFeatureValue(item.name, features[item.name])
+      const unit = getUnit(item.name)
+      const direction = item.val > 0 ? "làm tăng" : "làm giảm"
+      const impactEmoji = item.val > 0 ? "🔺" : "🔻"
+      const sign = item.val > 0 ? "+" : ""
+      topFeatures.push(`${impactEmoji} **${label}** (${valStr}${unit}): ${direction} nguy cơ ngập (${sign}${item.val.toFixed(2)} cm)`)
+    })
+  }
+
+  if (topFeatures.length === 0) {
+    if (features.prcp_24h >= 100) topFeatures.push(`🌧️ Lượng mưa 24h cực lớn (${features.prcp_24h}mm) gây quá tải cục bộ`)
+    else if (features.prcp_3h >= 50) topFeatures.push(`🌧️ Cường độ mưa 3h mạnh (${features.prcp_3h}mm) tạo dòng chảy mặt`)
+    if (features.elevation <= 5) topFeatures.push(`📉 Cao độ địa hình thấp (${features.elevation}m) dễ tích tụ nước`)
+    if (features.impervious_ratio >= 0.7) topFeatures.push(`🏢 Tỷ lệ bê tông hóa rất cao (${(features.impervious_ratio * 100).toFixed(0)}%) ngăn nước thấm`)
+    if (features.dist_to_drain_km >= 1.5) topFeatures.push(`🕳️ Khoảng cách đến cống thoát khá xa (${features.dist_to_drain_km}km)`)
+    if (topFeatures.length === 0) topFeatures.push('✅ Không có yếu tố nào vượt ngưỡng nguy hiểm đột biến')
+  }
 
   let md = `> 🔬 **Phân tích chuyên gia – ${locationName}**\n`
   md += `> 🛡️ Mức rủi ro ngập: **${riskTag}**\n`
