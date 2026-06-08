@@ -46,7 +46,14 @@ class DashboardService {
   }
 
   async getDynamicAlerts() {
-    return this.dashboardRepository.getDynamicAlerts().catch((err) => {
+    const key = 'dashboard:dynamic_alerts'
+    const cached = this.cache.get(key)
+    if (cached) return cached
+
+    return this.dashboardRepository.getDynamicAlerts().then(data => {
+      this.cache.set(key, data, 15) // cache 15 seconds
+      return data
+    }).catch((err) => {
       console.error('[DashboardService] getDynamicAlerts error:', err.message)
       return []
     })

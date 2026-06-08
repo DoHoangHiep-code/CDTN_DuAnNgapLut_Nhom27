@@ -35,16 +35,16 @@ class ReportsRepository {
     }
 
     if (dateFrom || dateTo) {
-      where.created_at = {}
-      if (dateFrom) where.created_at[Op.gte] = new Date(dateFrom + 'T00:00:00+07:00')
-      if (dateTo) where.created_at[Op.lte] = new Date(dateTo + 'T23:59:59+07:00')
+      where.reported_at = {}
+      if (dateFrom) where.reported_at[Op.gte] = new Date(dateFrom + 'T00:00:00+07:00')
+      if (dateTo) where.reported_at[Op.lte] = new Date(dateTo + 'T23:59:59+07:00')
     }
 
     const { count, rows } = await ActualFloodReport.findAndCountAll({
       where,
       limit: safeLimit,
       offset,
-      order: [['created_at', 'DESC']],
+      order: [['reported_at', 'DESC']],
       include: [
         {
           model: GridNode,
@@ -86,25 +86,25 @@ class ReportsRepository {
     )
   }
 
-  // POST tạo báo cáo mới: tạo geom bằng PostGIS từ lat/lng (không xử lý geometry bằng JSON)
-  async createActualFloodReport({ userId, latitude, longitude, reported_level, node_id }) {
+  // POST tạo báo cáo mới: tạo geom bằng PostGIS từ lat/lng
+  async createActualFloodReport({ userId, latitude, longitude, flood_depth_cm, description }) {
     const sql = `
-      INSERT INTO actual_flood_reports (user_id, latitude, longitude, geom, reported_level, created_at, node_id)
+      INSERT INTO actual_flood_reports (user_id, latitude, longitude, geom, flood_depth_cm, description, reported_at)
       VALUES (
         :userId,
         :latitude,
         :longitude,
         ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326),
-        :reported_level,
-        NOW(),
-        :node_id
+        :flood_depth_cm,
+        :description,
+        NOW()
       )
-      RETURNING report_id, created_at, latitude, longitude, reported_level, user_id, node_id;
+      RETURNING report_id, reported_at, latitude, longitude, flood_depth_cm, description, user_id;
     `
     return this._withStatementTimeout(7000, (t) =>
       this.sequelize.query(sql, {
         type: QueryTypes.SELECT,
-        replacements: { userId, latitude, longitude, reported_level, node_id },
+        replacements: { userId: userId || null, latitude, longitude, flood_depth_cm: flood_depth_cm || 0, description: description || '' },
         transaction: t,
       }).then((rows) => rows?.[0] ?? null),
     )

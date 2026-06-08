@@ -34,6 +34,11 @@ class AuthController {
       // Trả về kết quả (không gồm password)
       return res.status(201).json({ success: true, message: result.message, data: result.user })
     } catch (err) {
+      if (err.name === 'SequelizeUniqueConstraintError') {
+        const field = err.errors[0].path;
+        const msg = field === 'email' ? 'Email đã được sử dụng' : 'Tên đăng nhập đã tồn tại';
+        return res.status(409).json({ success: false, error: { message: msg } })
+      }
       // Đẩy lỗi cho global error handler để tập trung xử lý
       return next(err)
     }
@@ -80,7 +85,10 @@ class AuthController {
       if (!email) return res.status(400).json({ success: false, error: { message: 'Thiếu email' } })
 
       const result = await this.authService.checkEmail({ email })
-      return res.status(200).json({ success: true, message: result.message, resetToken: result.resetToken })
+      if (!result.exists) {
+        return res.status(200).json({ success: true, data: { exists: false } })
+      }
+      return res.status(200).json({ success: true, data: { exists: true }, message: result.message, resetToken: result.resetToken })
     } catch (err) {
       if (err && err.statusCode) return res.status(err.statusCode).json({ success: false, error: { message: err.message } })
       return next(err)
