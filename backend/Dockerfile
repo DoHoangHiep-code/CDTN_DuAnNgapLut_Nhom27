@@ -1,13 +1,13 @@
-FROM node:20-bookworm
+FROM node:18-slim
 
+# Set working directory
 WORKDIR /app
 
-COPY package*.json ./
-
-RUN npm install
-
+# Copy all files (including local node_modules containing prebuilt Linux x64 binaries)
 COPY . .
 
+# Expose port
 EXPOSE 3002
 
-CMD ["npm", "start"]
+# Startup command with increased V8 heap memory limit to prevent OOM
+CMD ["node", "--max-old-space-size=6144", "src/server.js"]

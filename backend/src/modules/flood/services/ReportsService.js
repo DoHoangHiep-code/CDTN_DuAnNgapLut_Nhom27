@@ -42,6 +42,9 @@ class ReportsService {
         
         try {
           const liveData = await getWeatherByCoords(fallbackLat, fallbackLon)
+          if (!liveData) {
+            throw new Error('No weather data returned from OWM')
+          }
           data = {
             district_name: district,
             temp: liveData.temp,
@@ -54,8 +57,8 @@ class ReportsService {
           console.error(`[ReportsService] Fallback OWM failed for ${district}:`, err?.message || err)
           data = {
             district_name: district,
-            temp: 0,
-            rhum: 0,
+            temp: 28, // Fallback -> 28°C
+            rhum: 70, // Fallback -> 70%
             prcp: 0,
             flood_depth_cm: 0,
             is_fallback: true

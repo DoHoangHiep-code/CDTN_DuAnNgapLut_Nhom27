@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 
 import numpy as np
 import uvicorn
-from catboost import CatBoostRegressor
+from catboost import CatBoostRegressor, Pool
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -258,6 +258,19 @@ def _run_pipeline(ordered_features_2d: list[list[float]]) -> list[dict]:
     raw1 = _stage1.predict(ordered_features_2d)  # type: ignore[union-attr]
     depths_s1 = [max(0.0, float(v)) for v in raw1]
 
+    # Tính toán SHAP values từ Stage 1
+    try:
+        pool = Pool(data=ordered_features_2d, feature_names=FEATURE_ORDER)
+        shap_vals = _stage1.get_feature_importance(data=pool, type='ShapValues')  # type: ignore[union-attr]
+        feature_importances = []
+        for i in range(len(depths_s1)):
+            row_shap = shap_vals[i]
+            feat_imp = {FEATURE_ORDER[j]: float(row_shap[j]) for j in range(len(FEATURE_ORDER))}
+            feature_importances.append(feat_imp)
+    except Exception as shap_err:
+        logger.warning("Lỗi tính SHAP values: %s", shap_err)
+        feature_importances = [{} for _ in range(len(depths_s1))]
+
     # --- Physics-based Hard Rule: No rain = No flood ---
     # Ép độ ngập về 0 nếu hoàn toàn không có mưa trong 24h (chống false positive của AI)
     for i, row in enumerate(ordered_features_2d):
@@ -281,6 +294,7 @@ def _run_pipeline(ordered_features_2d: list[list[float]]) -> list[dict]:
             "label": 0,
             "stage": 1,
             "stage1_depth_cm": round(depths_s1[i], 2),
+            "feature_importance": feature_importances[i],
         }
 
     # Có ngập: chạy Stage 2 để tinh chỉnh
@@ -295,6 +309,7 @@ def _run_pipeline(ordered_features_2d: list[list[float]]) -> list[dict]:
                     "label": 1,
                     "stage": 1,
                     "stage1_depth_cm": round(d, 2),
+                    "feature_importance": feature_importances[i],
                 }
         else:
             try:
@@ -317,6 +332,7 @@ def _run_pipeline(ordered_features_2d: list[list[float]]) -> list[dict]:
                         "label": 1,
                         "stage": 2,
                         "stage1_depth_cm": round(depths_s1[i], 2),
+                        "feature_importance": feature_importances[i],
                     }
             except Exception as e:
                 logger.warning("[Stage2] Predict lỗi, fallback depth_s1: %s", e)
@@ -328,6 +344,7 @@ def _run_pipeline(ordered_features_2d: list[list[float]]) -> list[dict]:
                         "label": 1,
                         "stage": 1,
                         "stage1_depth_cm": round(d, 2),
+                        "feature_importance": feature_importances[i],
                     }
 
     return final  # type: ignore[return-value]

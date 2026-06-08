@@ -1216,11 +1216,27 @@ function replySafeRoute(areaName, safeRoutes) {
         });
         text += `\n*Dữ liệu được hệ thống truy vấn thời gian thực từ các điểm đo liền kề.*\n\n`;
     } else {
-        if (areaName && areaName.toLowerCase().includes('nguyễn tuân')) {
+        const l = areaName ? areaName.toLowerCase() : '';
+        if (l.includes('nguyễn tuân')) {
             text += `✅ **Gợi ý tuyến đường vòng an toàn (Dữ liệu dự đoán AI):**\n`;
             text += `1. **Trục Lê Văn Lương - Láng Hạ**: Đang có khả năng thoát nước tốt.\n`;
             text += `2. **Đường vành đai 3 trên cao (Khuất Duy Tiến)**: An toàn tuyệt đối.\n`;
             text += `3. **Ngụy Như Kon Tum**: Tình trạng ngập cục bộ ít nghiêm trọng hơn.\n\n`;
+        } else if (l.includes('nguyễn trãi')) {
+            text += `✅ **Gợi ý tuyến đường vòng an toàn (Dữ liệu dự đoán AI):**\n`;
+            text += `1. **Đường Nguyễn Xiển hoặc Vũ Tông Phan**: Tuyến song song tránh điểm trũng chính.\n`;
+            text += `2. **Đường vành đai 3 trên cao**: Tuyến giao thông trên cao, an toàn tuyệt đối tránh ngập lụt dưới lòng đường.\n`;
+            text += `3. **Phố Khương Đình**: Tuyến tránh đi qua hồ và bờ sông Tô Lịch để vòng qua các điểm ngập Nguyễn Trãi.\n\n`;
+        } else if (l.includes('phạm hùng')) {
+            text += `✅ **Gợi ý tuyến đường vòng an toàn (Dữ liệu dự đoán AI):**\n`;
+            text += `1. **Đường vành đai 3 trên cao**: Tuyến đường cao tốc trên cao tránh ngập mặt đường.\n`;
+            text += `2. **Đường Trần Thái Tông - Nguyễn Phong Sắc**: Hướng di chuyển thay thế song song.\n`;
+            text += `3. **Đường Lê Đức Thọ**: Trục đường lớn phụ cận ít bị ngập úng hơn.\n\n`;
+        } else if (l.includes('triều khúc')) {
+            text += `✅ **Gợi ý tuyến đường vòng an toàn (Dữ liệu dự đoán AI):**\n`;
+            text += `1. **Đường Nguyễn Xiển**: Trục đường lớn ngoài rìa thoát nước tốt.\n`;
+            text += `2. **Đường Chiến Thắng**: Hướng đi vòng tránh đi qua khu vực hồ Triều Khúc trũng thấp.\n`;
+            text += `3. **Đường Tân Triều mới**: Tuyến liên kết an toàn hơn.\n\n`;
         } else {
             text += `✅ **Gợi ý chung:** Không tìm thấy dữ liệu vi mô của các ngõ nhỏ xung quanh. Vui lòng ưu tiên các **trục đường lớn** hoặc **đường vành đai trên cao**.\n\n`;
         }
@@ -1718,8 +1734,8 @@ router.post('/chatbot/ask', async (req, res) => {
                 case 'FIND_SAFE_ROUTE':
                     if (area) {
                         try {
-                            // queryAlternativeRoutes trả về mảng trực tiếp (Array), không phải { data: [] }
-                            const routes = await queryAlternativeRoutes(area);
+                            const routesObj = await queryAlternativeRoutes(area);
+                            const routes = routesObj ? routesObj.data : [];
                             data = { data: Array.isArray(routes) ? routes : [] };
                         } catch (err) {
                             console.warn('[CHATBOT] queryAlternativeRoutes lỗi:', err.message);

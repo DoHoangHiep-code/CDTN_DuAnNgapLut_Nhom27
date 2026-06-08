@@ -41,53 +41,62 @@ router.get('/flood-prediction/nodes/:id/current', async (req, res, next) => {
       LIMIT 1
     `, { replacements: { nodeId, offset } })
 
-    // 2. Nếu không tìm thấy node thì thử lấy chỉ từ grid_nodes
-    let nodeRow = predRows && predRows.length > 0 ? predRows[0] : null
-    if (!nodeRow) {
-      const [nodeRows] = await sequelize.query(`
-        SELECT latitude, longitude, location_name FROM grid_nodes WHERE node_id = :nodeId
-      `, { replacements: { nodeId } })
-      if (!nodeRows || nodeRows.length === 0) {
-        return res.status(404).json({ success: false, error: { message: 'Node not found' } })
-      }
-      nodeRow = nodeRows[0]
+    // 2. Lấy thông tin node (weather_station_id, location_name)
+    const [nodeRows] = await sequelize.query(`
+      SELECT weather_station_id, location_name, latitude, longitude
+      FROM grid_nodes
+      WHERE node_id = :nodeId
+    `, { replacements: { nodeId } })
+
+    if (!nodeRows || nodeRows.length === 0) {
+      return res.status(404).json({ success: false, error: { message: 'Node not found' } })
     }
 
-    const { latitude, longitude, location_name } = nodeRow
+    const { weather_station_id: stationId, location_name } = nodeRows[0]
+    // Dùng lat/lon từ prediction nếu có, ngược lại lấy từ grid_nodes
+    const latitude  = predRows?.[0]?.latitude  ?? nodeRows[0].latitude
+    const longitude = predRows?.[0]?.longitude ?? nodeRows[0].longitude
 
     // Lấy thời gian dự đoán (để filter thời tiết tương ứng)
-    const predTime = nodeRow?.time || new Date()
+    const predTime = predRows?.[0]?.time || new Date()
 
-    // 3. Lấy thời tiết từ trạm GẦN NHẤT tương ứng với giờ dự đoán (không lấy trung bình)
-    const [wxRows] = await sequelize.query(`
-      WITH nearest AS (
-        SELECT gn.node_id,
-               (gn.latitude::float - :lat)^2 + (gn.longitude::float - :lon)^2 AS dist2
-        FROM grid_nodes gn
-        WHERE EXISTS (
-          SELECT 1 FROM weather_measurements WHERE node_id = gn.node_id LIMIT 1
-        )
-        ORDER BY dist2 ASC
-        LIMIT 1
-      )
-      SELECT wm.node_id, wm.temp, wm.clouds, wm.prcp, wm.rhum, wm.time
-      FROM weather_measurements wm
-      JOIN nearest n ON n.node_id = wm.node_id
-      WHERE wm.time <= :predTime::timestamp + interval '2 hours'
-        AND wm.time >= :predTime::timestamp - interval '2 hours'
-      ORDER BY ABS(EXTRACT(EPOCH FROM (wm.time - :predTime::timestamp))) ASC
-      LIMIT 1
-    `, { replacements: { lat: parseFloat(latitude), lon: parseFloat(longitude), predTime } })
-
+    // 3. Lấy thời tiết từ representative node của trạm (weather_station_id)
+    //    weatherCron lưu weather_measurements cho node đầu tiên trong cluster mỗi trạm.
+    //    Dùng weather_station_id để tìm đúng representative node — nhanh và chính xác.
     let weatherData = null
-    if (wxRows && wxRows.length > 0) {
-      const r = wxRows[0]
-      weatherData = {
-        temp:   parseFloat(r.temp   ?? 0),
-        clouds: Math.round(r.clouds ?? 0),
-        prcp:   parseFloat(r.prcp   ?? 0),
-        rhum:   parseFloat(r.rhum   ?? 0),
-        time:   r.time,
+    if (stationId) {
+      // Tìm representative node (node_id nhỏ nhất trong cluster trạm)
+      const [repRows] = await sequelize.query(`
+        SELECT node_id
+        FROM grid_nodes
+        WHERE weather_station_id = :stationId
+        ORDER BY node_id ASC
+        LIMIT 1
+      `, { replacements: { stationId } })
+
+      if (repRows && repRows.length > 0) {
+        const repNodeId = repRows[0].node_id
+        const targetTime = new Date(predTime)
+
+        // Lấy bản ghi thời tiết gần nhất với thời điểm dự đoán (không giới hạn ±2h)
+        const [wxRows] = await sequelize.query(`
+          SELECT temp, clouds, prcp, rhum, time
+          FROM weather_measurements
+          WHERE node_id = :repNodeId
+          ORDER BY ABS(EXTRACT(EPOCH FROM (time - :targetTime::timestamp))) ASC
+          LIMIT 1
+        `, { replacements: { repNodeId, targetTime } })
+
+        if (wxRows && wxRows.length > 0) {
+          const r = wxRows[0]
+          weatherData = {
+            temp:   parseFloat(r.temp   ?? 0),
+            clouds: Math.round(r.clouds ?? 0),
+            prcp:   parseFloat(r.prcp   ?? 0),
+            rhum:   parseFloat(r.rhum   ?? 0),
+            time:   r.time,
+          }
+        }
       }
     }
 
