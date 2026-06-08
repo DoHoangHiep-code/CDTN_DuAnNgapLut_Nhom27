@@ -28,3 +28,5 @@ npm-debug.log*
 # Data Engineering (Satellite files)
 data_engineering/*.tif
 
+# Documentation
+docs/

@@ -70,10 +70,11 @@ export function WeatherTerrainPage() {
         const c = nodeData.lulc_class;
         let lulc = 'Không rõ';
         if (c !== null && c !== undefined) {
-          if ([1, 2, 3, 4, 5].includes(c)) lulc = 'Rừng (Các loại)';
-          else if ([6, 7, 8, 9, 10].includes(c)) lulc = 'Đất thưa / Cây bụi';
-          else if ([11, 12, 14].includes(c)) lulc = 'Nông nghiệp / Đồng cỏ';
-          else if ([13, 16, 17].includes(c)) lulc = 'Đô thị / Đất trống';
+          const cNum = Number(c);
+          if ([1, 2, 3, 4, 5].includes(cNum)) lulc = 'Rừng (Các loại)';
+          else if ([6, 7, 8, 9, 10].includes(cNum)) lulc = 'Đất thưa / Cây bụi';
+          else if ([11, 12, 14].includes(cNum)) lulc = 'Nông nghiệp / Đồng cỏ';
+          else if ([13, 16, 17].includes(cNum)) lulc = 'Đô thị / Đất trống';
         } else {
           // fallback
           if (ndvi > 0.6) lulc = 'Rừng rậm';

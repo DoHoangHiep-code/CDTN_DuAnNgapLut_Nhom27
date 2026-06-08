@@ -30,10 +30,10 @@ class ReportsController {
       // Chuẩn hoá shape trả về để frontend render/export ổn định
       const mapped = result.rows.map((r) => ({
         id: `afr_${r.report_id}`,
-        createdAtIso: r.created_at,
+        createdAtIso: r.reported_at,
         latitude: Number(r.latitude),
         longitude: Number(r.longitude),
-        reportedLevel: r.reported_level,
+        reportedLevel: r.flood_depth_cm ? `${r.flood_depth_cm} cm` : r.description,
         userFullName: r.user_full_name ?? null,
       }))
 
@@ -80,7 +80,8 @@ class ReportsController {
         userId,          // ← user_id luôn có giá trị tại đây
         latitude: lat,
         longitude: lng,
-        reported_level,
+        description: reported_level, // backward compatibility
+        flood_depth_cm: 0,
       })
 
       // Nếu insert thất bại bất thường, trả 500 an toàn
@@ -89,10 +90,10 @@ class ReportsController {
       // Trả record mới theo đúng shape list để FE có thể append nếu muốn
       const data = {
         id: `afr_${created.report_id}`,
-        createdAtIso: created.created_at,
+        createdAtIso: created.reported_at,
         latitude: Number(created.latitude),
         longitude: Number(created.longitude),
-        reportedLevel: created.reported_level,
+        reportedLevel: created.description,
         userFullName: null, // join full_name có thể fetch lại bằng GET nếu cần
       }
 
@@ -130,35 +131,33 @@ class ReportsController {
         })
       }
 
-      // Map 'severity' từ frontend sang giá trị ENUM tiếng Việt trong DB
-      // Thứ tự: none → Khô ráo, low → <15cm, medium → 15-30cm, high → >30cm
-      const LEVEL_MAP = {
-        none:   'Khô ráo',
-        low:    '<15cm',
-        medium: '15-30cm',
-        high:   '>30cm',
+      // Map 'severity' từ frontend sang depth
+      const DESC_MAP = {
+        none:   'Khô ráo (0cm)',
+        low:    'Ngập nhẹ (<15cm)',
+        medium: 'Ngập vừa (15-30cm)',
+        high:   'Ngập sâu (>30cm)',
       }
-      const reported_level = LEVEL_MAP[severity]
-      if (!reported_level) {
+      const DEPTH_MAP = { none: 0, low: 10, medium: 20, high: 40 }
+      
+      const descriptionText = DESC_MAP[severity]
+      if (!descriptionText) {
         return res.status(400).json({
           success: false,
           error: { message: `Mức độ ngập không hợp lệ: "${severity}". Chấp nhận: none, low, medium, high.` },
         })
       }
+      
+      const flood_depth_cm = DEPTH_MAP[severity]
+      const description = note ? `${descriptionText} - ${note}` : descriptionText
 
-      // Xây dựng geometry GeoJSON chuẩn SRID 4326 để lưu vào PostGIS
-      // QUAN TRỌNG: GeoJSON quy định coordinates = [longitude, latitude] (kinh độ trước)
-      const geom = { type: 'Point', coordinates: [longitude, latitude] }
-
-      // Lưu vào DB qua service hiện có (tái dụng logic đã có sẵn)
+      // Lưu vào DB qua service hiện có
       const created = await this.reportsService.create({
         userId,
         latitude,
         longitude,
-        geom,
-        reported_level,
-        // 'note' chưa có cột trong DB → bỏ qua khi insert
-        // TODO: thêm cột 'note TEXT' vào bảng actual_flood_reports nếu cần lưu
+        flood_depth_cm,
+        description,
       })
 
       if (!created) {
@@ -174,10 +173,10 @@ class ReportsController {
         message: 'Đã lưu báo cáo hiện trường!',
         data: {
           id: `afr_${created.report_id}`,
-          createdAtIso: created.created_at,
+          createdAtIso: created.reported_at,
           latitude: Number(created.latitude),
           longitude: Number(created.longitude),
-          reportedLevel: created.reported_level,
+          reportedLevel: created.flood_depth_cm ? `${created.flood_depth_cm} cm` : created.description,
         },
       })
     } catch (err) {

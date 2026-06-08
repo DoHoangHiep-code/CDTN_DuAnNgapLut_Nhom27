@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { RefreshCcw, CloudRain, Droplets, AlertTriangle, AlertCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardMeta } from '../components/common/Card';
 import { Button } from '../components/common/Button';
