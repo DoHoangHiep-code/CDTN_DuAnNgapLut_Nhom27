@@ -314,6 +314,14 @@ export type LandslideNode = {
   twi: number | null
   elevation: number | null
   ndvi: number | null
+  lulc_class?: number | string | null
+  tri?: number | null
+  tpi?: number | null
+  roughness?: number | null
+  ndwi?: number | null
+  bsi?: number | null
+  dist_to_river_m?: number | null
+  dist_to_road_m?: number | null
   prob_landslide: number | null
   risk_level: 'SAFE' | 'WARNING' | 'DANGER' | null
   rain_7d_accum: number | null

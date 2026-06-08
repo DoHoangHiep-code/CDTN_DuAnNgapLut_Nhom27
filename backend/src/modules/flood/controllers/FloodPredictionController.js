@@ -85,10 +85,9 @@ class FloodPredictionController {
         })
       }
 
-      // ── Optimized BBox Query: DISTINCT ON from flood_predictions ────────
-      // Uses parameterized $bind with ::numeric cast (pg-pool safe).
-      // Only returns fresh data (last 2 hours) to avoid stale predictions.
-      // No LEFT JOIN LATERAL – simple JOIN + DISTINCT ON for performance.
+      // ── Optimized BBox Query: lat/lng BETWEEN + :replacements ────────
+      // CockroachDB compatible – avoids $bind format issues with ST_MakeEnvelope.
+      // Only returns fresh data (current date + offset) to avoid stale predictions.
       try {
         const rows = await this.sequelize.query(
           `SELECT 
@@ -102,13 +101,13 @@ class FloodPredictionController {
              fp.explanation
            FROM grid_nodes gn
            JOIN mv_latest_flood_predictions fp ON fp.node_id = gn.node_id
-           WHERE gn.latitude >= $1::numeric AND gn.latitude <= $2::numeric
-             AND gn.longitude >= $3::numeric AND gn.longitude <= $4::numeric
-             AND fp.date_only = CURRENT_DATE + ($5 || ' days')::interval
-             AND fp.flood_depth_cm > 5
-           LIMIT $6`,
+           WHERE gn.latitude BETWEEN :minLat AND :maxLat
+             AND gn.longitude BETWEEN :minLng AND :maxLng
+             AND fp.date_only = CURRENT_DATE + (:offset || ' days')::interval
+             AND fp.flood_depth_cm > 0
+           LIMIT :limit`,
           {
-            bind: [minLat, maxLat, minLng, maxLng, offset, limit],
+            replacements: { minLat, maxLat, minLng, maxLng, offset, limit },
             type: QueryTypes.SELECT,
           },
         )

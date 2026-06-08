@@ -31,7 +31,8 @@
     "pg": "^8.13.1",
     "pg-hstore": "^2.3.4",
     "redis": "^5.12.1",
-    "sequelize": "^6.37.7"
+    "sequelize": "^6.37.7",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.14",
