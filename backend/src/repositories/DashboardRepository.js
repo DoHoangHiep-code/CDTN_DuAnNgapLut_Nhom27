@@ -417,14 +417,14 @@ class DashboardRepository {
     const sql = `
       SELECT DISTINCT ON (gn.district_name)
         gn.district_name AS district,
-        fp.flood_depth_cm::float AS max_depth,
-        to_char(fp.time AT TIME ZONE :tz, 'HH24:MI DD/MM') AS time
-      FROM flood_predictions fp
-      JOIN grid_nodes gn ON fp.node_id = gn.node_id
-      WHERE fp.time >= date_trunc('hour', now()) AND fp.time <= date_trunc('hour', now()) + interval '24 hours'
-        AND (fp.target = 1 OR fp.risk_level IN ('high', 'severe', 'medium'))
+        mv.flood_depth_cm::float AS max_depth,
+        to_char(mv.time AT TIME ZONE :tz, 'HH24:MI DD/MM') AS time
+      FROM mv_latest_flood_predictions mv
+      JOIN grid_nodes gn ON mv.node_id = gn.node_id
+      WHERE mv.date_only = CURRENT_DATE
+        AND mv.risk_level IN ('high', 'severe', 'medium')
         AND gn.district_name IS NOT NULL
-      ORDER BY gn.district_name, fp.flood_depth_cm DESC
+      ORDER BY gn.district_name, mv.flood_depth_cm DESC
     `
     return this.sequelize.query(sql, { type: QueryTypes.SELECT, replacements: { tz } })
   }

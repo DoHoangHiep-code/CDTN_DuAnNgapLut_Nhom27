@@ -86,25 +86,36 @@ class ReportsRepository {
     )
   }
 
-  // POST tạo báo cáo mới: tạo geom bằng PostGIS từ lat/lng
-  async createActualFloodReport({ userId, latitude, longitude, flood_depth_cm, description }) {
+  async createActualFloodReport({ userId, latitude, longitude, reported_level, geom, node_id, flood_depth_cm, description }) {
+    // If geom is provided, we can use it. But for safety, we'll just reconstruct it using PostGIS.
     const sql = `
-      INSERT INTO actual_flood_reports (user_id, latitude, longitude, geom, flood_depth_cm, description, reported_at)
+      INSERT INTO actual_flood_reports (user_id, latitude, longitude, geom, reported_level, node_id, flood_depth_cm, description, reported_at, created_at)
       VALUES (
         :userId,
         :latitude,
         :longitude,
         ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326),
+        :reported_level,
+        :node_id,
         :flood_depth_cm,
         :description,
+        NOW(),
         NOW()
       )
-      RETURNING report_id, reported_at, latitude, longitude, flood_depth_cm, description, user_id;
+      RETURNING report_id, reported_at, created_at, latitude, longitude, reported_level, flood_depth_cm, description, user_id, node_id;
     `
     return this._withStatementTimeout(7000, (t) =>
       this.sequelize.query(sql, {
         type: QueryTypes.SELECT,
-        replacements: { userId: userId || null, latitude, longitude, flood_depth_cm: flood_depth_cm || 0, description: description || '' },
+        replacements: { 
+          userId: userId || null, 
+          latitude, 
+          longitude, 
+          reported_level: reported_level || 'Khô ráo',
+          node_id: node_id || null,
+          flood_depth_cm: flood_depth_cm || 0, 
+          description: description || '' 
+        },
         transaction: t,
       }).then((rows) => rows?.[0] ?? null),
     )
