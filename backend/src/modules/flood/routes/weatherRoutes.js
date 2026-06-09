@@ -193,7 +193,7 @@ router.get('/weather/forecast7d', async (req, res, next) => {
 
     let data = dbRows.map(row => {
       const wRow = weatherByDay.get(row.date_only) ?? {}
-      const depth = Math.round(Number(row.avg_depth ?? 0) * 10) / 10
+      const depth = Math.round(Number(row.max_depth ?? 0) * 10) / 10
       const risk = depth < 15 ? 'safe' : depth < 30 ? 'medium' : depth < 60 ? 'high' : 'severe'
       return {
         dateIso:        String(row.date_only).slice(0, 10),

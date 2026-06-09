@@ -286,7 +286,7 @@ router.get('/forecasts/latest', cacheResponse(30 * 60, 'flood_api'), async (req,
        FROM flood_predictions fp
        WHERE fp.node_id = :nodeId
          AND fp.date_only = CURRENT_DATE + (:offset || ' days')::interval
-       ORDER BY fp.flood_depth_cm DESC, fp.time ASC
+       ORDER BY fp.flood_depth_cm DESC, ABS(EXTRACT(EPOCH FROM (fp.time - NOW()))) ASC
        LIMIT 1`,
       { replacements: { nodeId, offset } }
     )

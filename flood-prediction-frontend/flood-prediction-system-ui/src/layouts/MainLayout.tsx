@@ -18,7 +18,7 @@ function buildTickerItems(alertsData: Array<{ district: string; max_depth: numbe
     return [{
       id: 'safe_status',
       severity: 'info',
-      text: `✅ Cập nhật ${timeStr}: Hệ thống hoạt động ổn định. Không có cảnh báo ngập lụt trong 24h tới.`
+      text: `✅ Cập nhật ${timeStr}: Hệ thống hoạt động ổn định. Không có cảnh báo ngập lụt trong ngày hôm nay.`
     }]
   }
 
